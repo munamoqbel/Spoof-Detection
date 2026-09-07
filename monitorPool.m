@@ -11,10 +11,11 @@
 %      whole life with NO alarm is reported as the anchor candidate.
 %
 % INPUTS:
-%   - pool (PoolState)
-%   - this epoch's innovation / innovation_cov / obs_matrix
+%   - pool (STRUCT_SPF.setMonitorPool)
+%   - this epoch's innovation / innovation_cov / obs_matrix, sized to
+%     CST_spfParam.MAX_MEAS rows; numMeas = valid rows this epoch
 %   - the watched filter's kf_state / kf_covariance (post-update)
-%   - spoofInfo
+%   - spoofInfo (.phiAcc / .qAcc interval matrices)
 %
 % OUTPUTS:
 %   - pool (updated)
@@ -27,7 +28,7 @@
 %******************************************************************************************
 %#codegen
 function [poolOut, report] = monitorPool(poolIn, innovation, ...
-    innovation_cov, obs_matrix, kf_state, kf_covariance, spoofInfo)
+    innovation_cov, obs_matrix, numMeas, kf_state, kf_covariance, spoofInfo)
 
 % Define variables
 windowLength = CST_spfParam.WINDOW_LENGTH;
@@ -46,9 +47,11 @@ for wIdx = 1:windowLength
         age = poolIn.windowAge(wIdx) + 1;
         poolOut.windowAge(wIdx) = age;
 
-        poolOut.innovationBuffer(:, age, wIdx)       = innovation;
-        poolOut.innovationCovBuffer(:, :, age, wIdx) = innovation_cov;
-        poolOut.obsMatrixBuffer(:, :, age, wIdx)     = obs_matrix;
+        m = numMeas;
+        poolOut.innovationBuffer(1:m, age, wIdx)          = innovation(1:m);
+        poolOut.innovationCovBuffer(1:m, 1:m, age, wIdx)  = innovation_cov(1:m, 1:m);
+        poolOut.obsMatrixBuffer(1:m, :, age, wIdx)        = obs_matrix(1:m, :);
+        poolOut.numMeasBuffer(age, wIdx)                  = uint8(m);
 
         % ------------------------------------------------------------------
         %  2. Solution-Separation test (all monitored axes)
@@ -81,13 +84,14 @@ for wIdx = 1:windowLength
                     poolOut.innovationBuffer(:, 1:windowLength, wIdx), ...
                     poolOut.innovationCovBuffer(:, :, 1:windowLength, wIdx), ...
                     poolOut.obsMatrixBuffer(:, :, 1:windowLength, wIdx), ...
+                    poolOut.numMeasBuffer(1:windowLength, wIdx), ...
                     axisIdx);
 
                 if (cpiAlarm)
                     report.cpiAlarm                = true;
                     report.anyAlarm                = true;
                     poolOut.hadAlarm(wIdx)         = true;
-                    report.alarmPerAxis(axisIdx)   = true;
+                    report.alarmPerAxis(idx)       = true;   % monitored-axis index (as ssMonitor)
                 end % ELSE is trivial
             end
 

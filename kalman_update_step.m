@@ -1,4 +1,5 @@
-function [state, covariance, innovation, innovation_cov, kalman_gain] = ...
+function [state, covariance, innovation, innovation_cov, kalman_gain, ...
+          predicted_state] = ...
     kalman_update_step(state, covariance, measurement, obs_matrix, ...
                        spoofInfo, meas_noise_cov)
 %KALMAN_UPDATE_STEP  One complete Kalman filter epoch (time + measurement).
@@ -8,7 +9,7 @@ function [state, covariance, innovation, innovation_cov, kalman_gain] = ...
 %   covariance       [n x n]  filter covariance at previous epoch
 %   measurement      [m x 1]  GNSS measurement vector z
 %   obs_matrix       [m x n]  observation matrix H
-%   Phi, Q           [n x n]  state transition and process noise
+%   spoofInfo        .phiAcc/.qAcc [n x n] state transition and process noise
 %   meas_noise_cov   [m x m]  measurement noise covariance V
 %
 % OUTPUTS
@@ -17,6 +18,7 @@ function [state, covariance, innovation, innovation_cov, kalman_gain] = ...
 %   innovation       [m x 1]  gamma = z - H*x_bar                (paper Eq. 3)
 %   innovation_cov   [m x m]  S = H*P_bar*H' + V
 %   kalman_gain      [n x m]  L = P_bar*H'/S
+%   predicted_state  [n x 1]  x_bar = Phi*x (the prior the innovation refers to)
 %
 % NOTE  Linear measurement model (harness). In a real EKF, replace
 %       obs_matrix*predicted_state with your nonlinear h(x).

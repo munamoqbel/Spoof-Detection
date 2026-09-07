@@ -18,7 +18,7 @@ classdef STRUCT_SPF
     methods(Static)
         function [pool] = setMonitorPool(active, hadAlarm, windowAge, ...
                 coastState, coastCovariance, innovationBuffer, ...
-                innovationCovBuffer, obsMatrixBuffer)
+                innovationCovBuffer, obsMatrixBuffer, numMeasBuffer)
 
             % Define structure
             pool = struct( ...
@@ -29,14 +29,17 @@ classdef STRUCT_SPF
                 'coastCovariance',     coastCovariance, ...
                 'innovationBuffer',    innovationBuffer, ...
                 'innovationCovBuffer', innovationCovBuffer,...
-                'obsMatrixBuffer',     obsMatrixBuffer);
+                'obsMatrixBuffer',     obsMatrixBuffer, ...
+                'numMeasBuffer',       numMeasBuffer);
         end
 
-        function [pool] = zeroMonitorPool(num_meas)
+        function [pool] = zeroMonitorPool
 
-            % Define variables
+            % Define variables (buffers sized to the measurement upper bound;
+            % numMeasBuffer holds the valid row count per buffered epoch)
             windowLength = CST_spfParam.WINDOW_LENGTH;
             numStates = CST_gnssHybrid.NO_STATES;
+            num_meas  = CST_spfParam.MAX_MEAS;
 
             active   = false(windowLength, 1);
             hadAlarm = false(windowLength, 1);
@@ -50,11 +53,12 @@ classdef STRUCT_SPF
                 windowLength);
             obsMatrixBuffer = zeros(num_meas, numStates, windowLength, ...
                 windowLength);
+            numMeasBuffer = zeros(windowLength, windowLength, 'uint8');
 
             % Set the output
             pool = STRUCT_SPF.setMonitorPool(active, hadAlarm, windowAge, ...
                 coastState, coastCovariance, innovationBuffer, ...
-                innovationCovBuffer, obsMatrixBuffer);
+                innovationCovBuffer, obsMatrixBuffer, numMeasBuffer);
         end
 
         function [ssMonitor] = setMonitorReport(alarmPerAxis, anyAlarm, ...
@@ -97,7 +101,7 @@ classdef STRUCT_SPF
         end
 
         function [poolOut] = openWindow(poolIn, kf_state, kf_covariance, ...
-                innovation, innovation_cov, obs_matrix)
+                innovation, innovation_cov, obs_matrix, numMeas)
 
             % Set the output
             poolOut = poolIn;
@@ -123,9 +127,11 @@ classdef STRUCT_SPF
                 poolOut.coastState(:, freeSlot)         = kf_state;         % E24
                 poolOut.coastCovariance(:, :, freeSlot) = kf_covariance;
 
-                poolOut.innovationBuffer(:, 1, freeSlot)       = innovation;
-                poolOut.innovationCovBuffer(:, :, 1, freeSlot) = innovation_cov;
-                poolOut.obsMatrixBuffer(:, :, 1, freeSlot)     = obs_matrix;
+                m = numMeas;
+                poolOut.innovationBuffer(1:m, 1, freeSlot)          = innovation(1:m);
+                poolOut.innovationCovBuffer(1:m, 1:m, 1, freeSlot)  = innovation_cov(1:m, 1:m);
+                poolOut.obsMatrixBuffer(1:m, :, 1, freeSlot)        = obs_matrix(1:m, :);
+                poolOut.numMeasBuffer(1, freeSlot)                  = uint8(m);
             end
 
         end
@@ -195,10 +201,10 @@ classdef STRUCT_SPF
 
             % Define structure
             anchor = struct( ...
-                'valid',      valid, ...
+                'valid',      logical(valid), ...
                 'state',      state, ...
                 'covariance', covariance, ...
-                'epoch',      epoch);
+                'epoch',      uint32(epoch));
         end
 
         function [anchor] = zeroAnchor
@@ -207,14 +213,14 @@ classdef STRUCT_SPF
             valid = false;
             state = zeros(CST_gnssHybrid.NO_STATES, 1);
             covariance = zeros(CST_gnssHybrid.NO_STATES, CST_gnssHybrid.NO_STATES);
-            epoch = 0.0;
+            epoch = uint32(0);
 
             anchor = STRUCT_SPF.setAnchor(valid, state, covariance, epoch);
 
         end
 
         function [sys] = setSys(mode, filter, trial, pool, anchor, ...
-                dwellCount, probationCount)
+                dwellCount, probationCount, coastCount)
 
             % Define structure
             sys = struct( ...
@@ -224,22 +230,24 @@ classdef STRUCT_SPF
                 'pool',           pool, ...
                 'anchor',         anchor, ...
                 'dwellCount',     dwellCount, ...
-                'probationCount', probationCount);
+                'probationCount', probationCount, ...
+                'coastCount',     coastCount);
         end
 
-        function [sys] = zeroSys(numMeas)
+        function [sys] = zeroSys
 
             % Init values
             mode = CST_spfMode.NOMINAL;
             filter = STRUCT_SPF.zeroFilter;
             trial = STRUCT_SPF.zeroTrial;
-            pool = STRUCT_SPF.zeroMonitorPool(numMeas);
+            pool = STRUCT_SPF.zeroMonitorPool;
             anchor = STRUCT_SPF.zeroAnchor;
             dwellCount = 0.0;
             probationCount = 0.0;
+            coastCount = 0.0;
 
             sys = STRUCT_SPF.setSys(mode, filter, trial, pool, ...
-                anchor, dwellCount, probationCount);
+                anchor, dwellCount, probationCount, coastCount);
         end
 
         function [altXCheck] = setAltXCheck(suspect, altDiff)
@@ -283,7 +291,7 @@ classdef STRUCT_SPF
         function [info] = setInfo(mode, ssAlarm, cpiAlarm, ...
                 alarmPerAxis, maxProtectionLevel, qReval, revalComputed,...
                 dwellCount, eventLatched, eventAnchorEpoch, eventProbationStarted,...
-                eventProbationVetoed, eventHandback, anchorMissing)
+                eventProbationVetoed, eventHandback, anchorMissing, coastEpochs)
 
             % Define structure
             info = struct( ...
@@ -300,13 +308,14 @@ classdef STRUCT_SPF
                 'eventProbationStarted', logical(eventProbationStarted), ...
                 'eventProbationVetoed',  logical(eventProbationVetoed), ...
                 'eventHandback',         logical(eventHandback), ...
-                'anchorMissing',         logical(anchorMissing));
+                'anchorMissing',         logical(anchorMissing), ...
+                'coastEpochs',           coastEpochs);
         end
 
         function [info] = zeroInfo
 
             % Init values
-            mode                  = 1;
+            mode                  = CST_spfMode.NOMINAL;
             ssAlarm               = false;
             cpiAlarm              = false;
             alarmPerAxis          = false(1, 3);
@@ -320,12 +329,13 @@ classdef STRUCT_SPF
             eventProbationVetoed  = false;
             eventHandback         = false;
             anchorMissing         = false;
+            coastEpochs           = 0;
 
             % Define structure
             info = STRUCT_SPF.setInfo(mode, ssAlarm, cpiAlarm, ...
                 alarmPerAxis, maxProtectionLevel, qReval, revalComputed,...
                 dwellCount, eventLatched, eventAnchorEpoch, eventProbationStarted,...
-                eventProbationVetoed, eventHandback, anchorMissing);
+                eventProbationVetoed, eventHandback, anchorMissing, coastEpochs);
         end
 
         function [command] = setCommand(reseedKF, reseedState, reseedCov)

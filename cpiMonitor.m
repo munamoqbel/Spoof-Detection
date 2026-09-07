@@ -3,17 +3,20 @@
 % Cumulative Position-domain Innovation monitor, one complete window.
 %
 % INPUTS:
-%   - innovation_buffer          [m x N] gamma history of the window
-%   - innovation_cov_buffer      [m x m x N] S history
-%   - obs_matrix_buffer          [m x n x N] H history
-%   - axis_idx                   monitored position state index
+%   - innovationBuffer          [MAX_MEAS x N] gamma history of the window
+%   - innovationCovBuffer       [MAX_MEAS x MAX_MEAS x N] S history
+%   - obsMatrixBuffer           [MAX_MEAS x n x N] H history
+%   - numMeasBuffer             [N x 1] valid measurement count per epoch
+%                               (rows/cols beyond it are padding)
+%   - axisIdx                   monitored position state index
 %
 % OUTPUTS:
-%   - is_alarm                   logical
-%   - q_statistic                double Eq. 33 statistic
-%   - xi_history                 [N x 1] normalised projections (diagnostics)
+%   - cpiAlarm                  logical
+%   - qStatistic                double Eq. 33 statistic
+%   - xiHistory                 [N x 1] normalised projections (diagnostics)
 %
 % ASSUMPTIONS AND LIMITATIONS:
+% An epoch with numMeas = 0 (no GNSS) contributes xi = 0 to the window.
 %
 % REQUIREMENT TRACEABILITY:
 % - PAPER MAPPING
@@ -27,41 +30,43 @@
 %******************************************************************************************
 %#codegen
 function [cpiAlarm, qStatistic, xiHistory] = cpiMonitor...
-    (innovationBuffer, innovationCovBuffer, obsMatrixBuffer, axisIdx)
+    (innovationBuffer, innovationCovBuffer, obsMatrixBuffer, numMeasBuffer, axisIdx)
 
 % Define variables
 windowLength = CST_spfParam.WINDOW_LENGTH;
 cpiThreshold = CST_spfParam.CPI_THRESHOLD;
-numMeas      = size(innovationBuffer, 1); % To be replaced by numMeas from KFL_IS22_stateUpdates
 xiHistory    = zeros(windowLength, 1);
 qStatistic   = 0.0;
 cpiAlarm     = false;
 
 for idx = 1:windowLength
-    innovation    = innovationBuffer(:, idx);           % gamma. Eq.3
-    innovationCov = innovationCovBuffer(:, :, idx);     % S. Defined under Eq. 4
-    projection    = obsMatrixBuffer(:, axisIdx, idx);   % f = H(:,axis). From Eq. 17
+    numMeas = numMeasBuffer(idx);
+    xiNormalised = 0.0;
 
-    % ----------------------------------------------------------------------
-    % WARNING: Exception handler need to be added!
-    % ----------------------------------------------------------------------
-    sInvInnovation = innovationCov \ innovation;     % S^{-1} gamma
-    sInvProjection = innovationCov \ projection;     % S^{-1} f
-    % ----------------------------------------------------------------------
+    if (numMeas > 0)
+        innovation    = innovationBuffer(1:numMeas, idx);               % gamma. Eq.3
+        innovationCov = innovationCovBuffer(1:numMeas, 1:numMeas, idx); % S. Defined under Eq. 4
+        projection    = obsMatrixBuffer(1:numMeas, axisIdx, idx);       % f = H(:,axis). From Eq. 17
 
-    gammaProjection  = 0.0;  % Eq. 17
-    sigma2Projection = 0.0;  % Eq. 20
-    for idxMeas = 1:numMeas
-        gammaProjection  = gammaProjection + projection(idxMeas) * sInvInnovation(idxMeas);   % = projection' * sInvInnovation (Eq.17); loop used for deterministic rounding
-        sigma2Projection = sigma2Projection + projection(idxMeas) * sInvProjection(idxMeas);  % = projection' * sInvProjection (Eq.20); loop used for deterministic rounding
-    end
+        % ------------------------------------------------------------------------
+        % WARNING: Exception handler need to be added!
+        % ------------------------------------------------------------------------
+        sInvInnovation = innovationCov \ innovation;     % S^{-1} gamma
+        sInvProjection = innovationCov \ projection;     % S^{-1} f
+        % ------------------------------------------------------------------------
 
-    % Exception handler
-    if (sigma2Projection > 0.0)
-        xiNormalised = gammaProjection / sqrt(sigma2Projection);   % Eq. 29
-    else
-        xiNormalised = 0.0; % axis unobservable this epoch
-    end
+        gammaProjection  = 0.0;  % Eq. 17
+        sigma2Projection = 0.0;  % Eq. 20
+        for idxMeas = 1:numMeas
+            gammaProjection  = gammaProjection + projection(idxMeas) * sInvInnovation(idxMeas);   % = projection' * sInvInnovation (Eq.17); loop used for deterministic rounding
+            sigma2Projection = sigma2Projection + projection(idxMeas) * sInvProjection(idxMeas);  % = projection' * sInvProjection (Eq.20); loop used for deterministic rounding
+        end
+
+        % Exception handler
+        if (sigma2Projection > 0.0)
+            xiNormalised = gammaProjection / sqrt(sigma2Projection);   % Eq. 29
+        end % ELSE: axis unobservable this epoch -> xi = 0
+    end % ELSE: no GNSS this epoch -> xi = 0
 
     xiHistory(idx) = xiNormalised;
     qStatistic     = qStatistic + (xiNormalised * xiNormalised);   % Eq. 33
@@ -73,4 +78,4 @@ end % ELSE is trivial
 
 end
 
-%------------------------------------------------------------------------------------------
+%------------------------------------------------------------------------

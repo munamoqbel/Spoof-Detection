@@ -12,13 +12,25 @@
 %              on the coast; alarm => VETO; full quiet probation =>
 %              COMMIT (handback).
 %
-% INPUTS:
-%   - sys          structure of type STRUCT_SPF.setSys
-%   - epoch        scalar   epoch counter (event stamps, anchor loop)
+% INPUTS (all from the HOST's 2 Hz GNSS update of this epoch):
+%   - sys            structure of type STRUCT_SPF.setSys (persistent)
+%   - innovation     [MAX_MEAS x 1]  host innovation  y = z - h(x_prior)
+%   - innovationCov  [MAX_MEAS x MAX_MEAS]  S = H P_prior H' + R
+%   - obsMatrix      [MAX_MEAS x n]  H (host linearisation)
+%   - numMeas        scalar  valid measurement rows this epoch (0 = none)
+%   - priorState     [n x 1]  host predicted state the innovation refers to
+%   - kfState        [n x 1]  host post-update state
+%   - kfCovariance   [n x n]  host post-update covariance
+%   - measNoiseCov   [MAX_MEAS x MAX_MEAS]  R
+%   - spoofInfo      .phiAcc / .qAcc  interval Phi / Q since the last epoch
+%   - epoch          scalar  epoch counter (event stamps, anchor age)
 %
 % OUTPUTS:
 %   - sys          structure of type STRUCT_SPF.setSys
 %   - spoofTel     structure of type STRUCT_SPF.setTel
+%                  .kfCommand.reseedKF/State/Cov  -> host KF (probation open)
+%                  .nav.state/covar/sigmaPosition -> protected navigation output
+%                  .info.*                        -> telemetry / events
 %
 % ASSUMPTIONS AND LIMITATIONS:
 %
@@ -27,7 +39,7 @@
 %******************************************************************************************
 %#codegen
 function [sys, spoofTel] = protectedNav(sys, innovation, ...
-    innovationCov, obsMatrix, kfState, kfCovariance, measurement, ...
+    innovationCov, obsMatrix, numMeas, priorState, kfState, kfCovariance, ...
     measNoiseCov, spoofInfo, epoch)
 
 info = STRUCT_SPF.zeroInfo;
@@ -46,8 +58,16 @@ switch sys.mode
 
         % ---- 2. monitor bank on the filter ----
         [sys.pool, report] = monitorPool(sys.pool, ...
-            innovation, innovationCov, obsMatrix, ...
+            innovation, innovationCov, obsMatrix, numMeas, ...
             sys.filter.state, sys.filter.covariance, spoofInfo);
+
+        % ---- 2b. keep the anchor LIVE: propagate it INS-only to this
+        %          epoch (E28/E31) so a latch can use it without a
+        %          bring-forward loop (exact for time-varying Phi/Q) ----
+        if (sys.anchor.valid)
+            [sys.anchor.state, sys.anchor.covariance] = insCoast( ...
+                sys.anchor.state, sys.anchor.covariance, spoofInfo);
+        end % ELSE is trivial
 
         info.ssAlarm            = report.ssAlarm;
         info.cpiAlarm           = report.cpiAlarm;
@@ -58,27 +78,21 @@ switch sys.mode
         %         anchor always ends strictly before detection) ----
         if (report.cleanCloseFound) && (~report.anyAlarm)
             sys.anchor.valid      = true;
-            sys.anchor.state      = report.cleanCloseState;
+            sys.anchor.state      = report.cleanCloseState;   % already at 'now'
             sys.anchor.covariance = report.cleanCloseCovar;
-            sys.anchor.epoch      = epoch;
+            sys.anchor.epoch      = uint32(epoch);
         end
 
         % ---- 4. latch on any alarm, else open the next window ----
         if (report.anyAlarm)
             info.eventLatched = true;
-            anchorAge = epoch - sys.anchor.epoch;
+            anchorAge = uint32(epoch) - sys.anchor.epoch;
 
             if (sys.anchor.valid) && (anchorAge <= CST_spfParam.MAX_ANCHOR_AGE)
-                % fall back to the certified-clean coast, brought
-                % forward from its close epoch to 'now' INS-onl
-                fallbackState = sys.anchor.state;
-                fallbackCov   = sys.anchor.covariance;
-                for j = sys.anchor.epoch + 1 : epoch
-                    [fallbackState, fallbackCov] = ...
-                        insCoast(fallbackState, fallbackCov, spoofInfo);
-                end
-                sys.filter.state      = fallbackState;
-                sys.filter.covariance = fallbackCov;
+                % fall back to the certified-clean coast (kept live at
+                % 'now' by step 2b)
+                sys.filter.state      = sys.anchor.state;
+                sys.filter.covariance = sys.anchor.covariance;
                 info.eventAnchorEpoch = sys.anchor.epoch;
             else
                 % no clean window ever closed: fallback unavailable.
@@ -88,12 +102,13 @@ switch sys.mode
 
             sys.pool       = STRUCT_SPF.closeAllWindows(sys.pool);
             sys.dwellCount = 0;
+            sys.coastCount = 0;
             sys.mode       = CST_spfMode.COAST;
 
         else
             sys.pool = STRUCT_SPF.openWindow(sys.pool, ...
                 sys.filter.state, sys.filter.covariance, ...
-                innovation, innovationCov, obsMatrix);
+                innovation, innovationCov, obsMatrix, numMeas);
         end
 
     % ==================================================================
@@ -104,9 +119,12 @@ switch sys.mode
         [sys.filter.state, sys.filter.covariance] = insCoast( ...
             sys.filter.state, sys.filter.covariance, spoofInfo);
 
+        sys.coastCount = sys.coastCount + 1;
+
         % ---- 2. test the (untrusted) GNSS against the coast ----
-        [passed, q_value] = revalidation(measurement, obsMatrix, ...
-            measNoiseCov, sys.filter.state, sys.filter.covariance);
+        [passed, q_value] = revalidation(innovation, obsMatrix, ...
+            measNoiseCov, numMeas, priorState, ...
+            sys.filter.state, sys.filter.covariance);
         info.qReval = q_value;
         info.revalComputed = true;
 
@@ -143,15 +161,18 @@ switch sys.mode
         sys.trial.state = kfState;
         sys.trial.covariance = kfCovariance;
 
+        sys.coastCount = sys.coastCount + 1;
+
         % ---- 3. diagnostic: GNSS-vs-coast, log only ----
-        [~, q_value] = revalidation(measurement, obsMatrix, ...
-            measNoiseCov, sys.filter.state, sys.filter.covariance);
+        [~, q_value] = revalidation(innovation, obsMatrix, ...
+            measNoiseCov, numMeas, priorState, ...
+            sys.filter.state, sys.filter.covariance);
         info.qReval = q_value;
         info.revalComputed = true;
 
         % ---- 4. monitor bank on THE TRIAL filter ----
         [sys.pool, report] = monitorPool(sys.pool, ...
-            innovation, innovationCov, obsMatrix, ...
+            innovation, innovationCov, obsMatrix, numMeas, ...
             sys.trial.state, sys.trial.covariance, spoofInfo);
 
         info.ssAlarm            = report.ssAlarm;
@@ -170,7 +191,7 @@ switch sys.mode
         else
             sys.pool = STRUCT_SPF.openWindow(sys.pool, ...
                 sys.trial.state, sys.trial.covariance, ...
-                innovation, innovationCov, obsMatrix);
+                innovation, innovationCov, obsMatrix, numMeas);
 
             sys.probationCount = sys.probationCount + 1;
 
@@ -184,8 +205,9 @@ switch sys.mode
                 sys.anchor.valid      = true;
                 sys.anchor.state      = sys.filter.state;
                 sys.anchor.covariance = sys.filter.covariance;
-                sys.anchor.epoch      = epoch;
+                sys.anchor.epoch      = uint32(epoch);
 
+                sys.coastCount = 0;
                 sys.mode = CST_spfMode.NOMINAL;
                 % pool carries over seamlessly
             end
@@ -199,8 +221,9 @@ for axisIdx = 1:3
         sqrt(max(sys.filter.covariance(axisIdx, axisIdx), 0.0));
 end
 
-info.mode       = sys.mode;
-info.dwellCount = sys.dwellCount;
+info.mode        = sys.mode;
+info.dwellCount  = sys.dwellCount;
+info.coastEpochs = sys.coastCount;    % time-in-coast (COAST + PROBATION), epochs
 
 spoofTel = STRUCT_SPF.setTel(info, kfCommand, nav);
 

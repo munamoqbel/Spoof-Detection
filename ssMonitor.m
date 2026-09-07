@@ -61,9 +61,12 @@ for idx = 1:numAxes
         - kfCovariance(axisIdx, axisIdx);                                % Eq. 50
     varianceCoast       = coastCovariance(axisIdx, axisIdx);             % Eq. 52
 
-    % Exception handler
+    % Exception handler: sigma_SS = 0 (window just opened, or numerical)
+    % means the test is undefined; report no alarm rather than |q| > 0.
+    testable = false;
     if (varianceSeparation > 0.0)
         sigmaSeparation(idx) = sqrt(varianceSeparation);
+        testable = true;
     end % ELSE is trivial
 
     if (varianceCoast > 0.0)
@@ -76,7 +79,7 @@ for idx = 1:numAxes
         + kMissedDetection * sigmaCoast;                                 % Eq. 51
 
     % alarm rule (section 5 under Eq. 52)
-    if (abs(separation(idx)) > (kFalseAlert * sigmaSeparation(idx)))
+    if testable && (abs(separation(idx)) > (kFalseAlert * sigmaSeparation(idx)))
         alarmPerAxis(idx) = true;
         anyAlarm = true;
     end % ELSE is trivial

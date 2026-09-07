@@ -1,5 +1,7 @@
 function [sys, spoofTel] = protected_nav_step(sys, measurement, ...
     obs_matrix, meas_noise_cov, spoofInfo, epoch)
+% LEGACY self-contained variant (runs its own KF). Kept for the
+% use_fed = false harness path; the deployed gate is protectedNav.m.
 %PROTECTED_NAV_STEP  One epoch of the spoofing-protected navigator (FSM).
 %
 % MODES (constants in NavMode.m)
@@ -35,6 +37,7 @@ function [sys, spoofTel] = protected_nav_step(sys, measurement, ...
 
 info = STRUCT_SPF.zeroInfo;
 kfCommand = STRUCT_SPF.zeroCommand;
+num_meas  = size(measurement, 1);
 
 switch sys.mode
 
@@ -50,7 +53,7 @@ switch sys.mode
 
         % ---- 2. monitor bank on the filter ----
         [sys.pool, report] = monitorPool(sys.pool, ...
-            innovation, innovation_cov, obs_matrix, ...
+            innovation, innovation_cov, obs_matrix, num_meas, ...
             sys.filter.state, sys.filter.covariance, spoofInfo);
 
         info.ssAlarm            = report.ssAlarm;
@@ -64,7 +67,7 @@ switch sys.mode
             sys.anchor.valid      = true;
             sys.anchor.state      = report.cleanCloseState;
             sys.anchor.covariance = report.cleanCloseCovar;
-            sys.anchor.epoch      = epoch;
+            sys.anchor.epoch      = uint32(epoch);
         end
 
         % ---- 4. latch on any alarm, else open the next window ----
@@ -77,7 +80,7 @@ switch sys.mode
                 % forward from its close epoch to 'now' INS-only
                 fallback_state = sys.anchor.state;
                 fallback_cov   = sys.anchor.covariance;
-                for j = sys.anchor.epoch + 1 : epoch
+                for j = double(sys.anchor.epoch) + 1 : epoch
                     [fallback_state, fallback_cov] = ...
                         insCoast(fallback_state, fallback_cov, ...
                             spoofInfo);
@@ -99,7 +102,7 @@ switch sys.mode
         else
             sys.pool = STRUCT_SPF.openWindow(sys.pool, ...
                 sys.filter.state, sys.filter.covariance, ...
-                innovation, innovation_cov, obs_matrix);
+                innovation, innovation_cov, obs_matrix, num_meas);
         end
 
     % ==================================================================
@@ -111,8 +114,10 @@ switch sys.mode
             sys.filter.state, sys.filter.covariance, spoofInfo);
 
         % ---- 2. test the (untrusted) GNSS against the coast ----
-        [passed, q_value] = revalidation(measurement, obs_matrix, ...
-            meas_noise_cov, sys.filter.state, sys.filter.covariance);
+        coastInnov = measurement - obs_matrix * sys.filter.state;   % linear harness
+        [passed, q_value] = revalidation(coastInnov, obs_matrix, ...
+            meas_noise_cov, num_meas, sys.filter.state, ...
+            sys.filter.state, sys.filter.covariance);
         info.qReval = q_value;
 
         if (passed)
@@ -147,13 +152,15 @@ switch sys.mode
                 measurement, obs_matrix, spoofInfo, meas_noise_cov);
 
         % ---- 3. diagnostic: GNSS-vs-coast, log only ----
-        [~, q_value] = revalidation(measurement, obs_matrix, ...
-            meas_noise_cov, sys.filter.state, sys.filter.covariance);
+        coastInnov = measurement - obs_matrix * sys.filter.state;   % linear harness
+        [~, q_value] = revalidation(coastInnov, obs_matrix, ...
+            meas_noise_cov, num_meas, sys.filter.state, ...
+            sys.filter.state, sys.filter.covariance);
         info.qReval = q_value;
 
         % ---- 4. monitor bank on THE TRIAL filter ----
         [sys.pool, report] = monitorPool(sys.pool, ...
-            trial_innovation, trial_innovation_cov, obs_matrix, ...
+            trial_innovation, trial_innovation_cov, obs_matrix, num_meas, ...
             sys.trial.state, sys.trial.covariance, spoofInfo);
 
         info.ssAlarm            = report.ssAlarm;
@@ -175,7 +182,7 @@ switch sys.mode
 
             sys.pool = STRUCT_SPF.openWindow(sys.pool, ...
                 sys.trial.state, sys.trial.covariance, ...
-                trial_innovation, trial_innovation_cov, obs_matrix);
+                trial_innovation, trial_innovation_cov, obs_matrix, num_meas);
 
             sys.probationCount = sys.probationCount + 1;
 
@@ -189,7 +196,7 @@ switch sys.mode
                 sys.anchor.valid      = true;
                 sys.anchor.state      = sys.filter.state;
                 sys.anchor.covariance = sys.filter.covariance;
-                sys.anchor.epoch      = epoch;
+                sys.anchor.epoch      = uint32(epoch);
 
                 sys.mode = CST_spfMode.NOMINAL;
                 % pool carries over seamlessly

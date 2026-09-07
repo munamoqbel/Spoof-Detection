@@ -45,9 +45,9 @@ end
 mode = CST_spfMode.NOMINAL;
 filter = STRUCT_SPF.setFilter(zeros(prm.n_states, 1), P0);
 trial = STRUCT_SPF.setTrial(zeros(prm.n_states, 1), P0);
-pool = STRUCT_SPF.zeroMonitorPool(prm.m_meas);
-anchor = STRUCT_SPF.setAnchor(false, zeros(prm.n_states, 1), P0, 0);
-sys = STRUCT_SPF.setSys(mode, filter, trial, pool, anchor, 0, 0);
+pool = STRUCT_SPF.zeroMonitorPool;
+anchor = STRUCT_SPF.setAnchor(false, zeros(prm.n_states, 1), P0, uint32(0));
+sys = STRUCT_SPF.setSys(mode, filter, trial, pool, anchor, 0, 0, 0);
 
 % ----------------------------------------------------------------------
 %  allocate outputs
@@ -75,6 +75,7 @@ event_handback   = [];
 
 kf_x = zeros(prm.n_states, 1);
 kf_P = P0;
+num_meas = size(z_all, 1);                 % constant in the harness
 
 % ----------------------------------------------------------------------
 %  run
@@ -83,12 +84,12 @@ for epoch = 1:num_epochs
 
     if (use_fed)
         % ---- your 2a/2b: the KF updates ALWAYS (free-running) ----
-        [kf_x, kf_P, innov, innov_S, ~] = kalman_update_step(kf_x, kf_P, ...
+        [kf_x, kf_P, innov, innov_S, ~, kf_prior] = kalman_update_step(kf_x, kf_P, ...
             z_all(:, epoch), H_all(:, :, epoch), spoofInfo, V);
 
         % ---- your 2c: the fed FSM ----
         [sys, spoofTel] = protectedNav(sys, innov, innov_S, ...
-            H_all(:, :, epoch), kf_x, kf_P, z_all(:, epoch), ...
+            H_all(:, :, epoch), num_meas, kf_prior, kf_x, kf_P, ...
             V, spoofInfo, epoch);
 
         % ---- your 2d: reseed on command ----
@@ -116,6 +117,7 @@ for epoch = 1:num_epochs
     out.reval_computed(epoch)   = spoofTel.info.revalComputed;
     out.dwell(epoch)            = spoofTel.info.dwellCount;
     out.anchor_missing(epoch)   = spoofTel.info.anchorMissing;
+    out.coast_epochs(epoch)     = spoofTel.info.coastEpochs;
 
     % ---- event logs ----
     if spoofTel.info.eventLatched

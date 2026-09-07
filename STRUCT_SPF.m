@@ -203,5 +203,172 @@ classdef STRUCT_SPF
 
         function [anchor] = zeroAnchor
 
-% !!! TRANSCRIPTION CONTINUES - lines 206 to end (zeroAnchor body, setSys,
-% zeroInfo, setCommand, zeroCommand, setNav, setTel, ...) not yet provided.
+            % Init values
+            valid = false;
+            state = zeros(CST_gnssHybrid.NO_STATES, 1);
+            covariance = zeros(CST_gnssHybrid.NO_STATES, CST_gnssHybrid.NO_STATES);
+            epoch = 0.0;
+
+            anchor = STRUCT_SPF.setAnchor(valid, state, covariance, epoch);
+
+        end
+
+        function [sys] = setSys(mode, filter, trial, pool, anchor, ...
+                dwellCount, probationCount)
+
+            % Define structure
+            sys = struct( ...
+                'mode',           mode, ...
+                'filter',         filter, ...
+                'trial',          trial, ...
+                'pool',           pool, ...
+                'anchor',         anchor, ...
+                'dwellCount',     dwellCount, ...
+                'probationCount', probationCount);
+        end
+
+        function [sys] = zeroSys(numMeas)
+
+            % Init values
+            mode = CST_spfMode.NOMINAL;
+            filter = STRUCT_SPF.zeroFilter;
+            trial = STRUCT_SPF.zeroTrial;
+            pool = STRUCT_SPF.zeroMonitorPool(numMeas);
+            anchor = STRUCT_SPF.zeroAnchor;
+            dwellCount = 0.0;
+            probationCount = 0.0;
+
+            sys = STRUCT_SPF.setSys(mode, filter, trial, pool, ...
+                anchor, dwellCount, probationCount);
+        end
+
+        function [altXCheck] = setAltXCheck(suspect, altDiff)
+
+            % Define structure
+            altXCheck = struct( ...
+                'suspect', suspect, ...
+                'altDiff', altDiff);
+
+        end
+
+        function [altXCheck] = zeroAltXCheck
+
+            % Init values
+            suspect = false;
+            altDiff = 0.0;
+
+            altXCheck = STRUCT_SPF.setAltXCheck(suspect, altDiff);
+        end
+
+        function [spoofTel] = setTel(info, kfCommand, nav)
+
+            % Define structure
+            spoofTel = struct( ...
+                'info',      info, ...
+                'kfCommand', kfCommand, ...
+                'nav',       nav);
+        end
+
+        function [spoofTel] = zeroTel
+
+            % Init values
+            info = STRUCT_SPF.zeroInfo;
+            kfCommand = STRUCT_SPF.zeroCommand;
+            nav = STRUCT_SPF.zeroNav;
+
+            % Define structure
+            spoofTel = STRUCT_SPF.setTel(info, kfCommand, nav);
+        end
+
+        function [info] = setInfo(mode, ssAlarm, cpiAlarm, ...
+                alarmPerAxis, maxProtectionLevel, qReval, revalComputed,...
+                dwellCount, eventLatched, eventAnchorEpoch, eventProbationStarted,...
+                eventProbationVetoed, eventHandback, anchorMissing)
+
+            % Define structure
+            info = struct( ...
+                'mode',                  mode, ...
+                'ssAlarm',               logical(ssAlarm), ...
+                'cpiAlarm',              logical(cpiAlarm), ...
+                'alarmPerAxis',          logical(alarmPerAxis), ...
+                'maxProtectionLevel',    maxProtectionLevel, ...
+                'qReval',                qReval, ...
+                'revalComputed',         logical(revalComputed), ...
+                'dwellCount',            dwellCount, ...
+                'eventLatched',          logical(eventLatched), ...
+                'eventAnchorEpoch',      eventAnchorEpoch, ...
+                'eventProbationStarted', logical(eventProbationStarted), ...
+                'eventProbationVetoed',  logical(eventProbationVetoed), ...
+                'eventHandback',         logical(eventHandback), ...
+                'anchorMissing',         logical(anchorMissing));
+        end
+
+        function [info] = zeroInfo
+
+            % Init values
+            mode                  = 1;
+            ssAlarm               = false;
+            cpiAlarm              = false;
+            alarmPerAxis          = false(1, 3);
+            maxProtectionLevel    = 0.0;
+            qReval                = 0.0;
+            revalComputed         = false;
+            dwellCount            = 0;
+            eventLatched          = false;
+            eventAnchorEpoch      = 0;
+            eventProbationStarted = false;
+            eventProbationVetoed  = false;
+            eventHandback         = false;
+            anchorMissing         = false;
+
+            % Define structure
+            info = STRUCT_SPF.setInfo(mode, ssAlarm, cpiAlarm, ...
+                alarmPerAxis, maxProtectionLevel, qReval, revalComputed,...
+                dwellCount, eventLatched, eventAnchorEpoch, eventProbationStarted,...
+                eventProbationVetoed, eventHandback, anchorMissing);
+        end
+
+        function [command] = setCommand(reseedKF, reseedState, reseedCov)
+
+            % Define structure
+            command = struct( ...
+                'reseedKF',    logical(reseedKF), ...
+                'reseedState', reseedState, ...
+                'reseedCov',   reseedCov);
+        end
+
+        function [command] = zeroCommand
+
+            % Init values
+            reseedKF = false;
+            reseedState = zeros(CST_gnssHybrid.NO_STATES, 1);
+            reseedCov = zeros(CST_gnssHybrid.NO_STATES, CST_gnssHybrid.NO_STATES);
+
+            % Define structure
+            command = STRUCT_SPF.setCommand(reseedKF, reseedState, reseedCov);
+        end
+
+        function [nav] = setNav(state, covar, sigmaPosition)
+
+            % Define structure
+            nav = struct( ...
+                'state',         state, ...
+                'covar',         covar, ...
+                'sigmaPosition', sigmaPosition);
+        end
+
+        function [nav] = zeroNav
+
+            % Init values
+            state = zeros(CST_gnssHybrid.NO_STATES, 1);
+            covar = eye(CST_gnssHybrid.NO_STATES);
+            sigmaPosition = zeros(3, 1);
+
+            % Define structure
+            nav = STRUCT_SPF.setNav(state, covar, sigmaPosition);
+        end
+
+    end
+end
+
+%------------------------------------------------------------------------------------------

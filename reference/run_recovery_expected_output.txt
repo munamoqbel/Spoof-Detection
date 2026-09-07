@@ -22,7 +22,7 @@ N_min         = 9 epochs
 CPI_threshold = 43.6079451236
 k_FA          = 5.2136254579
 k_MD          = 4.7534243088
-P_MD achieved = 3.5856e-08   (req: 1.0000e-07)
+P_MD achieved = 3.5856e-08  (req: 1.0000e-07)
 -------------------
 
 === axis 2 design ===
@@ -34,7 +34,7 @@ N_min         = 10 epochs
 CPI_threshold = 45.6396776457
 k_FA          = 5.2331264178
 k_MD          = 4.7534243088
-P_MD achieved = 1.8641e-08   (req: 1.0000e-07)
+P_MD achieved = 1.8641e-08  (req: 1.0000e-07)
 -------------------
 
 === axis 3 design ===
@@ -46,7 +46,7 @@ N_min         = 9 epochs
 CPI_threshold = 43.6079451236
 k_FA          = 5.2136254579
 k_MD          = 4.7534243088
-P_MD achieved = 2.7307e-08   (req: 1.0000e-07)
+P_MD achieved = 2.7307e-08  (req: 1.0000e-07)
 -------------------
 
 --- Bank constants ---

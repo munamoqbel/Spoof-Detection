@@ -1,0 +1,31 @@
+Reference console output of run_scheduler_test.m as run by the user
+(MATLAB), captured from a screenshot. Regression target for the
+100 Hz + 2 Hz split-rate architecture (scheduler_sim + spoofMonitor2hz).
+
+==============================================
+  Scheduler test: 100 Hz + 2 Hz architecture
+==============================================
+
+T1 Phi_step^50 vs interval Phi : rel err = 4.93e-17 PASS (exact - nilpotent coupling)
+ Q_acc vs interval Q : rel diff = 5.48e-02 (informational)
+
+T2 Scheduler vs flat reference:
+ max |x_nav diff| = 0.00e+00 | modes PASS | events PASS | alarms PASS -> PASS
+
+T3 Feedback ON iff NOMINAL : PASS
+T4 Resets at latch+commit only: PASS (epochs: 81  208)
+T5 x_mech == nav output : max diff 1.30e-14 -> PASS
+ (latch epoch 81 designed one-tick lag: |mech-nav| = 0.013 m)
+T6 Repeat run identical : PASS
+
+=== ALL SCHEDULER TESTS PASS ===
+
+----------------------------------------------------------------------
+Figure "Scheduler-path result" (3 panels, 0..240 s):
+  1) |3-D pos| scheduler path (blue) and flat reference (red dashed)
+     overlay exactly: ~0 until 40 s, linear ramp to ~0.17 m at ~104 s,
+     drop to ~0 and stay there.
+  2) FSM mode: NOMINAL -> COAST at 40.5 s (red reset marker), three
+     short PROBATION blips ~45-60 s, PROBATION ~93-104 s, NOMINAL from
+     104 s (red reset marker at the commit).
+  3) Feedback gate: ON, OFF from 40.5 s to 104 s, ON afterwards.

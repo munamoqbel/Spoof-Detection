@@ -203,6 +203,10 @@ nav = STRUCT_SPF.setNav(sys.filter.state, sys.filter.covariance, zeros(3, 1));
 for axis_idx = 1:3
     nav.sigmaPosition(axis_idx) = ...
         sqrt(max(sys.filter.covariance(axis_idx, axis_idx), 0.0));
+end
 
-% !!! TRANSCRIPTION CONTINUES - lines 206 to end (end of the sigma loop
-% and the spoofTel assembly) not yet provided. Awaiting screenshot.
+info.mode       = sys.mode;
+info.dwellCount = sys.dwellCount;
+
+spoofTel = STRUCT_SPF.setTel(info, kfCommand, nav);
+end

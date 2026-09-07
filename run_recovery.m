@@ -98,6 +98,25 @@ rec.M_prob  = prm.N_min + 8;
 fprintf('Re-validation: T_reval = %.2f (chi2_%d), dwell = %d ep, probation = %d ep\n\n', ...
     rec.T_reval, prm_boot.m_meas, rec.M_dwell, rec.M_prob);
 
+% ---- consistency guard: the runtime reads CST_spfParam, not prm/rec ----
+% The monitors (monitorPool/cpiMonitor/ssMonitor/protectedNav) take their
+% constants from CST_spfParam.m (Coder-friendly). The offline design above
+% is informational; warn if the two have drifted apart.
+chk = {'WINDOW_LENGTH',        double(CST_spfParam.WINDOW_LENGTH),        N_c;
+       'CPI_THRESHOLD',        CST_spfParam.CPI_THRESHOLD,                T_Nc;
+       'K_FALSE_ALERT',        CST_spfParam.K_FALSE_ALERT,                kFAc;
+       'K_MISSED_DETECTION',   CST_spfParam.K_MISSED_DETECTION,           kMDc;
+       'REVAL_THRESHOLD',      CST_spfParam.REVAL_THRESHOLD,              rec.T_reval;
+       'REVAL_DWELL_REQUIRED', double(CST_spfParam.REVAL_DWELL_REQUIRED), rec.M_dwell;
+       'PROBATION_LENGTH',     double(CST_spfParam.PROBATION_LENGTH),     rec.M_prob};
+for c = 1:size(chk, 1)
+    if abs(chk{c,2} - chk{c,3}) > 1e-9 * max(1, abs(chk{c,3}))
+        warning('run_recovery:designMismatch', ...
+            'CST_spfParam.%s = %.10g but offline design gives %.10g (runtime uses CST_spfParam)', ...
+            chk{c,1}, chk{c,2}, chk{c,3});
+    end
+end
+
 %% Step 3 - run the protected system
 use_fed = true;
 out = recovery_nav_sim(z_all, H_all, V, spoofInfo, P0, prm, use_fed);
@@ -180,7 +199,7 @@ legend('Unprotected','Recovery','Recovery 3\sigma (RSS)','Location','southeast')
 subplot(4,1,3);
 q_plot = out.q_reval;
 q_plot(~out.reval_computed) = NaN;
-semilogy(t, out.q_reval, 'k.-', 'LineWidth', 0.8, 'MarkerSize', 6); hold on;
+semilogy(t, q_plot, 'k.-', 'LineWidth', 0.8, 'MarkerSize', 6); hold on;
 yline(rec.T_reval, 'r-', 'T_{reval}', 'LineWidth', 1.2);
 xline(t_se, 'r:', 'HandleVisibility','off');
 ylabel('q_{reval}'); grid on; xlim([0 t(end)]);

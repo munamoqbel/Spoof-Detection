@@ -73,7 +73,7 @@ event_prob_start = [];
 event_prob_fail  = [];
 event_handback   = [];
 
-kf_x = zeros(60, 1);
+kf_x = zeros(prm.n_states, 1);
 kf_P = P0;
 
 % ----------------------------------------------------------------------

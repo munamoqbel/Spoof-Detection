@@ -68,7 +68,7 @@ switch sys.mode
             info.eventLatched = true;
             anchorAge = epoch - sys.anchor.epoch;
 
-            if (sys.anchor.valid) && (anchorAge <= 200)
+            if (sys.anchor.valid) && (anchorAge <= CST_spfParam.MAX_ANCHOR_AGE)
                 % fall back to the certified-clean coast, brought
                 % forward from its close epoch to 'now' INS-onl
                 fallbackState = sys.anchor.state;

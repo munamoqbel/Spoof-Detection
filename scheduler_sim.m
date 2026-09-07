@@ -113,7 +113,7 @@ for epoch = 1:num_epochs
 
     [mode_flag, reset_flag, reset_state, reseed, spoofTel] = ...
         spoof_monitor_2hz(innov, innov_S, H_all(:, :, epoch), kf_x, kf_P, ...
-        z_all(:, epoch), V, spoofInfo, x0, P0, epoch == 1, num_meas);
+        z_all(:, epoch), V, spoofInfo, x0, P0, reset_request, num_meas);
     if reseed.reseedKF % your step 2d
         kf_x = reseed.reseedState;
         kf_P = reseed.reseedCov;

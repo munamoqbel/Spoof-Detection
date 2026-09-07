@@ -1,0 +1,90 @@
+Reference console output of run_recovery.m as run by the user (MATLAB),
+captured from screenshots. Scenario toggles at the top of run_recovery.m:
+seed=42, sigma_t_attack=0.10, ramp_rate=0.5, attack_dir=[1 1 1],
+alpha_reval=1e-3, M_dwell=10, axes_mon=[1 2 3].
+
+Use this as the regression target: any refactor of the monitor / scheduler
+must reproduce these numbers on the same inputs.
+
+=============================================
+  Kujur 2024 - Sec. 5 Recovery, 3-axis bank
+=============================================
+
+Attack: dir [0.58 0.58 0.58] | sigma_t_attack = 0.10 m | ramp = 0.50 m/epoch
+Phase 1 clean 1..80 | Phase 2 spoofed 81..180 (ramp from 120) | Phase 3 clean 181..480
+
+=== axis 1 design ===
+--- solve_N_min ---
+sigma2_gamma_u = 40344.0217
+sigma_t        = 0.1000 m
+Omega          = 403.4402
+N_min         = 9 epochs
+CPI_threshold = 43.6079451236
+k_FA          = 5.2136254579
+k_MD          = 4.7534243088
+P_MD achieved = 3.5856e-08   (req: 1.0000e-07)
+-------------------
+
+=== axis 2 design ===
+--- solve_N_min ---
+sigma2_gamma_u = 30305.6472
+sigma_t        = 0.1000 m
+Omega          = 303.0565
+N_min         = 10 epochs
+CPI_threshold = 45.6396776457
+k_FA          = 5.2331264178
+k_MD          = 4.7534243088
+P_MD achieved = 1.8641e-08   (req: 1.0000e-07)
+-------------------
+
+=== axis 3 design ===
+--- solve_N_min ---
+sigma2_gamma_u = 42892.5338
+sigma_t        = 0.1000 m
+Omega          = 428.9253
+N_min         = 9 epochs
+CPI_threshold = 43.6079451236
+k_FA          = 5.2136254579
+k_MD          = 4.7534243088
+P_MD achieved = 2.7307e-08   (req: 1.0000e-07)
+-------------------
+
+--- Bank constants ---
+Per-axis N_min = [9 10 9] -> common N = 10 (5.0 s)
+T_N = 45.6397 | k_FA = 5.2331 | k_MD = 4.7534  (FA budgets /3 per axis)
+axis 1: PMD achieved at N=10 : 4.547e-09 (req 1.0e-07)
+axis 2: PMD achieved at N=10 : 1.864e-08 (req 1.0e-07)
+axis 3: PMD achieved at N=10 : 3.359e-09 (req 1.0e-07)
+
+Re-validation: T_reval = 39.25 (chi2_16), dwell = 10 ep, probation = 18 ep
+
+--- Events ---
+Pre-detection consistency (recovery KF vs baseline KF): 0.00e+00 m
+Latch 1 : alarm at epoch 81 (t = 40.5 s), axis/axes [1  2  3]
+          anchored to clean window closed at epoch 80 (t = 40.0 s)
+          handback at epoch 208 (t = 104.0 s); total = 63.5 s
+
+Max |3-D position error| from attack onset to end of run:
+  unprotected KF :   30.500 m
+  recovery system:    0.171 m
+Probation attempts: 4 started, 3 vetoed, 1 committed
+Integrity check: epochs with |3-D err| > 3-sigma (RSS) claim: 0
+
+maxAnchorAge = 234 epochs (117 s)
+
+----------------------------------------------------------------------
+Facts implied by the numbers above (for reconstructing helper functions):
+  fs            = 2 Hz            (epoch 81 -> 40.5 s; N_c=10 -> 5.0 s)
+  N_total       = 480 epochs      (240 s)
+  m_meas        = 16              (chi2_16 re-validation)
+  T_reval       = chi2inv(1-1e-3, 16) = 39.25
+  k_MD          = norminv(1 - P_MD_minus) = 4.7534  -> P_MD_minus = 1e-6
+  P_MD_plus     = 1e-7            (printed requirement)
+  prm.N_min     = 10 at the bank  (M_prob = N_min + 8 = 18)
+  Figure 1 (4 panels): unprotected KF ramps to ~+18 m on axis 1 then snaps back
+    at ~90 s; recovery output stays ~0. FSM: NOMINAL -> COAST at ~40.5 s, three
+    short PROBATION attempts (vetoed) between ~45-60 s, a long PROBATION
+    ~93-104 s, then NOMINAL from 104 s. Alarm markers on all 3 axes at each latch.
+  Figure 2 (SS PL, Eq. 51): ~0.2 m while windows live in NOMINAL, 0 during
+    COAST (no live windows), spike to ~0.55 m at probation re-open (~100 s),
+    then ~0.2 m again.

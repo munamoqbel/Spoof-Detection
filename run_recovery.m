@@ -17,7 +17,7 @@
 
 clear; clc; close all;
 
-% --------------- scenario toggles ----------------
+% ---------------- scenario toggles ----------------
 seed           = 42;
 sigma_t_attack = 0.10;    % injected tracking-error std (m). 0 => ramp-only
 ramp_rate      = 0.5;     % injected ramp (m/epoch).         0 => tracking-only
@@ -27,9 +27,9 @@ alpha_reval    = 1e-3;    % re-validation false-alarm allocation per epoch
 M_dwell        = 10;      % consecutive passes to open probation
 axes_mon       = [1 2 3]; % monitored axes (the bank)
 
-fprintf('==============================================\n');
+fprintf('=============================================\n');
 fprintf('  Kujur 2024 - Sec. 5 Recovery, 3-axis bank\n');
-fprintf('==============================================\n\n');
+fprintf('=============================================\n\n');
 
 %% Step 1 - data (one measurement stream feeds both systems)
 prm_boot = kujur_params();
@@ -123,16 +123,16 @@ else
             i, td, td/fs, num2str(ax));
         ta = out.ev.t_anchor(i);
         if isnan(ta)
-            fprintf('               NO clean anchor available - froze current state\n');
+            fprintf('          NO clean anchor available - froze current state\n');
         else
-            fprintf('               anchored to clean window closed at epoch %d (t = %.1f s)\n', ta, ta/fs);
+            fprintf('          anchored to clean window closed at epoch %d (t = %.1f s)\n', ta, ta/fs);
         end
         if numel(out.ev.t_handback) >= i
             th = out.ev.t_handback(i);
-            fprintf('               handback at epoch %d (t = %.1f s); total = %.1f s\n', ...
+            fprintf('          handback at epoch %d (t = %.1f s); total = %.1f s\n', ...
                 th, th/fs, (th - td)/fs);
         else
-            fprintf('               still in COAST/PROBATION at end of run\n');
+            fprintf('          still in COAST/PROBATION at end of run\n');
         end
     end
 end
@@ -156,6 +156,69 @@ figure('Name','Sec-5 Recovery, 3-axis bank','NumberTitle','off','Position',[50 5
 % Panel 1: navigation output on the attacked axis
 subplot(4,1,1); hold on;
 ymx = max([max(err_base), max(err_rec), 1]) * 1.1;
+fill([t_sp t_se t_se t_sp], [-ymx -ymx ymx ymx], [1 .85 .85], ...
+    'EdgeColor','none','FaceAlpha',.3,'HandleVisibility','off');
+plot(t, xh_base(ia,:), 'r-', 'LineWidth', 1.2, 'DisplayName', 'Unprotected KF (captured)');
+plot(t, out.x_nav(ia,:), 'b-', 'LineWidth', 1.4, 'DisplayName', 'Recovery system output');
+yline(0, 'k:', 'HandleVisibility','off');
+xline(t_rp, 'm:', 'HandleVisibility','off');
+ylabel(sprintf('Axis-%d pos (m)', ia));
+legend('Location','northwest'); grid on; xlim([0 t(end)]); ylim([-ymx ymx]);
+title(sprintf('Navigation output vs truth (truth = 0), attack dir [%.2f %.2f %.2f], dominant axis %d', ...
+    scn.attack_dir(1), scn.attack_dir(2), scn.attack_dir(3), ia));
 
-% !!! TRANSCRIPTION CONTINUES — content from line ~159 onward (rest of the
-% plotting section) has not been provided yet. Awaiting remaining screenshots.
+% Panel 2: |3-D position error| on log scale + RSS 3-sigma
+subplot(4,1,2);
+semilogy(t, max(err_base, 1e-6), 'r-', 'LineWidth', 1.2); hold on;
+semilogy(t, max(err_rec,  1e-6), 'b-', 'LineWidth', 1.4);
+semilogy(t, max(3*sig_rss, 1e-6), 'b:', 'LineWidth', 1.0);
+xline(t_sp,'r:','HandleVisibility','off'); xline(t_se,'r:','HandleVisibility','off');
+ylabel('|3-D pos err| (m)'); grid on; xlim([0 t(end)]);
+legend('Unprotected','Recovery','Recovery 3\sigma (RSS)','Location','southeast');
+
+% Panel 3: re-validation statistic
+subplot(4,1,3);
+q_plot = out.q_reval;
+q_plot(~out.reval_computed) = NaN;
+semilogy(t, out.q_reval, 'k.-', 'LineWidth', 0.8, 'MarkerSize', 6); hold on;
+yline(rec.T_reval, 'r-', 'T_{reval}', 'LineWidth', 1.2);
+xline(t_se, 'r:', 'HandleVisibility','off');
+ylabel('q_{reval}'); grid on; xlim([0 t(end)]);
+title(sprintf('GNSS-vs-coast re-validation, \\chi^2_{%d}; needs %d consecutive passes', ...
+    prm_boot.m_meas, rec.M_dwell));
+
+% Panel 4: FSM state + per-axis alarm markers
+subplot(4,1,4); hold on;
+fill([t_sp t_se t_se t_sp], [0.8 0.8 3.4 3.4], [1 .85 .85], ...
+    'EdgeColor','none','FaceAlpha',.3,'HandleVisibility','off');
+stairs(t, out.state, 'k-', 'LineWidth', 1.6, 'HandleVisibility','off');
+mk = {'r^', 'gs', 'bo'};
+for a = 1:3
+    iax = find(out.alarm_axis(:, a));
+    if ~isempty(iax)
+        scatter(t(iax), out.state(iax) + 0.10 + 0.08*a, 16, mk{a}, 'filled', ...
+            'DisplayName', sprintf('alarm axis %d', a));
+    end
+end
+xline(t_sp,'r:','HandleVisibility','off');
+xline(t_rp,'m:','HandleVisibility','off');
+xline(t_se,'r:','HandleVisibility','off');
+ylim([0.8 3.4]); yticks([1 2 3]); yticklabels({'NOMINAL','COAST','PROBATION'});
+xlabel('Time (s)'); grid on; xlim([0 t(end)]);
+legend('Location','northeast');
+title('FSM state (per-axis alarm markers)');
+
+figure; plot(t, out.SS_PL, 'm-'); grid on; ylabel('SS PL(m)'); xlabel('Time(s)'); title('Eq.51 protection level (max over live windows/axes)');
+%% set anchor age limit
+alertLimt = 10;
+P=P0;
+for k =1:10
+    P = spoofInfo.phiAcc * P * (spoofInfo.phiAcc)' + spoofInfo.qAcc;
+end
+horiz = zeros(600, 1);
+for k=1:600
+    P = spoofInfo.phiAcc * P * (spoofInfo.phiAcc)' + spoofInfo.qAcc;
+    horiz(k) = 3*sqrt(P(1,1) + P(2,2));
+end
+maxAnchorAge = find(horiz < alertLimt, 1, 'last');
+fprintf('maxAnchorAge = %d epochs (%.0f s)\n', maxAnchorAge, maxAnchorAge/2);

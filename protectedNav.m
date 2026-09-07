@@ -202,5 +202,8 @@ end
 info.mode       = sys.mode;
 info.dwellCount = sys.dwellCount;
 
-% !!! TRANSCRIPTION CONTINUES - lines 204 to end (spoofTel = STRUCT_SPF.setTel(...)
-% and the closing end) not yet provided. Awaiting screenshot.
+spoofTel = STRUCT_SPF.setTel(info, kfCommand, nav);
+
+end
+
+%------------------------------------------------------------------------------------------

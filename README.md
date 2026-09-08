@@ -35,11 +35,17 @@ bookkeeping of `KF.states`.
 
 ## Tests
 
+Run `runAllTests` from the repo root before integrating (MATLAB; or Octave via
+`tools/octave_shim/run_all_headless.m`). It runs the four scripts below in
+order and prints one PASS/FAIL line each.
+
 - `run_scheduler_test.m` — 100 Hz + 2 Hz architecture (T1-T6)
 - `tests/test_monitors.m` — engine unit + Monte-Carlo checks (replaces the
   dual_monitor-era `test_all.m`, which cannot drive `cpiMonitor` since the
   window length / thresholds moved into `CST_spfParam`)
 - `tests/test_variable_numMeas.m` — varying satellite count, padded vs exact
+- `tests/test_shadow_mode.m` — guide Step 5: shadow mode on clean data (zero alarms),
+  then a scripted attack with authority (latch, vetoes, one commit)
 - `run_recovery.m` — end-to-end demo with offline design and plots
 
 ## Regression

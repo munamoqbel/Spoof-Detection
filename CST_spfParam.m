@@ -13,7 +13,7 @@
 % - MAX_MEAS:
 % Upper bound on GNSS measurements per epoch. All monitor buffers are sized
 % to it; the per-epoch valid count (numMeas) selects the live rows.
-% - REVAL_THRESHOLD_TABLE(m) = chi2inv(1 - 1e-3, m), m = 1..MAX_MEAS
+% - REVAL_THRESHOLD_TABLE(m) = chi2inv(1 - 1e-3, m), m = 1..MAX_MEAS (30)
 % (Implementation Guide Sec. 5: one gate per possible satellite count).
 % Recompute offline if MAX_MEAS or the 1e-3 allocation changes.
 %
@@ -33,15 +33,19 @@ classdef CST_spfParam
         K_MISSED_DETECTION = 4.753424308817088;           % PL term
         MONITORED_AXES = [1 2 3];                         % NED position state indices
         REVAL_THRESHOLD = 39.252354790768472;     % chi-square gate, m = 16 (kept for reference)
-        REVAL_THRESHOLD_TABLE = [ ...                 % chi2inv(1 - 1e-3, m), m = 1..16
-            10.8275661706627, 13.8155105579643, 16.2662361962381, 18.4668269529032, ...
-            20.5150056524329, 22.4577444848253, 24.3218863478569, 26.1244815583761, ...
-            27.8771648712566, 29.5882984450744, 31.2641336202400, 32.9094904073602, ...
-            34.5281789748709, 36.1232736803981, 37.6972982183538, 39.2523547907685];
+        REVAL_THRESHOLD_TABLE = [ ...                 % chi2inv(1 - 1e-3, m), m = 1..30
+            10.82756617066, 13.81551055796, 16.26623619624, 18.4668269529, ...
+            20.51500565243, 22.45774448483, 24.32188634786, 26.12448155838, ...
+            27.87716487126, 29.58829844507, 31.26413362024, 32.90949040736, ...
+            34.52817897487, 36.1232736804, 37.69729821835, 39.25235479077, ...
+            40.7902167069, 42.31239633168, 43.82019596452, 45.31474661813, ...
+            46.79703804156, 48.26794229084, 49.72823246643, 51.17859777738, ...
+            52.61965577617, 54.05196238858, 55.47602020575, 56.89228539335, ...
+            58.30117348979, 59.70306430443];
         REVAL_DWELL_REQUIRED = uint8(10);         % passes -> probation
         PROBATION_LENGTH = uint8(18);             % quiet epochs -> commit
         MAX_ANCHOR_AGE = uint32(234);             % epochs, 0.5 s each
-        MAX_MEAS = uint8(16);                     % max GNSS measurements per epoch (8 SV x code/carrier)
+        MAX_MEAS = uint8(30);                     % max measurements per epoch (host arrays are sized to 30)
 
 
     end

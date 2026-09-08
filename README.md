@@ -48,6 +48,17 @@ order and prints one PASS/FAIL line each.
   then a scripted attack with authority (latch, vetoes, one commit)
 - `run_recovery.m` — end-to-end demo with offline design and plots
 
+## Code generation
+
+The runtime path (`spoofMonitor2hz` and everything it calls) is written for
+MATLAB Coder: fixed-size padded buffers, one struct layout per type from
+`STRUCT_SPF`, `uint8` enumeration modes, no cells, varargin, dynamic
+fields, function handles or try/catch. `tools/codegenSpoofMonitor.m`
+(MATLAB only) runs `coder.screener` on the call tree and builds a C library
+with the entry-point types taken from the `STRUCT_SPF` zero constructors.
+The gate must only run in navigation mode (see the alignment section of
+`docs/HOST_2HZ_WIRING.m`).
+
 ## Regression
 
 `reference/` holds the console output of both scripts from the author's

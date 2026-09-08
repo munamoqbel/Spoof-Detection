@@ -100,6 +100,31 @@
 % end
 %
 % ----------------------------------------------------------------------
+%  alignment vs navigation mode
+% ----------------------------------------------------------------------
+%   propTel is only accumulated in NAVIGATION mode; in ALIGNMENT the host
+%   publishes the defaults (accumPhi = I, accumQ = 0). The gate must NOT
+%   run on those: with Q = 0 its coast covariance never grows, the SS
+%   variance sigma_SS^2 = P_C - P_KF is underestimated, false alarms
+%   follow, and a latch/COAST during alignment would stop the KF updates
+%   the alignment needs. Wire it as:
+%
+% if ~inNavigationMode                       % alignment (or re-alignment)
+%     KF        = setKF(kfUpdate, KF);       % existing path, untouched
+%     spoofTel  = STRUCT_SPF.zeroTel;        % mode NOMINAL, no commands
+%     spoofMode = CST_spfMode.NOMINAL;
+%     firstCall = true;                      % gate re-arms on the first navigation epoch
+% else
+%     spoofTel  = spoofMonitor2hz(kfMeas, propTel, firstCall);   % as above
+%     firstCall = false;
+%     ...
+% end
+%
+%   On the first navigation epoch resetRequest = true makes that epoch's
+%   (x+, P+) the startup anchor and the pool starts empty; the first
+%   window closes clean 10 epochs (5 s) later and takes over as anchor.
+%
+% ----------------------------------------------------------------------
 %  what the 100 Hz side must do
 % ----------------------------------------------------------------------
 %   - nothing new: spfAccumProp already provides propTel; KF.stateFB is

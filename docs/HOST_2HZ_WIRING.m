@@ -12,8 +12,9 @@
 % is not the navigation error. The gate therefore never uses an absolute
 % state: it accumulates the update increments  dx = xPost - xPrior  (= K*y)
 % of whichever filter is ACTIVE, propagated with the host's own interval
-% matrices. Every decision it returns is an increment to apply through the
-% host's normal setKF path, or a mode.
+% matrices. Every decision it returns is either a mode or a complete
+% (x+, P+) for the operational KF to be passed through the host's normal
+% setKF, unchanged.
 %
 % ----------------------------------------------------------------------
 %  inputs the gate needs from kfUpdate (this epoch, first numMeas rows)
@@ -75,12 +76,12 @@
 % % coast); no stateFB is produced, so the mechanization coasts by itself.
 %
 % if spoofTel.nav.applyCorrection                          % LATCH or COMMIT
-%     % treat the correction as this epoch's update result of the
-%     % OPERATIONAL KF and run your normal bookkeeping on it:
-%     kfCorr            = KF;
-%     kfCorr.states     = KF.states + spoofTel.nav.correction;
-%     kfCorr.covariance = spoofTel.nav.covar;
-%     KF = setKF(kfCorr, KF);                              % feeds back pos/vel/att, biases cumulative
+%     % (nav.state, nav.covar) is a complete update result for the
+%     % OPERATIONAL KF: hand it to your normal setKF, unchanged
+%     kfClean            = kfUpdate;
+%     kfClean.states     = spoofTel.nav.state;
+%     kfClean.covariance = spoofTel.nav.covar;
+%     KF = setKF(kfClean, KF);                             % sets stateFB and states as usual
 % end
 %
 % if spoofTel.kfCommand.reseedKF                           % probation opens
@@ -100,9 +101,9 @@
 % ----------------------------------------------------------------------
 %  sign convention check (do once)
 % ----------------------------------------------------------------------
-%   In NOMINAL, feeding back an update increment dx = xPost - xPrior moves
-%   the navigation solution by the same amount the gate calls 'correction'.
-%   The latch rule above assumes exactly that: it reuses your setKF, so no
-%   sign is chosen by the gate. Verify with the QUICKSTART step-0 test
+%   nav.state is built from this epoch's x+ of the active filter in your
+%   own state space (x+ minus the anchor separation at LATCH; the trial's
+%   x+ at COMMIT), so setKF sees exactly what a kfUpdate result looks like
+%   and no sign is chosen by the gate. Verify with the QUICKSTART step-0 test
 %   (add +10 m to z along H(:,idxD); the solution must move +10 m), then
 %   with a scripted latch in shadow mode.

@@ -84,8 +84,8 @@ for epoch = 1:num_epochs
     else
         [kf_x, kf_P] = insCoast(kf_x, kf_P, propTel);    % extrapolated only (coast)
     end
-    if spoofTel.nav.applyCorrection                      % LATCH or COMMIT
-        kf_x = kf_x + spoofTel.nav.correction;
+    if spoofTel.nav.applyCorrection                      % LATCH or COMMIT: setKF(nav.state, nav.covar)
+        kf_x = spoofTel.nav.state;
         kf_P = spoofTel.nav.covar;
     end
     if spoofTel.kfCommand.reseedKF                       % probation opens

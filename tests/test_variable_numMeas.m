@@ -50,7 +50,7 @@ for variant = 1:2
         [sys, tel] = protectedNav(sys, kfMeas, propTel, k);
         mode = tel.info.mode;
         if kfUpd, kf_x = post; kf_P = postP; else, [kf_x, kf_P] = insCoast(kf_x, kf_P, propTel); end
-        if tel.nav.applyCorrection, kf_x = kf_x + tel.nav.correction; kf_P = tel.nav.covar; end
+        if tel.nav.applyCorrection, kf_x = tel.nav.state; kf_P = tel.nav.covar; end
         if tel.kfCommand.reseedKF, tr_x = kf_x; tr_P = kf_P; end
         st(k) = tel.info.mode; xn(:, k) = kf_x;
         al(k) = tel.info.ssAlarm || tel.info.cpiAlarm;

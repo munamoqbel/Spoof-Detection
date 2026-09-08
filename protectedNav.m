@@ -17,10 +17,11 @@
 % HOST CONTRACT (see docs/HOST_2HZ_WIRING.m)
 %   - every epoch: kfMeas from the ACTIVE filter's update (operational KF
 %     in NOMINAL/COAST, trial in PROBATION)
-%   - nav.applyCorrection true (LATCH, COMMIT): treat
-%         x+ = KF.states + nav.correction,  P+ = nav.covar
-%     as this epoch's update result of the OPERATIONAL KF and run the usual
-%     feedback bookkeeping on it
+%   - nav.applyCorrection true (LATCH, COMMIT): pass (nav.state, nav.covar)
+%     to the normal setKF as this epoch's update result of the OPERATIONAL
+%     KF (LATCH: x+ of the operational KF minus the anchor separation;
+%     COMMIT: the trial's x+, which by construction equals the coasting
+%     KF.states plus the accumulated trial increments)
 %   - kfCommand.reseedKF true (probation opens): trial <- copy of the
 %     operational KF (covariance kfCommand.reseedCov)
 %
@@ -46,7 +47,8 @@ info      = STRUCT_SPF.zeroInfo;
 kfCommand = STRUCT_SPF.zeroCommand;
 numStates = CST_gnssHybrid.NO_STATES;
 applyCorrection = false;
-correction      = zeros(numStates, 1);
+correction      = zeros(numStates, 1);    % increment relative to the OPERATIONAL KF
+navState        = kfMeas.postState;       % absolute x+ to hand to setKF (LATCH / COMMIT)
 
 Phi = propTel.accumPhi;
 Q   = propTel.accumQ;
@@ -97,6 +99,7 @@ switch sys.mode
                 % anchor window opened) and take the coast covariance
                 applyCorrection       = true;
                 correction            = -sys.anchor.separation;
+                navState              = kfMeas.postState + correction;   % operational x+ - separation
                 sys.coastCov          = sys.anchor.covariance;
                 info.eventAnchorEpoch = sys.anchor.epoch;
             else
@@ -198,7 +201,8 @@ switch sys.mode
                 % ---- COMMIT (handback): host solution <- trial ----
                 info.eventHandback = true;
                 applyCorrection    = true;
-                correction         = sys.probSep;          % trial - coast
+                correction         = sys.probSep;          % trial - coast (relative to the operational KF)
+                navState           = kfMeas.postState;     % the trial's x+ IS the clean solution
                 sys.coastCov       = kfMeas.postCov;
 
                 % just certified by a full quiet probation: new anchor
@@ -220,7 +224,7 @@ sigmaPosition = zeros(3, 1);
 for axisIdx = 1:3
     sigmaPosition(axisIdx) = sqrt(max(sys.coastCov(axisIdx, axisIdx), 0.0));
 end
-nav = STRUCT_SPF.setNav(applyCorrection, correction, sys.coastCov, sigmaPosition);
+nav = STRUCT_SPF.setNav(applyCorrection, navState, correction, sys.coastCov, sigmaPosition);
 
 info.mode        = sys.mode;
 info.dwellCount  = sys.dwellCount;

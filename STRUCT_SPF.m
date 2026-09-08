@@ -377,17 +377,20 @@ classdef STRUCT_SPF
             command = STRUCT_SPF.setCommand(reseedKF, reseedCov);
         end
 
-        function [nav] = setNav(applyCorrection, correction, covar, sigmaPosition)
-            % applyCorrection true on LATCH and COMMIT epochs: the host must
-            % treat  x+ = KF.states + correction,  P+ = covar  as this epoch's
-            % update result for the OPERATIONAL KF and run its normal
-            % feedback bookkeeping on it. Otherwise correction is zero.
+        function [nav] = setNav(applyCorrection, state, correction, covar, sigmaPosition)
+            % applyCorrection true on LATCH and COMMIT epochs: (state, covar)
+            % is a complete update result (x+, P+) for the OPERATIONAL KF,
+            % expressed in the host's KF-state space. The host passes it to
+            % its normal setKF exactly like any kfUpdate result.
+            % correction = state - (this epoch's x+ of the active filter) is
+            % the same information as an increment (diagnostics / harness).
 
             % Define structure
             nav = struct( ...
                 'applyCorrection', logical(applyCorrection), ...
-                'correction',      correction, ...    % [n x 1] increment to the solution
-                'covar',           covar, ...         % [n x n] protected-solution covariance
+                'state',           state, ...         % [n x 1] x+ to hand to setKF
+                'correction',      correction, ...    % [n x 1] increment form of the same
+                'covar',           covar, ...         % [n x n] P+ / protected-solution covariance
                 'sigmaPosition',   sigmaPosition);    % [3 x 1] 1-sigma of position
         end
 
@@ -395,7 +398,7 @@ classdef STRUCT_SPF
 
             % Init values
             n = CST_gnssHybrid.NO_STATES;
-            nav = STRUCT_SPF.setNav(false, zeros(n, 1), eye(n), zeros(3, 1));
+            nav = STRUCT_SPF.setNav(false, zeros(n, 1), zeros(n, 1), eye(n), zeros(3, 1));
         end
 
     end

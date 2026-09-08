@@ -1,2 +1,0 @@
-function close(varargin)
-end

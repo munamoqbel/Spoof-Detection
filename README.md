@@ -35,8 +35,8 @@ bookkeeping of `KF.states`.
 
 ## Tests
 
-Run `runAllTests` from the repo root before integrating (MATLAB; or Octave via
-`tools/octave_shim/run_all_headless.m`). It runs the four scripts below in
+Run `runAllTests` from the repo root before integrating (MATLAB; for Octave see
+`tools/octave_shim/README.md`). Do not add `tools/octave_shim` to a MATLAB path. It runs the four scripts below in
 order and prints one PASS/FAIL line each.
 
 - `run_scheduler_test.m` — 100 Hz + 2 Hz architecture (T1-T6)
@@ -51,6 +51,5 @@ order and prints one PASS/FAIL line each.
 ## Regression
 
 `reference/` holds the console output of both scripts from the author's
-MATLAB run. `tools/octave_shim/` lets both scripts run under GNU Octave
-(constants and architecture tests reproduce exactly; event epochs differ by
-the RNG stream).
+MATLAB run; the current engine reproduces it exactly on MATLAB. `tools/octave_shim/`
+lets everything run under GNU Octave (event epochs differ by the RNG stream).

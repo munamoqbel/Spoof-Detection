@@ -1,22 +1,19 @@
-# Octave regression shim (NOT for the simulation)
+# Octave regression shim (NOT for MATLAB, NOT for the simulation)
 
-Lets `run_recovery.m` and `run_scheduler_test.m` run headless under GNU
-Octave (tested 8.4 + statistics package) without MATLAB:
+Lets the harness and tests run headless under GNU Octave (tested 8.4 +
+statistics package). Nothing in this folder may be added to a MATLAB path:
+`CST_spfMode_octave.txt` is a constant-property stand-in for the
+enumeration class, and `octaveHeadless.m` writes it plus no-op plotting
+stubs (`figure`, `plot`, ...) into a temporary folder outside the repo for
+the session only. Any copy of those stubs on a MATLAB path silently
+suppresses all figures.
 
-- `CST_spfMode.m` — Octave has no `enumeration` classes; this exposes the
-  same three `uint8` constants as Constant properties.
-- `pf.m` — Octave cannot call a script-local function defined after its use.
-- plotting stubs (`figure`, `plot`, `subplot`, ...) — headless no-ops.
-- `run_recovery_headless.m`, `run_sched_headless.m` — drivers.
+From the repo root:
 
-Run from the repo root:
-
-    SHIM=$PWD/tools/octave_shim octave --no-gui --quiet tools/octave_shim/run_sched_headless.m
+    octave --no-gui --quiet --eval "addpath tools/octave_shim; octaveHeadless; runAllTests"
+    octave --no-gui --quiet --eval "addpath tools/octave_shim; octaveHeadless; run_recovery"
 
 Octave's `rng(42)`/`randn` stream differs from MATLAB's, so the random
-geometry and noise differ: expect the same design constants, the same
-qualitative events (latch on all 3 axes at attack onset, 4 probation
-attempts / 3 vetoes / 1 commit, handback at epoch 208) but not bit-exact
-epochs. Bit-exact regression against `reference/*.txt` needs MATLAB.
-
-Do NOT copy this folder into the target simulation.
+geometry differs: expect the same design constants and the same qualitative
+events, not bit-exact epochs. Bit-exact regression against `reference/*.txt`
+needs MATLAB.

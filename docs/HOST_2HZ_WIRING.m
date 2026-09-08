@@ -42,20 +42,20 @@
 %    a host that does have S can call STRUCT_SPF.setKfMeas instead)
 %
 % ----------------------------------------------------------------------
-%  2 Hz function
+%  2 Hz function (complete skeleton; ONE setKF per epoch, never two)
 % ----------------------------------------------------------------------
-% function [KF, kfTel, spoofTel] = twoHzFunction(navOut, KF, satellite, propTel, ...)
+% function [KF, kfTel, spoofTel] = twoHzFunction(navOut, KF, satellite, propTel, inNavigationMode, ...)
 %
 % persistent trialKF spoofMode firstCall
 % if isempty(trialKF)
-%     trialKF   = KF;
+%     trialKF   = KF;                        % set once as a KF structure
 %     spoofMode = CST_spfMode.NOMINAL;
 %     firstCall = true;
 % end
 %
-% inProbation = (spoofMode == CST_spfMode.PROBATION);
-% kfUpdated   = (spoofMode == CST_spfMode.NOMINAL);
+% inProbation = (spoofMode == CST_spfMode.PROBATION);   % mode BEFORE this epoch's gate call
 %
+% % ---- 1. active filter: trial in PROBATION, operational KF otherwise ----
 % if inProbation
 %     % bring the trial to this epoch with the SAME interval matrices the
 %     % 100 Hz side used for KF, then let it eat the GNSS. NO setKF
@@ -65,39 +65,65 @@
 %     trialKF.covariance = (trialKF.covariance + trialKF.covariance') / 2;
 %     activeKF = trialKF;
 % else
-%     activeKF = KF;                      % NOMINAL: normal; COAST: scratch copy
+%     activeKF = KF;                         % NOMINAL: normal; COAST: scratch copy
 % end
 %
+% % ---- 2. your pipeline on the active filter (+ 4 new outputs) ----
 % xPrior = activeKF.states;  PPrior = activeKF.covariance;
-% [kfUpdate, y, H, R, numMeas] = kfUpdate(measurement, activeKF, ...);      % your pipeline + 4 outputs
+% [kfUpdate, y, H, R, numMeas] = kfUpdate(measurement, activeKF, ...);
 % kfMeas = STRUCT_SPF.kfMeasFromUpdate(y, H, R, numMeas, xPrior, PPrior, ...
 %                                      kfUpdate.states, kfUpdate.covariance);
 %
-% spoofTel  = spoofMonitor2hz(kfMeas, propTel, firstCall);
-% firstCall = false;
-% spoofMode = spoofTel.info.mode;
-%
-% if inProbation
-%     trialKF = kfUpdate;                                 % trial keeps the update (no setKF)
-% elseif kfUpdated
-%     KF = setKF(kfUpdate, KF);                           % NOMINAL: your existing path
+% % ---- 3. gate (navigation mode only, see next section) ----
+% if inNavigationMode
+%     spoofTel  = spoofMonitor2hz(kfMeas, propTel, firstCall);
+%     firstCall = false;
+% else
+%     spoofTel  = STRUCT_SPF.zeroTel;        % NOMINAL, no commands
+%     firstCall = true;                      % re-arm on the first navigation epoch
 % end
-% % COAST: KF is left as extrapolated by the 100 Hz side (= the INS-only
-% % coast); no stateFB is produced, so the mechanization coasts by itself.
+% spoofMode = spoofTel.info.mode;            % mode AFTER the gate call
 %
-% if spoofTel.nav.applyCorrection                          % LATCH or COMMIT
-%     % (nav.state, nav.covar) is a complete update result for the
-%     % OPERATIONAL KF: hand it to your normal setKF, unchanged
+% % ---- 4. apply the epoch's result: exactly ONE setKF on the operational KF ----
+% if spoofTel.nav.applyCorrection
+%     % LATCH (x+ of the operational KF minus the anchor separation) or
+%     % COMMIT (the trial's x+): a complete (x+, P+) for the OPERATIONAL KF.
+%     % Hand it to your normal setKF so stateFB and states are set as usual.
+%     % Do NOT also run the normal setKF this epoch, and do NOT write
+%     % KF.states / KF.covariance directly (the mechanization would never
+%     % receive the correction).
 %     kfClean            = kfUpdate;
 %     kfClean.states     = spoofTel.nav.state;
 %     kfClean.covariance = spoofTel.nav.covar;
-%     KF = setKF(kfClean, KF);                             % sets stateFB and states as usual
+%     KF = setKF(kfClean, KF);
+% elseif ~inProbation && (spoofMode == CST_spfMode.NOMINAL)
+%     KF = setKF(kfUpdate, KF);              % NOMINAL -> NOMINAL: your existing path
 % end
+% % COAST (and the PROBATION epochs): KF is left exactly as the 100 Hz side
+% % extrapolated it (= the INS-only coast); no stateFB is produced.
 %
-% if spoofTel.kfCommand.reseedKF                           % probation opens
-%     trialKF = KF;                                        % trial starts ON the coast
+% % ---- 5. trial bookkeeping ----
+% if inProbation
+%     trialKF = kfUpdate;                    % trial keeps its update (no setKF); on
+% end                                        % VETO it is simply never used again
+% if spoofTel.kfCommand.reseedKF             % probation opens THIS epoch
+%     trialKF            = KF;               % trial starts ON the coast
 %     trialKF.covariance = spoofTel.kfCommand.reseedCov;   % (equals KF.covariance)
 % end
+%
+% Epoch-by-epoch this gives:
+%   NOMINAL->NOMINAL   setKF(kfUpdate)
+%   NOMINAL->COAST     setKF(kfClean) only            (latch)
+%   COAST->COAST       nothing                        (KF coasts)
+%   COAST->PROBATION   nothing; trialKF <- KF         (reseed)
+%   PROBATION->PROB.   trialKF <- kfUpdate
+%   PROBATION->COAST   nothing                        (veto, trial dropped)
+%   PROBATION->NOMINAL setKF(kfClean) only            (commit)
+%
+% If you prefer to reseed at the START of the next probation epoch (as in
+% an earlier sketch), copy KF there and skip step 1's propagation for that
+% one epoch: KF.states / KF.covariance were already extrapolated by the
+% 100 Hz side, so a second propagation would double it.
 %
 % ----------------------------------------------------------------------
 %  alignment vs navigation mode
@@ -107,18 +133,9 @@
 %   run on those: with Q = 0 its coast covariance never grows, the SS
 %   variance sigma_SS^2 = P_C - P_KF is underestimated, false alarms
 %   follow, and a latch/COAST during alignment would stop the KF updates
-%   the alignment needs. Wire it as:
-%
-% if ~inNavigationMode                       % alignment (or re-alignment)
-%     KF        = setKF(kfUpdate, KF);       % existing path, untouched
-%     spoofTel  = STRUCT_SPF.zeroTel;        % mode NOMINAL, no commands
-%     spoofMode = CST_spfMode.NOMINAL;
-%     firstCall = true;                      % gate re-arms on the first navigation epoch
-% else
-%     spoofTel  = spoofMonitor2hz(kfMeas, propTel, firstCall);   % as above
-%     firstCall = false;
-%     ...
-% end
+%   the alignment needs. Step 3 of the skeleton above handles it: in
+%   alignment the gate is skipped, spoofTel is zeroTel (NOMINAL, no
+%   commands) and firstCall is re-armed.
 %
 %   On the first navigation epoch resetRequest = true makes that epoch's
 %   (x+, P+) the startup anchor and the pool starts empty; the first

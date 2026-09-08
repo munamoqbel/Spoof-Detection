@@ -107,11 +107,16 @@ else
     fprintf('  FAIL  q=%.1f <= T_N=%.1f\n\n', q, T_N_t); fail=fail+1;
 end
 
-%% Test 7: SS false-alarm rate under H0 (truth driven by the KF's own Q)
-% NOTE: generate_test_data uses a static truth without process noise, so the
-% KF is conservative there and the SS spread is below P_C - P_KF (0 alarms).
-% Here the truth carries w ~ N(0, Q) so the KF is exactly matched.
-fprintf('Test 7: SS P_FA under H0 ...\n');
+%% Test 7: SS calibration under H0 (truth driven by the KF's own Q)
+% Checks Eq. 50 directly: on a long clean run, over NON-overlapping windows,
+% the normalised separation r = q_SS / sigma_SS must be N(0,1):
+%   mean(r^2) ~ 1  and  P(|r| > 2) ~ 4.55 %.
+% (Counting 1e-3 exceedances over overlapping windows is too clustered to
+% be a useful test; that count is printed for information only.)
+% NOTE: generate_test_data uses a static truth without process noise, so
+% the KF is conservative there and sigma_SS overstates the spread; here
+% the truth carries w ~ N(0, Q) so the KF is exactly matched.
+fprintf('Test 7: SS calibration under H0 ...\n');
 [Phi, Q] = build_Phi_Q(prm_boot);
 propTel = STRUCT_SPF.setPropTel(Phi, Q);
 sqQ = sqrt(diag(Q)); sqV = sqrt(V_diag);
@@ -121,8 +126,12 @@ for it = 1:200                                % Riccati warm-up
     Pb = Phi*P*Phi' + Q; Sk = H_t*Pb*H_t' + V; L = Pb*H_t'/Sk;
     P = (eye(n_states) - L*H_t)*Pb; P = (P+P')/2;
 end
-N_run = 600; x_true = zeros(n_states,1); x_hat = zeros(n_states,1);
-xh_all = zeros(n_states, N_run); Ph_all = zeros(n_states, n_states, N_run);
+N  = double(CST_spfParam.WINDOW_LENGTH);
+N_run = 600 * N;                              % 600 independent windows
+x_true = zeros(n_states,1); x_hat = zeros(n_states,1);
+r_all = zeros(1, 3 * (N-1) * 600); n_r = 0;
+n_1e3 = 0; k_1e3 = norminv(1 - 1e-3/2);
+dS = zeros(n_states, 1); cP = P; x_prev = x_hat;
 for k = 1:N_run
     x_true = Phi*x_true + sqQ .* randn(n_states,1);
     z  = H_t*x_true + sqV .* randn(m_meas,1);
@@ -130,23 +139,27 @@ for k = 1:N_run
     Sk = H_t*Pb*H_t' + V; Sk = (Sk+Sk')/2; L = Pb*H_t'/Sk;
     x_hat = xb + L*(z - H_t*xb);
     P = (eye(n_states) - L*H_t)*Pb; P = (P+P')/2;
-    xh_all(:,k) = x_hat; Ph_all(:,:,k) = P;
-end
-N  = double(CST_spfParam.WINDOW_LENGTH);
-k_ss = norminv(1 - 1e-3/2);                  % two-sided 1e-3 per test
-n_test = 0; n_al = 0;
-for k0 = 1:(N_run - N)
-    dS = zeros(n_states, 1); cP = Ph_all(:, :, k0);
-    for k = k0+1 : k0+N-1
-        inc = xh_all(:, k) - Phi * xh_all(:, k-1);            % K*y (increment form)
-        [dS, cP, r] = ssMonitor(dS, cP, inc, Ph_all(:, :, k), propTel, k_ss, k_MD_t);
-        n_test = n_test + 3; n_al = n_al + sum(r.alarmPerAxis);
+    if mod(k, N) == 1                         % open a fresh window on this epoch
+        dS = zeros(n_states, 1); cP = P;
+    else
+        inc = x_hat - Phi * x_prev;           % K*y (increment form)
+        [dS, cP, r] = ssMonitor(dS, cP, inc, P, propTel, 2.0, k_MD_t);   % gate at 2 sigma
+        rr = r.separation ./ max(r.sigmaSeparation, 1e-12);
+        r_all(n_r+1 : n_r+3) = rr; n_r = n_r + 3;
+        n_1e3 = n_1e3 + sum(abs(rr) > k_1e3);
     end
+    x_prev = x_hat;
 end
-if n_al >= 1 && n_al <= 4 * n_test * 1e-3
-    fprintf('  PASS  alarms=%d over %d tests (expect ~%d)\n\n', n_al, n_test, round(n_test*1e-3)); pass=pass+1;
+r_all = r_all(1:n_r);
+ms  = mean(r_all.^2);
+p2  = mean(abs(r_all) > 2);
+ok7 = abs(ms - 1) < 0.15 && p2 > 0.025 && p2 < 0.07;
+fprintf('  mean(r^2) = %.3f (expect 1) | P(|r|>2) = %.3f (expect 0.046) | 1e-3 exceedances = %d of %d (expect ~%d, info)\n', ...
+    ms, p2, n_1e3, n_r, round(n_r*1e-3));
+if ok7
+    fprintf('  PASS\n\n'); pass=pass+1;
 else
-    fprintf('  FAIL  alarms=%d over %d tests (expect ~%d)\n\n', n_al, n_test, round(n_test*1e-3)); fail=fail+1;
+    fprintf('  FAIL\n\n'); fail=fail+1;
 end
 
 %% Test 8: SS detects a 1 m KF-vs-coast separation with the design gate

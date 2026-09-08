@@ -108,7 +108,7 @@ classdef STRUCT_SPF
 
             % ---- find the first free slot ----
             slotFound = false;
-            freeSlot = 1;
+            freeSlot = uint8(1);
             windowLength = CST_spfParam.WINDOW_LENGTH;
 
             for wIndx = 1:windowLength
@@ -304,7 +304,7 @@ classdef STRUCT_SPF
                 'revalComputed',         logical(revalComputed), ...
                 'dwellCount',            dwellCount, ...
                 'eventLatched',          logical(eventLatched), ...
-                'eventAnchorEpoch',      eventAnchorEpoch, ...
+                'eventAnchorEpoch',      uint32(eventAnchorEpoch), ...
                 'eventProbationStarted', logical(eventProbationStarted), ...
                 'eventProbationVetoed',  logical(eventProbationVetoed), ...
                 'eventHandback',         logical(eventHandback), ...
@@ -324,7 +324,7 @@ classdef STRUCT_SPF
             revalComputed         = false;
             dwellCount            = 0;
             eventLatched          = false;
-            eventAnchorEpoch      = 0;
+            eventAnchorEpoch      = uint32(0);
             eventProbationStarted = false;
             eventProbationVetoed  = false;
             eventHandback         = false;

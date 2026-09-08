@@ -96,7 +96,7 @@ switch sys.mode
                 info.eventAnchorEpoch = sys.anchor.epoch;
             else
                 % no clean window ever closed: fallback unavailable.
-                info.eventAnchorEpoch = 0;
+                info.eventAnchorEpoch = uint32(0);
                 info.anchorMissing    = true;
             end
 

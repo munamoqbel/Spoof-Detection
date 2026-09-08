@@ -46,7 +46,7 @@ mode = CST_spfMode.NOMINAL;
 filter = STRUCT_SPF.setFilter(zeros(prm.n_states, 1), P0);
 trial = STRUCT_SPF.setTrial(zeros(prm.n_states, 1), P0);
 pool = STRUCT_SPF.zeroMonitorPool;
-anchor = STRUCT_SPF.setAnchor(false, zeros(prm.n_states, 1), P0, uint32(0));
+anchor = STRUCT_SPF.setAnchor(true, zeros(prm.n_states, 1), P0, uint32(0));   % initial state = startup anchor
 sys = STRUCT_SPF.setSys(mode, filter, trial, pool, anchor, 0, 0, 0);
 
 % ----------------------------------------------------------------------

@@ -141,7 +141,7 @@ else
         fprintf('Latch %d : alarm at epoch %d (t = %.1f s), axis/axes [%s]\n', ...
             i, td, td/fs, num2str(ax));
         ta = out.ev.t_anchor(i);
-        if isnan(ta)
+        if isnan(ta) || ta == 0
             fprintf('          NO clean anchor available - froze current state\n');
         else
             fprintf('          anchored to clean window closed at epoch %d (t = %.1f s)\n', ta, ta/fs);

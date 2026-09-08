@@ -5,7 +5,11 @@
 % ASSUMPTIONS AND LIMITATIONS:
 % - MAX_ANCHOR_AGE:
 % Max anchor age at latch; drift budget @ 10 m alert limit (harness Phi/Q,
-% 02/09/2026); older anchor -> fallback refused + anchorMissing
+% 02/09/2026); older anchor -> fallback refused + anchorMissing.
+% NOTE: the anchor is refreshed on every alarm-free clean close, so at a
+% latch it is normally 1 epoch old; this guard only bites for the startup
+% anchor (initial state) before the first clean close. The real coasting
+% budget (max coast time, Implementation Guide rule 4) is not yet enforced.
 % - MAX_MEAS:
 % Upper bound on GNSS measurements per epoch. All monitor buffers are sized
 % to it; the per-epoch valid count (numMeas) selects the live rows.

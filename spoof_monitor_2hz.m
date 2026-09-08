@@ -70,7 +70,8 @@ if resetRequest || isempty(sys)
     filter = STRUCT_SPF.setFilter(initialState, initialCovariance);
     trial = STRUCT_SPF.setTrial(initialState, initialCovariance);
     pool = STRUCT_SPF.zeroMonitorPool;
-    anchor = STRUCT_SPF.setAnchor(false, initialState, initialCovariance, uint32(0));
+    % the initial state is the fallback until the first window closes clean
+    anchor = STRUCT_SPF.setAnchor(true, initialState, initialCovariance, uint32(0));
 
     sys = STRUCT_SPF.setSys(mode, filter, trial, pool, anchor, 0, 0, 0);
     epoch = uint32(0);

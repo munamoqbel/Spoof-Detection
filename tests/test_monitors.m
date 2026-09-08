@@ -113,7 +113,7 @@ end
 % Here the truth carries w ~ N(0, Q) so the KF is exactly matched.
 fprintf('Test 7: SS P_FA under H0 ...\n');
 [Phi, Q] = build_Phi_Q(prm_boot);
-spoofInfo.phiAcc = Phi; spoofInfo.qAcc = Q;
+propTel = STRUCT_SPF.setPropTel(Phi, Q);
 sqQ = sqrt(diag(Q)); sqV = sqrt(V_diag);
 rng(11);
 P = eye(n_states);
@@ -136,9 +136,10 @@ N  = double(CST_spfParam.WINDOW_LENGTH);
 k_ss = norminv(1 - 1e-3/2);                  % two-sided 1e-3 per test
 n_test = 0; n_al = 0;
 for k0 = 1:(N_run - N)
-    cS = xh_all(:, k0); cP = Ph_all(:, :, k0);
+    dS = zeros(n_states, 1); cP = Ph_all(:, :, k0);
     for k = k0+1 : k0+N-1
-        [cS, cP, r] = ssMonitor(cS, cP, xh_all(:, k), Ph_all(:, :, k), spoofInfo, k_ss, k_MD_t);
+        inc = xh_all(:, k) - Phi * xh_all(:, k-1);            % K*y (increment form)
+        [dS, cP, r] = ssMonitor(dS, cP, inc, Ph_all(:, :, k), propTel, k_ss, k_MD_t);
         n_test = n_test + 3; n_al = n_al + sum(r.alarmPerAxis);
     end
 end
@@ -150,9 +151,9 @@ end
 
 %% Test 8: SS detects a 1 m KF-vs-coast separation with the design gate
 fprintf('Test 8: SS detection under a separation ...\n');
-cS = xh_all(:, 100); cP = Ph_all(:, :, 100);
-xk = xh_all(:, 101); xk(3) = xk(3) + 1.0;
-[~, ~, r] = ssMonitor(cS, cP, xk, Ph_all(:, :, 101), spoofInfo);
+dS = zeros(n_states, 1); cP = Ph_all(:, :, 100);
+inc = xh_all(:, 101) - Phi * xh_all(:, 100); inc(3) = inc(3) + 1.0;
+[~, ~, r] = ssMonitor(dS, cP, inc, Ph_all(:, :, 101), propTel);
 if r.anyAlarm && r.alarmPerAxis(3) && ~r.alarmPerAxis(1)
     fprintf('  PASS  axis-3 alarm, PL=%.3f m\n\n', r.maxProtectionLevel); pass=pass+1;
 else
@@ -161,17 +162,17 @@ end
 
 %% Test 9: revalidation passes on consistent GNSS, fails on a 2 m offset
 fprintf('Test 9: revalidation ...\n');
-cP = Ph_all(:, :, 200); cS = xh_all(:, 200);
+cP = Ph_all(:, :, 200); cmp = zeros(n_states, 1);      % coast - prior = 0 (host not updating)
 S_r = H_t * cP * H_t' + V; S_r = (S_r + S_r')/2;
 [U_r, D_r] = eig(S_r); L_r = U_r * diag(sqrt(max(diag(D_r), 0)));
 n_ok = 0; n_tr = 500;
 for k = 1:n_tr
     y = L_r * randn(m_meas, 1);              % innovation vs the coast (prior = coast)
-    ok = revalidation(y, H_t, V, m_meas, cS, cS, cP);
+    ok = revalidation(y, H_t, V, m_meas, cmp, cP);
     n_ok = n_ok + ok;
 end
 y_off = L_r * randn(m_meas, 1) + H_t(:, 3) * 2.0;
-[ok_off, q_off] = revalidation(y_off, H_t, V, m_meas, cS, cS, cP);
+[ok_off, q_off] = revalidation(y_off, H_t, V, m_meas, cmp, cP);
 if n_ok >= 0.99 * n_tr && ~ok_off
     fprintf('  PASS  pass rate %.3f, offset q=%.1f rejected\n\n', n_ok/n_tr, q_off); pass=pass+1;
 else

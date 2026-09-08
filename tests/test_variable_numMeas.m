@@ -1,9 +1,9 @@
 %% test_variable_numMeas.m
 % The gate must accept a measurement count that changes every epoch
-% (satellites rise/set). Feeds the fed FSM (protectedNav) the harness
-% scenario with 5..8 satellites visible per epoch, two ways:
-%   (a) inputs padded to CST_spfParam.MAX_MEAS rows (Coder style)
-%   (b) inputs at their exact size (numMeas rows)
+% (satellites rise/set). Runs the host contract (docs/HOST_2HZ_WIRING.m)
+% on the harness scenario with 5..8 satellites visible per epoch, two ways:
+%   (a) kfMeas arrays padded to CST_spfParam.MAX_MEAS rows (Coder style)
+%   (b) kfMeas arrays at their exact size (numMeas rows)
 % and checks (a) == (b) bit-for-bit, no alarm before the attack, a latch
 % after attack onset, and a handback before the end.
 % Run from the repo root (MATLAB, or Octave with tools/octave_shim).
@@ -11,7 +11,7 @@
 prm_boot = kujur_params();
 [~, ~, H_all, ~, ~, Phi, Q, scn, z_all, V, P0] = ...
     generate_test_data(prm_boot, 42, 0.10, 0.5, [1 1 1]);
-spoofInfo.phiAcc = Phi; spoofInfo.qAcc = Q;
+propTel = STRUCT_SPF.setPropTel(Phi, Q);
 n      = prm_boot.n_states;
 mMax   = double(CST_spfParam.MAX_MEAS);
 N      = scn.N_total;
@@ -23,16 +23,21 @@ mk     = 2 * nSv;                     % code + carrier rows
 res = cell(1, 2);
 for variant = 1:2
     padded = (variant == 1);
-    mode = CST_spfMode.NOMINAL;
-    sys  = STRUCT_SPF.setSys(mode, STRUCT_SPF.setFilter(zeros(n,1), P0), ...
-        STRUCT_SPF.setTrial(zeros(n,1), P0), STRUCT_SPF.zeroMonitorPool, ...
-        STRUCT_SPF.setAnchor(false, zeros(n,1), P0, uint32(0)), 0, 0, 0);
-    kf_x = zeros(n, 1); kf_P = P0;
+    sys = STRUCT_SPF.zeroSys; sys.coastCov = P0;
+    sys.anchor = STRUCT_SPF.setAnchor(true, zeros(n,1), P0, uint32(0));
+    kf_x = zeros(n, 1); kf_P = P0; tr_x = kf_x; tr_P = P0; mode = CST_spfMode.NOMINAL;
     st = zeros(1, N); xn = zeros(n, N); det = []; hb = []; al = false(1, N);
     for k = 1:N
         m = mk(k);
         z = z_all(1:m, k); H = H_all(1:m, :, k); R = V(1:m, 1:m);
-        [kf_x, kf_P, y, S, ~, xp] = kalman_update_step(kf_x, kf_P, z, H, spoofInfo, R);
+        inProb = (mode == CST_spfMode.PROBATION); kfUpd = (mode == CST_spfMode.NOMINAL);
+        if inProb
+            [tr_x, tr_P, y, S, ~, xp] = kalman_update_step(tr_x, tr_P, z, H, propTel, R);
+            post = tr_x; postP = tr_P;
+        else
+            [ax, aP, y, S, ~, xp] = kalman_update_step(kf_x, kf_P, z, H, propTel, R);
+            post = ax; postP = aP;
+        end
         if padded
             yP = zeros(mMax, 1); yP(1:m) = y;
             SP = zeros(mMax);    SP(1:m, 1:m) = S;
@@ -41,11 +46,13 @@ for variant = 1:2
         else
             yP = y; SP = S; HP = H; RP = R;
         end
-        [sys, tel] = protectedNav(sys, yP, SP, HP, m, xp, kf_x, kf_P, RP, spoofInfo, k);
-        if tel.kfCommand.reseedKF
-            kf_x = tel.kfCommand.reseedState; kf_P = tel.kfCommand.reseedCov;
-        end
-        st(k) = tel.info.mode; xn(:, k) = tel.nav.state;
+        kfMeas = STRUCT_SPF.setKfMeas(yP, SP, HP, RP, m, xp, post, postP);
+        [sys, tel] = protectedNav(sys, kfMeas, propTel, k);
+        mode = tel.info.mode;
+        if kfUpd, kf_x = post; kf_P = postP; else, [kf_x, kf_P] = insCoast(kf_x, kf_P, propTel); end
+        if tel.nav.applyCorrection, kf_x = kf_x + tel.nav.correction; kf_P = tel.nav.covar; end
+        if tel.kfCommand.reseedKF, tr_x = kf_x; tr_P = kf_P; end
+        st(k) = tel.info.mode; xn(:, k) = kf_x;
         al(k) = tel.info.ssAlarm || tel.info.cpiAlarm;
         if tel.info.eventLatched,  det(end+1) = k; end %#ok<AGROW>
         if tel.info.eventHandback, hb(end+1)  = k; end %#ok<AGROW>

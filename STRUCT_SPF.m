@@ -1,23 +1,67 @@
 %******************************************************************************************
 % DESCRIPTION:
+% Struct constructors for the spoofing-detection gate (definitions only).
+% Every struct used by spoofMonitor2hz / protectedNav / monitorPool is built
+% here so Coder sees one fixed layout per type. All vector/matrix fields are
+% sized from CST_gnssHybrid.NO_STATES, CST_spfParam.MAX_MEAS and
+% CST_spfParam.WINDOW_LENGTH.
 %
-%
-% INPUTS:
-%
-% OUTPUTS:
+% STATE CONVENTION (host error-state EKF, closed loop):
+%   The gate never uses an absolute state. It accumulates the host KF's
+%   UPDATE INCREMENTS  dx = postState - priorState  (= K*y), propagated with
+%   the host's own interval matrices (propTel.accumPhi / accumQ). This is
+%   invariant to how the host splits its estimate between the mechanization
+%   feedback and the residual KF.states.
 %
 % ASSUMPTIONS AND LIMITATIONS:
 %
-%
 % REQUIREMENT TRACEABILITY:
-%   <traces to requirements (comma-separated list or one trace per line)>
 %
 %******************************************************************************************
 %#codegen
 classdef STRUCT_SPF
     methods(Static)
+
+        %% ---------------- inputs from the host ----------------
+        function [kfMeas] = setKfMeas(innovation, innovationCov, obsMatrix, ...
+                measNoiseCov, numMeas, priorState, postState, postCov)
+
+            % Define structure (rows/cols 1:numMeas are valid)
+            kfMeas = struct( ...
+                'innovation',    innovation, ...      % y = z - h(xPrior)      [MAX_MEAS x 1]
+                'innovationCov', innovationCov, ...   % S = H P H' + R         [MAX_MEAS x MAX_MEAS]
+                'obsMatrix',     obsMatrix, ...       % H(x)                   [MAX_MEAS x n]
+                'measNoiseCov',  measNoiseCov, ...    % R                      [MAX_MEAS x MAX_MEAS]
+                'numMeas',       uint8(numMeas), ...  % valid rows this epoch (0 = no GNSS)
+                'priorState',    priorState, ...      % x_bar into the update  [n x 1]
+                'postState',     postState, ...       % x+ out of the update   [n x 1]
+                'postCov',       postCov);            % P+                     [n x n]
+        end
+
+        function [kfMeas] = zeroKfMeas
+            m = double(CST_spfParam.MAX_MEAS);
+            n = CST_gnssHybrid.NO_STATES;
+            kfMeas = STRUCT_SPF.setKfMeas(zeros(m, 1), zeros(m, m), zeros(m, n), ...
+                zeros(m, m), 0, zeros(n, 1), zeros(n, 1), eye(n));
+        end
+
+        function [propTel] = setPropTel(accumPhi, accumQ)
+
+            % Define structure: interval matrices accumulated on the 100 Hz
+            % side since the previous GNSS epoch (spfAccumProp)
+            propTel = struct( ...
+                'accumPhi', accumPhi, ...
+                'accumQ',   accumQ);
+        end
+
+        function [propTel] = zeroPropTel
+            n = CST_gnssHybrid.NO_STATES;
+            propTel = STRUCT_SPF.setPropTel(eye(n), zeros(n, n));
+        end
+
+        %% ---------------- monitor pool ----------------
         function [pool] = setMonitorPool(active, hadAlarm, windowAge, ...
-                coastState, coastCovariance, innovationBuffer, ...
+                separation, coastCovariance, innovationBuffer, ...
                 innovationCovBuffer, obsMatrixBuffer, numMeasBuffer)
 
             % Define structure
@@ -25,8 +69,8 @@ classdef STRUCT_SPF
                 'active',              logical(active), ...
                 'hadAlarm',            logical(hadAlarm), ...
                 'windowAge',           windowAge, ...
-                'coastState',          coastState, ...
-                'coastCovariance',     coastCovariance, ...
+                'separation',          separation, ...        % d_w = KF - coast (increments) [n x N]
+                'coastCovariance',     coastCovariance, ...   % P_C per window               [n x n x N]
                 'innovationBuffer',    innovationBuffer, ...
                 'innovationCovBuffer', innovationCovBuffer,...
                 'obsMatrixBuffer',     obsMatrixBuffer, ...
@@ -45,7 +89,7 @@ classdef STRUCT_SPF
             hadAlarm = false(windowLength, 1);
             windowAge = zeros(windowLength, 1);
 
-            coastState      = zeros(numStates, windowLength);
+            separation      = zeros(numStates, windowLength);
             coastCovariance = zeros(numStates, numStates, windowLength);
 
             innovationBuffer = zeros(num_meas, windowLength, windowLength);
@@ -57,27 +101,27 @@ classdef STRUCT_SPF
 
             % Set the output
             pool = STRUCT_SPF.setMonitorPool(active, hadAlarm, windowAge, ...
-                coastState, coastCovariance, innovationBuffer, ...
+                separation, coastCovariance, innovationBuffer, ...
                 innovationCovBuffer, obsMatrixBuffer, numMeasBuffer);
         end
 
-        function [ssMonitor] = setMonitorReport(alarmPerAxis, anyAlarm, ...
+        function [report] = setMonitorReport(alarmPerAxis, anyAlarm, ...
                 maxProtectionLevel, ssAlarm, cpiAlarm, cleanCloseFound, ...
-                cleanCloseState, cleanCloseCovar)
+                cleanCloseSeparation, cleanCloseCovar)
 
             % Define structure
-            ssMonitor = struct( ...
-                'alarmPerAxis',       logical(alarmPerAxis), ...
-                'anyAlarm',           logical(anyAlarm), ...
-                'maxProtectionLevel', maxProtectionLevel, ...
-                'ssAlarm',            logical(ssAlarm), ...
-                'cpiAlarm',           logical(cpiAlarm), ...
-                'cleanCloseFound',    logical(cleanCloseFound), ...
-                'cleanCloseState',    cleanCloseState, ...
-                'cleanCloseCovar',    cleanCloseCovar);
+            report = struct( ...
+                'alarmPerAxis',         logical(alarmPerAxis), ...
+                'anyAlarm',             logical(anyAlarm), ...
+                'maxProtectionLevel',   maxProtectionLevel, ...
+                'ssAlarm',              logical(ssAlarm), ...
+                'cpiAlarm',             logical(cpiAlarm), ...
+                'cleanCloseFound',      logical(cleanCloseFound), ...
+                'cleanCloseSeparation', cleanCloseSeparation, ...
+                'cleanCloseCovar',      cleanCloseCovar);
         end
 
-        function [ssMonitor] = zeroMonitorReport
+        function [report] = zeroMonitorReport
 
             % Init values
             axisAlarm = zeros(1, 3, 'logical');
@@ -86,7 +130,7 @@ classdef STRUCT_SPF
             zeroState = zeros(CST_gnssHybrid.NO_STATES, 1);
             zeroCovar = zeros(CST_gnssHybrid.NO_STATES, CST_gnssHybrid.NO_STATES);
 
-            ssMonitor = STRUCT_SPF.setMonitorReport(axisAlarm, alarm, ...
+            report = STRUCT_SPF.setMonitorReport(axisAlarm, alarm, ...
                 scalar, alarm, alarm, alarm, zeroState, zeroCovar);
         end
 
@@ -100,8 +144,10 @@ classdef STRUCT_SPF
 
         end
 
-        function [poolOut] = openWindow(poolIn, kf_state, kf_covariance, ...
-                innovation, innovation_cov, obs_matrix, numMeas)
+        function [poolOut] = openWindow(poolIn, kfMeas)
+            % Open a window on this epoch's post-update solution: the window's
+            % coast is that solution propagated INS-only, so its separation
+            % starts at zero and its covariance at P+ (paper E24).
 
             % Set the output
             poolOut = poolIn;
@@ -124,17 +170,19 @@ classdef STRUCT_SPF
                 poolOut.hadAlarm(freeSlot)  = false;
                 poolOut.windowAge(freeSlot) = 1;
 
-                poolOut.coastState(:, freeSlot)         = kf_state;         % E24
-                poolOut.coastCovariance(:, :, freeSlot) = kf_covariance;
+                poolOut.separation(:, freeSlot)         = zeros(CST_gnssHybrid.NO_STATES, 1);
+                poolOut.coastCovariance(:, :, freeSlot) = kfMeas.postCov;
 
-                m = numMeas;
-                poolOut.innovationBuffer(1:m, 1, freeSlot)          = innovation(1:m);
-                poolOut.innovationCovBuffer(1:m, 1:m, 1, freeSlot)  = innovation_cov(1:m, 1:m);
-                poolOut.obsMatrixBuffer(1:m, :, 1, freeSlot)        = obs_matrix(1:m, :);
+                m = kfMeas.numMeas;
+                poolOut.innovationBuffer(1:m, 1, freeSlot)          = kfMeas.innovation(1:m);
+                poolOut.innovationCovBuffer(1:m, 1:m, 1, freeSlot)  = kfMeas.innovationCov(1:m, 1:m);
+                poolOut.obsMatrixBuffer(1:m, :, 1, freeSlot)        = kfMeas.obsMatrix(1:m, :);
                 poolOut.numMeasBuffer(1, freeSlot)                  = uint8(m);
             end
 
         end
+
+        %% ---------------- SS result ----------------
         function [ssMonitor] = setSSmonitor(alarmPerAxis, anyAlarm, ...
                 separation, sigmaSeparation, protectionLevel, ...
                 maxProtectionLevel)
@@ -161,48 +209,16 @@ classdef STRUCT_SPF
                 zeroVector, zeroVector, zeroVector, scalar);
         end
 
-        function [filter] = setFilter(state, covariance)
-
-            % Define structure
-            filter = struct( ...
-                'state',      state, ...
-                'covariance', covariance);
-        end
-
-        function [filter] = zeroFilter
-
-            % Init values
-            state = zeros(CST_gnssHybrid.NO_STATES, 1);
-            covariance = zeros(CST_gnssHybrid.NO_STATES, CST_gnssHybrid.NO_STATES);
-
-            filter = STRUCT_SPF.setFilter(state, covariance);
-
-        end
-
-        function [trial] = setTrial(state, covariance)
-
-            % Define structure
-            trial = struct( ...
-                'state',      state, ...
-                'covariance', covariance);
-        end
-
-        function [trial] = zeroTrial
-
-            % Init values
-            state = zeros(CST_gnssHybrid.NO_STATES, 1);
-            covariance = zeros(CST_gnssHybrid.NO_STATES, CST_gnssHybrid.NO_STATES);
-
-            trial = STRUCT_SPF.setTrial(state, covariance);
-
-        end
-
-        function [anchor] = setAnchor(valid, state, covariance, epoch)
+        %% ---------------- FSM state ----------------
+        function [anchor] = setAnchor(valid, separation, covariance, epoch)
+            % Certified-clean coast, kept live: separation = (host solution
+            % now) - (anchor coast now), accumulated increments since the
+            % anchor window opened; covariance = that coast's P_C.
 
             % Define structure
             anchor = struct( ...
                 'valid',      logical(valid), ...
-                'state',      state, ...
+                'separation', separation, ...
                 'covariance', covariance, ...
                 'epoch',      uint32(epoch));
         end
@@ -211,22 +227,22 @@ classdef STRUCT_SPF
 
             % Init values
             valid = false;
-            state = zeros(CST_gnssHybrid.NO_STATES, 1);
+            separation = zeros(CST_gnssHybrid.NO_STATES, 1);
             covariance = zeros(CST_gnssHybrid.NO_STATES, CST_gnssHybrid.NO_STATES);
             epoch = uint32(0);
 
-            anchor = STRUCT_SPF.setAnchor(valid, state, covariance, epoch);
+            anchor = STRUCT_SPF.setAnchor(valid, separation, covariance, epoch);
 
         end
 
-        function [sys] = setSys(mode, filter, trial, pool, anchor, ...
+        function [sys] = setSys(mode, coastCov, probSep, pool, anchor, ...
                 dwellCount, probationCount, coastCount)
 
             % Define structure
             sys = struct( ...
-                'mode',           mode, ...
-                'filter',         filter, ...
-                'trial',          trial, ...
+                'mode',           mode, ...           % CST_spfMode
+                'coastCov',       coastCov, ...       % covariance of the protected solution
+                'probSep',        probSep, ...        % (active filter) - (coast), increments [n x 1]
                 'pool',           pool, ...
                 'anchor',         anchor, ...
                 'dwellCount',     dwellCount, ...
@@ -238,15 +254,16 @@ classdef STRUCT_SPF
 
             % Init values
             mode = CST_spfMode.NOMINAL;
-            filter = STRUCT_SPF.zeroFilter;
-            trial = STRUCT_SPF.zeroTrial;
+            n = CST_gnssHybrid.NO_STATES;
+            coastCov = eye(n);
+            probSep = zeros(n, 1);
             pool = STRUCT_SPF.zeroMonitorPool;
             anchor = STRUCT_SPF.zeroAnchor;
             dwellCount = 0.0;
             probationCount = 0.0;
             coastCount = 0.0;
 
-            sys = STRUCT_SPF.setSys(mode, filter, trial, pool, ...
+            sys = STRUCT_SPF.setSys(mode, coastCov, probSep, pool, ...
                 anchor, dwellCount, probationCount, coastCount);
         end
 
@@ -268,6 +285,7 @@ classdef STRUCT_SPF
             altXCheck = STRUCT_SPF.setAltXCheck(suspect, altDiff);
         end
 
+        %% ---------------- telemetry / commands ----------------
         function [spoofTel] = setTel(info, kfCommand, nav)
 
             % Define structure
@@ -338,47 +356,49 @@ classdef STRUCT_SPF
                 eventProbationVetoed, eventHandback, anchorMissing, coastEpochs);
         end
 
-        function [command] = setCommand(reseedKF, reseedState, reseedCov)
+        function [command] = setCommand(reseedKF, reseedCov)
+            % reseedKF true = probation opens: the host must start its TRIAL
+            % filter as a copy of the operational (coasting) KF, with
+            % covariance reseedCov (equals the coast covariance).
 
             % Define structure
             command = struct( ...
-                'reseedKF',    logical(reseedKF), ...
-                'reseedState', reseedState, ...
-                'reseedCov',   reseedCov);
+                'reseedKF',  logical(reseedKF), ...
+                'reseedCov', reseedCov);
         end
 
         function [command] = zeroCommand
 
             % Init values
             reseedKF = false;
-            reseedState = zeros(CST_gnssHybrid.NO_STATES, 1);
             reseedCov = zeros(CST_gnssHybrid.NO_STATES, CST_gnssHybrid.NO_STATES);
 
             % Define structure
-            command = STRUCT_SPF.setCommand(reseedKF, reseedState, reseedCov);
+            command = STRUCT_SPF.setCommand(reseedKF, reseedCov);
         end
 
-        function [nav] = setNav(state, covar, sigmaPosition)
+        function [nav] = setNav(applyCorrection, correction, covar, sigmaPosition)
+            % applyCorrection true on LATCH and COMMIT epochs: the host must
+            % treat  x+ = KF.states + correction,  P+ = covar  as this epoch's
+            % update result for the OPERATIONAL KF and run its normal
+            % feedback bookkeeping on it. Otherwise correction is zero.
 
             % Define structure
             nav = struct( ...
-                'state',         state, ...
-                'covar',         covar, ...
-                'sigmaPosition', sigmaPosition);
+                'applyCorrection', logical(applyCorrection), ...
+                'correction',      correction, ...    % [n x 1] increment to the solution
+                'covar',           covar, ...         % [n x n] protected-solution covariance
+                'sigmaPosition',   sigmaPosition);    % [3 x 1] 1-sigma of position
         end
 
         function [nav] = zeroNav
 
             % Init values
-            state = zeros(CST_gnssHybrid.NO_STATES, 1);
-            covar = eye(CST_gnssHybrid.NO_STATES);
-            sigmaPosition = zeros(3, 1);
-
-            % Define structure
-            nav = STRUCT_SPF.setNav(state, covar, sigmaPosition);
+            n = CST_gnssHybrid.NO_STATES;
+            nav = STRUCT_SPF.setNav(false, zeros(n, 1), eye(n), zeros(3, 1));
         end
 
     end
 end
 
-%------------------------------------------------------------------------------------------
+%------------------------------------------------------------------------

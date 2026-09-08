@@ -3,23 +3,22 @@
 % One epoch of the overlapping-window dual monitor.
 %
 % For every OPEN window:
-%   1. buffer this epoch's (gamma, S, H)
-%   2. SS test via ss_monitor_step (propagates that window's coast
-%      once, tests every monitored axis, Eq. 49-52)
-%   3. at full length: CPI via cpi_monitor_window once per monitored
-%      axis (Eq. 33/35), then free the slot. A window that lived its
-%      whole life with NO alarm is reported as the anchor candidate.
+%   1. buffer this epoch's (y, S, H, numMeas)
+%   2. SS test via ssMonitor (accumulates this window's separation and
+%      propagates its coast covariance once, tests every monitored axis,
+%      Eq. 49-52)
+%   3. at full length: CPI via cpiMonitor once per monitored axis
+%      (Eq. 33/35), then free the slot. A window that lived its whole
+%      life with NO alarm is reported as the anchor candidate.
 %
 % INPUTS:
-%   - pool (STRUCT_SPF.setMonitorPool)
-%   - this epoch's innovation / innovation_cov / obs_matrix, sized to
-%     CST_spfParam.MAX_MEAS rows; numMeas = valid rows this epoch
-%   - the watched filter's kf_state / kf_covariance (post-update)
-%   - spoofInfo (.phiAcc / .qAcc interval matrices)
+%   - poolIn   (STRUCT_SPF.setMonitorPool)
+%   - kfMeas   (STRUCT_SPF.setKfMeas) this epoch's host update quantities
+%   - propTel  (STRUCT_SPF.setPropTel) .accumPhi / .accumQ
 %
 % OUTPUTS:
-%   - pool (updated)
-%   - report (PoolReport - see that file)
+%   - poolOut (updated)
+%   - report  (STRUCT_SPF.setMonitorReport)
 %
 % ASSUMPTIONS AND LIMITATIONS:
 %
@@ -27,14 +26,15 @@
 %
 %******************************************************************************************
 %#codegen
-function [poolOut, report] = monitorPool(poolIn, innovation, ...
-    innovation_cov, obs_matrix, numMeas, kf_state, kf_covariance, spoofInfo)
+function [poolOut, report] = monitorPool(poolIn, kfMeas, propTel)
 
 % Define variables
 windowLength = CST_spfParam.WINDOW_LENGTH;
 monitoredAxes = CST_spfParam.MONITORED_AXES;
 numAxes = cast(numel(monitoredAxes), 'uint8');
 poolOut = poolIn;
+kfIncrement = kfMeas.postState - kfMeas.priorState;     % K*y of the watched filter
+m = kfMeas.numMeas;
 
 report = STRUCT_SPF.zeroMonitorReport;
 
@@ -47,20 +47,19 @@ for wIdx = 1:windowLength
         age = poolIn.windowAge(wIdx) + 1;
         poolOut.windowAge(wIdx) = age;
 
-        m = numMeas;
-        poolOut.innovationBuffer(1:m, age, wIdx)          = innovation(1:m);
-        poolOut.innovationCovBuffer(1:m, 1:m, age, wIdx)  = innovation_cov(1:m, 1:m);
-        poolOut.obsMatrixBuffer(1:m, :, age, wIdx)        = obs_matrix(1:m, :);
+        poolOut.innovationBuffer(1:m, age, wIdx)          = kfMeas.innovation(1:m);
+        poolOut.innovationCovBuffer(1:m, 1:m, age, wIdx)  = kfMeas.innovationCov(1:m, 1:m);
+        poolOut.obsMatrixBuffer(1:m, :, age, wIdx)        = kfMeas.obsMatrix(1:m, :);
         poolOut.numMeasBuffer(age, wIdx)                  = uint8(m);
 
         % ------------------------------------------------------------------
         %  2. Solution-Separation test (all monitored axes)
         % ------------------------------------------------------------------
-        [newCoastState, newCoastCov, ssResult] = ssMonitor( ...
-            poolIn.coastState(:, wIdx), poolIn.coastCovariance(:, :, wIdx), ...
-            kf_state, kf_covariance, spoofInfo);
+        [newSeparation, newCoastCov, ssResult] = ssMonitor( ...
+            poolIn.separation(:, wIdx), poolIn.coastCovariance(:, :, wIdx), ...
+            kfIncrement, kfMeas.postCov, propTel);
 
-        poolOut.coastState(:, wIdx)         = newCoastState;
+        poolOut.separation(:, wIdx)         = newSeparation;
         poolOut.coastCovariance(:, :, wIdx) = newCoastCov;
 
         if (ssResult.anyAlarm)
@@ -99,9 +98,9 @@ for wIdx = 1:windowLength
                 % Whole life alarm-free: certified anchor candidate.
                 % Caller commits it ONLY on a globally alarm-free epoch,
                 % so the anchor always ends strictly before any detection.
-                report.cleanCloseFound = true;
-                report.cleanCloseState = poolOut.coastState(:, wIdx);
-                report.cleanCloseCovar = poolOut.coastCovariance(:, :, wIdx);
+                report.cleanCloseFound      = true;
+                report.cleanCloseSeparation = poolOut.separation(:, wIdx);
+                report.cleanCloseCovar      = poolOut.coastCovariance(:, :, wIdx);
             end % ELSE is trivial
 
             poolOut.active(wIdx) = false;        % free the slot
@@ -111,4 +110,4 @@ end
 
 end
 
-%------------------------------------------------------------------------------------------
+%------------------------------------------------------------------------

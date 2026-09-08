@@ -2,29 +2,36 @@
 % DESCRIPTION:
 % Solution-Separation test: one window, one epoch, ALL monitored axes.
 %
-% The coast is propagated ONCE, then the scalar test is evaluated for each
-% axis.
+% INCREMENT FORM. The window's coast is the solution at window open
+% propagated INS-only. Because the host solution and the coast share the
+% same propagation, their difference is the accumulation of the host KF's
+% update increments since the window opened:
+%     d_k = Phi_acc * d_(k-1) + (x+_k - x_bar_k)          (paper E28 / Eq. 49)
+%     P_C = Phi_acc * P_C * Phi_acc' + Q_acc               (paper E31)
+% so no absolute state is needed and the result is invariant to how the
+% host splits its estimate between feedback and residual states.
 %
 % INPUTS:
-%   - coast_state          [n x 1]  this window's coast (INS-only) state
-%   - coast_covariance     [n x n]  its covariance
-%   - kf_state             [n x 1]  current filter state (post-update)
-%   - kf_covariance        [n x n]  current filter covariance (post-update)
-%   - spoofInfo            .phiAcc / .qAcc [n x n] interval Phi / Q
+%   - separation           [n x 1]  d_(k-1) for this window
+%   - coastCovariance      [n x n]  P_C of this window's coast (previous epoch)
+%   - kfIncrement          [n x 1]  x+ - x_bar of the watched filter this epoch
+%   - kfCovariance         [n x n]  P+ of the watched filter this epoch
+%   - propTel              .accumPhi / .accumQ  interval Phi / Q
 %   - kFalseAlert, kMissedDetection (OPTIONAL, tests only) override
 %                          the CST_spfParam constants
 %
 % OUTPUTS:
-%   - coast_state          propagated to this epoch
-%   - coast_covariance     propagated to this epoch
+%   - separation           d_k
+%   - coastCovariance      P_C propagated to this epoch
 %   - ssResult             structure of type STRUCT_SPF.setSSmonitor
 %
 % ASSUMPTIONS AND LIMITATIONS:
+% An undefined test (sigma_SS = 0) reports no alarm.
 %
 % REQUIREMENT TRACEABILITY:
 % - PAPER MAPPING
-%    coast propagation:     E28 (state), E31 (covariance)
-%    separation:            Eq. 49  q_SS = u'(x_KF - x_C)
+%    coast propagation:     E28 (state, in increment form), E31 (covariance)
+%    separation:            Eq. 49  q_SS = u'(x_KF - x_C) = u' d
 %    separation variance:   Eq. 50  sigma_SS^2 = u'(P_C - P_KF)u
 %    coast variance:        Eq. 52  sigma_C^2  = u' P_C u
 %    protection level:      Eq. 51  PL = k_FA*sigma_SS + k_MD*sigma_C
@@ -32,8 +39,8 @@
 %
 %******************************************************************************************
 %#codegen
-function [coastState, coastCovariance, ssResult] = ssMonitor...
-    (coastState, coastCovariance, kfState, kfCovariance, spoofInfo, ...
+function [separation, coastCovariance, ssResult] = ssMonitor...
+    (separation, coastCovariance, kfIncrement, kfCovariance, propTel, ...
      kFalseAlert, kMissedDetection)
 
 % Define variables
@@ -43,7 +50,7 @@ if (nargin < 7)
     kMissedDetection = CST_spfParam.K_MISSED_DETECTION;
 end
 numAxes            = cast(numel(monitoredAxes), 'uint8');
-separation         = zeros(1, numAxes);
+sepAxis            = zeros(1, numAxes);
 sigmaSeparation    = zeros(1, numAxes);
 protectionLevel    = zeros(1, numAxes);
 alarmPerAxis       = zeros(1, numAxes, 'logical');
@@ -51,9 +58,9 @@ anyAlarm           = false;
 maxProtectionLevel = 0.0;
 
 % Propagate the coast once (shared by all axes)
-Phi = spoofInfo.phiAcc;
-Q   = spoofInfo.qAcc;
-coastState      = Phi * coastState;                                  % E28
+Phi = propTel.accumPhi;
+Q   = propTel.accumQ;
+separation      = Phi * separation + kfIncrement;                    % E28 (increment form)
 coastCovariance = Phi * coastCovariance * Phi' + Q;                  % E31
 
 % Scalar test per monitored axis
@@ -61,10 +68,10 @@ for idx = 1:numAxes
 
     axisIdx = monitoredAxes(idx);    % actual state index
 
-    separation(idx)     = kfState(axisIdx) - coastState(axisIdx);    % Eq. 49
+    sepAxis(idx)       = separation(axisIdx);                            % Eq. 49
     varianceSeparation = coastCovariance(axisIdx, axisIdx) ...
         - kfCovariance(axisIdx, axisIdx);                                % Eq. 50
-    varianceCoast       = coastCovariance(axisIdx, axisIdx);             % Eq. 52
+    varianceCoast      = coastCovariance(axisIdx, axisIdx);              % Eq. 52
 
     % Exception handler: sigma_SS = 0 (window just opened, or numerical)
     % means the test is undefined; report no alarm rather than |q| > 0.
@@ -84,7 +91,7 @@ for idx = 1:numAxes
         + kMissedDetection * sigmaCoast;                                 % Eq. 51
 
     % alarm rule (section 5 under Eq. 52)
-    if testable && (abs(separation(idx)) > (kFalseAlert * sigmaSeparation(idx)))
+    if testable && (abs(sepAxis(idx)) > (kFalseAlert * sigmaSeparation(idx)))
         alarmPerAxis(idx) = true;
         anyAlarm = true;
     end % ELSE is trivial
@@ -95,8 +102,8 @@ for idx = 1:numAxes
 end
 
 ssResult = STRUCT_SPF.setSSmonitor(alarmPerAxis, anyAlarm, ...
-    separation, sigmaSeparation, protectionLevel, maxProtectionLevel);
+    sepAxis, sigmaSeparation, protectionLevel, maxProtectionLevel);
 
 end
 
-%------------------------------------------------------------------------------------------
+%------------------------------------------------------------------------

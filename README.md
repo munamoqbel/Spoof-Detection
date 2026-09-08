@@ -8,10 +8,14 @@ two-rate host: a 100 Hz navigation loop and a 2 Hz GNSS/monitor task.
 
 ## Runtime path (what the target simulation needs)
 
+Host contract: `docs/HOST_2HZ_WIRING.m`. The gate works in update-increment
+space (`x+ - x_bar`), so it is independent of the host's feedback/gain
+bookkeeping of `KF.states`.
+
 | file | role |
 |---|---|
-| `spoof_monitor_2hz.m` | persistent-state 2 Hz gate; wraps `protectedNav` |
-| `protectedNav.m` | fed FSM: mirrors the host KF, commands reseeds |
+| `spoofMonitor2hz.m` | persistent-state 2 Hz gate; wraps `protectedNav` |
+| `protectedNav.m` | FSM in increment form; host owns its filters, gate returns corrections |
 | `monitorPool.m` | overlapping-window bank (N slots) |
 | `cpiMonitor.m`, `ssMonitor.m` | per-window CPI (Eq. 33/35) and SS (Eq. 49-52) tests |
 | `insCoast.m`, `revalidation.m` | INS-only propagation (E28/E31), chi-square re-validation |
@@ -26,7 +30,7 @@ two-rate host: a 100 Hz navigation loop and a 2 Hz GNSS/monitor task.
 `scheduler_sim.m` (100 Hz + 2 Hz split-rate architecture test),
 `generate_test_data.m`, `build_Phi_Q.m`, `kalman_update_step.m`,
 `kujur_params.m`, `solve_N_min.m`, `compute_PMD_eq38.m`,
-`recovery_nav_sim.m`, `protected_nav_step.m` (legacy self-contained FSM),
+`recovery_nav_sim.m` (a host following `docs/HOST_2HZ_WIRING.m`),
 `ins_100hz_template.m` (what the host's 100 Hz function must add).
 
 ## Tests

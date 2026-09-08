@@ -14,17 +14,18 @@
 % by the host's own linearisation:
 %   residual = z - h(x_coast)
 %            ~ [z - h(x_prior)] - H (x_coast - x_prior)
-%            =  innovation      - H (coastState - priorState)
-% For the linear harness (innovation = z - H x_prior) this is exact.
+%            =  innovation      - H * coastMinusPrior
+% coastMinusPrior is supplied by the caller in increment form
+% (= -Phi_acc * accumulated increments of the active filter since the
+% protected solution was set; zero when the host has not updated it).
 %
 % INPUTS:
 %   - innovation        [MAX_MEAS x 1] host innovation z - h(x_prior)
 %   - obsMatrix         [MAX_MEAS x n] H (host linearisation)
-%   - measNoiseCov      [MAX_MEAS x MAX_MEAS] R / V
+%   - measNoiseCov      [MAX_MEAS x MAX_MEAS] R
 %   - numMeas           scalar   valid rows this epoch (0 = no GNSS)
-%   - priorState        [n x 1]  host predicted state the innovation refers to
-%   - coastState        [n x 1]  quarantined INS-only navigation state
-%   - coastCovariance   [n x n]  its covariance
+%   - coastMinusPrior   [n x 1]  x_coast - x_prior (increment space)
+%   - coastCovariance   [n x n]  P_C of the coast
 %
 % OUTPUTS:
 %   - passed     logical, qValue < threshold(numMeas); false if numMeas = 0
@@ -38,7 +39,7 @@
 %******************************************************************************************
 %#codegen
 function [passed, qValue] = revalidation(innovation, obsMatrix, ...
-    measNoiseCov, numMeas, priorState, coastState, coastCovariance)
+    measNoiseCov, numMeas, coastMinusPrior, coastCovariance)
 
 % Define variables
 passed = false;
@@ -48,7 +49,7 @@ if (numMeas > 0)
     threshold = CST_spfParam.REVAL_THRESHOLD_TABLE(numMeas);
     H = obsMatrix(1:numMeas, :);
 
-    residual    = innovation(1:numMeas) - H * (coastState - priorState);
+    residual    = innovation(1:numMeas) - H * coastMinusPrior;
     residualCov = H * coastCovariance * H' + measNoiseCov(1:numMeas, 1:numMeas);
     residualCov = (residualCov + residualCov') / 2;
 

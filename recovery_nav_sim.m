@@ -1,60 +1,46 @@
-function out = recovery_nav_sim(z_all, H_all, V, spoofInfo, P0, prm, use_fed)
-
-if nargin<7
-    use_fed = false;
-end
-%RECOVERY_NAV_SIM  Batch wrapper: run the protected navigator over a
-%                  logged measurement set. THIN LOOP ONLY.
+function out = recovery_nav_sim(z_all, H_all, V, propTel, P0, prm)
+%RECOVERY_NAV_SIM  Batch harness: a HOST that follows the gate contract
+%                  (docs/HOST_2HZ_WIRING.m) over a logged measurement set.
 %
-% State is managed EXPLICITLY here (no persistent) so batch runs are
-% repeatable. The deployment wrapper with persistent state is
-% spoof_monitor_2hz.m.
-%
-% CALL GRAPH
-%   recovery_nav_sim
-%     KujurConfig.fromPrmRec              (struct class - config)
-%     NavState.create                     (struct class - sys; uses PoolState)
-%     protected_nav_step                  (FSM: NOMINAL / COAST / PROBATION)
-%       kalman_update_step
-%       monitor_pool_step                 (windows; report = PoolReport.blank)
-%         ss_monitor_step                 (SS per axis; result = SsResult.blank)
-%         cpi_monitor_window              (CPI at close)
-%       monitor_pool_open_window
-%       monitor_pool_clear
-%       ins_coast_step
-%       revalidation_test
-%
-% Interface identical to previous versions: run_recovery.m unchanged.
+% The host owns its filters:
+%   - operational KF  kf_x / kf_P : updated in NOMINAL; only extrapolated in
+%                     COAST / PROBATION (= the INS-only coast)
+%   - trial KF        tr_x / tr_P : copy of the coasting KF when probation
+%                     opens; updated in PROBATION
+% and applies the gate's corrections at LATCH and COMMIT. The gate (the
+% FSM in protectedNav) is called with the ACTIVE filter's update result.
+% State is kept explicitly (no persistent) so batch runs are repeatable;
+% the deployment wrapper with persistent state is spoofMonitor2hz.m.
 %
 % INPUTS
-%   z_all [m x N], H_all [m x n x N], V [m x m], Phi/Q [n x n]
+%   z_all [m x N], H_all [m x n x N], V [m x m]
+%   propTel         .accumPhi / .accumQ [n x n] interval matrices (constant here)
 %   P0    [n x n]   Riccati-converged initial covariance
-%   prm             kujur_params(N_min, T_N, k_FA, k_MD)
-%                   optional prm.mon_axes (default: prm.idx_z only)
-%   rec             .T_reval, .M_dwell, optional .M_prob
+%   prm             kujur_params(...) (only n_states / idx_z are used)
 %
 % OUTPUT struct 'out':
-%   x_nav [n x N], sig_pos [3 x N], sig_z [1 x N], state [1 x N],
-%   CPI_alarm/SS_alarm [N x 1], alarm_axis [N x 3], SS_PL [N x 1],
-%   q_reval [N x 1], dwell [N x 1],
+%   x_nav [n x N] (host operational KF = protected solution), sig_pos [3 x N],
+%   sig_z [1 x N], state [1 x N], CPI_alarm/SS_alarm [N x 1],
+%   alarm_axis [N x 3], SS_PL [N x 1], q_reval [N x 1], reval_computed,
+%   dwell, anchor_missing, coast_epochs, correction_log [N x 1],
 %   ev.t_detect / t_anchor / t_prob_start / t_prob_fail / t_handback
 
-% ----------------------------------------------------------------------
-%  configuration and initial state (struct classes)
-% ----------------------------------------------------------------------
-mode = CST_spfMode.NOMINAL;
-filter = STRUCT_SPF.setFilter(zeros(prm.n_states, 1), P0);
-trial = STRUCT_SPF.setTrial(zeros(prm.n_states, 1), P0);
-pool = STRUCT_SPF.zeroMonitorPool;
-anchor = STRUCT_SPF.setAnchor(true, zeros(prm.n_states, 1), P0, uint32(0));   % initial state = startup anchor
-sys = STRUCT_SPF.setSys(mode, filter, trial, pool, anchor, 0, 0, 0);
-
-% ----------------------------------------------------------------------
-%  allocate outputs
-% ----------------------------------------------------------------------
+n = prm.n_states;
 num_epochs = size(z_all, 2);
+num_meas   = size(z_all, 1);                 % constant in the harness
 
-out.x_nav          = zeros(prm.n_states, num_epochs);
+% ---- gate state (explicit) ----
+sys = STRUCT_SPF.zeroSys;
+sys.coastCov = P0;
+sys.anchor   = STRUCT_SPF.setAnchor(true, zeros(n, 1), P0, uint32(0));   % startup anchor
+
+% ---- host filters ----
+kf_x = zeros(n, 1);  kf_P = P0;
+tr_x = zeros(n, 1);  tr_P = P0;
+mode = CST_spfMode.NOMINAL;
+
+% ---- logs ----
+out.x_nav          = zeros(n, num_epochs);
 out.sig_pos        = zeros(3, num_epochs);
 out.sig_z          = zeros(1, num_epochs);
 out.state          = zeros(1, num_epochs);
@@ -65,49 +51,51 @@ out.SS_PL          = zeros(num_epochs, 1);
 out.q_reval        = zeros(num_epochs, 1);
 out.reval_computed = false(num_epochs, 1);
 out.dwell          = zeros(num_epochs, 1);
-out.anchor_missing  = false(num_epochs, 1);
+out.anchor_missing = false(num_epochs, 1);
+out.coast_epochs   = zeros(num_epochs, 1);
+out.correction_log = false(num_epochs, 1);
 
-event_detect     = [];
-event_anchor     = [];
-event_prob_start = [];
-event_prob_fail  = [];
-event_handback   = [];
+event_detect = []; event_anchor = []; event_prob_start = [];
+event_prob_fail = []; event_handback = [];
 
-kf_x = zeros(prm.n_states, 1);
-kf_P = P0;
-num_meas = size(z_all, 1);                 % constant in the harness
-
-% ----------------------------------------------------------------------
-%  run
-% ----------------------------------------------------------------------
 for epoch = 1:num_epochs
+    inProbation = (mode == CST_spfMode.PROBATION);
+    kfUpdated   = (mode == CST_spfMode.NOMINAL);
 
-    if (use_fed)
-        % ---- your 2a/2b: the KF updates ALWAYS (free-running) ----
-        [kf_x, kf_P, innov, innov_S, ~, kf_prior] = kalman_update_step(kf_x, kf_P, ...
-            z_all(:, epoch), H_all(:, :, epoch), spoofInfo, V);
-
-        % ---- your 2c: the fed FSM ----
-        [sys, spoofTel] = protectedNav(sys, innov, innov_S, ...
-            H_all(:, :, epoch), num_meas, kf_prior, kf_x, kf_P, ...
-            V, spoofInfo, epoch);
-
-        % ---- your 2d: reseed on command ----
-        if spoofTel.kfCommand.reseedKF
-            kf_x = spoofTel.kfCommand.reseedState;
-            kf_P = spoofTel.kfCommand.reseedCov;
-        end
-        out.reseed_log(epoch) = spoofTel.kfCommand.reseedKF;
-
+    % ---- host: update the ACTIVE filter (your kfUpdate) ----
+    if inProbation
+        [tr_x, tr_P, y, S, ~, prior] = kalman_update_step(tr_x, tr_P, ...
+            z_all(:, epoch), H_all(:, :, epoch), propTel, V);
+        post = tr_x; postP = tr_P;
     else
-        [sys, spoofTel] = protected_nav_step(sys, z_all(:, epoch), ...
-            H_all(:, :, epoch), V, spoofInfo, epoch);
+        [ax, aP, y, S, ~, prior] = kalman_update_step(kf_x, kf_P, ...
+            z_all(:, epoch), H_all(:, :, epoch), propTel, V);
+        post = ax; postP = aP;
+    end
+    kfMeas = STRUCT_SPF.setKfMeas(y, S, H_all(:, :, epoch), V, num_meas, prior, post, postP);
+
+    % ---- gate ----
+    [sys, spoofTel] = protectedNav(sys, kfMeas, propTel, epoch);
+    mode = spoofTel.info.mode;
+
+    % ---- host: apply the gate's decisions to the OPERATIONAL KF ----
+    if kfUpdated
+        kf_x = post; kf_P = postP;                       % normal closed-loop update
+    else
+        [kf_x, kf_P] = insCoast(kf_x, kf_P, propTel);    % extrapolated only (coast)
+    end
+    if spoofTel.nav.applyCorrection                      % LATCH or COMMIT
+        kf_x = kf_x + spoofTel.nav.correction;
+        kf_P = spoofTel.nav.covar;
+    end
+    if spoofTel.kfCommand.reseedKF                       % probation opens
+        tr_x = kf_x; tr_P = kf_P;
     end
 
     % ---- per-epoch logs ----
-    out.x_nav(:, epoch)         = spoofTel.nav.state;
-    out.sig_pos(:, epoch)       = spoofTel.nav.sigmaPosition;
-    out.sig_z(epoch)            = spoofTel.nav.sigmaPosition(prm.idx_z);
+    out.x_nav(:, epoch)         = kf_x;
+    out.sig_pos(:, epoch)       = sqrt(max(diag(kf_P(1:3, 1:3)), 0));
+    out.sig_z(epoch)            = out.sig_pos(prm.idx_z, epoch);
     out.state(epoch)            = spoofTel.info.mode;
     out.SS_alarm(epoch)         = spoofTel.info.ssAlarm;
     out.CPI_alarm(epoch)        = spoofTel.info.cpiAlarm;
@@ -118,21 +106,16 @@ for epoch = 1:num_epochs
     out.dwell(epoch)            = spoofTel.info.dwellCount;
     out.anchor_missing(epoch)   = spoofTel.info.anchorMissing;
     out.coast_epochs(epoch)     = spoofTel.info.coastEpochs;
+    out.correction_log(epoch)   = spoofTel.nav.applyCorrection;
 
     % ---- event logs ----
     if spoofTel.info.eventLatched
         event_detect(end+1) = epoch;                                    %#ok<AGROW>
-        event_anchor(end+1) = spoofTel.info.eventAnchorEpoch;           %#ok<AGROW>
+        event_anchor(end+1) = double(spoofTel.info.eventAnchorEpoch);   %#ok<AGROW>
     end
-    if spoofTel.info.eventProbationStarted
-        event_prob_start(end+1) = epoch;                                %#ok<AGROW>
-    end
-    if spoofTel.info.eventProbationVetoed
-        event_prob_fail(end+1) = epoch;                                 %#ok<AGROW>
-    end
-    if spoofTel.info.eventHandback
-        event_handback(end+1) = epoch;                                  %#ok<AGROW>
-    end
+    if spoofTel.info.eventProbationStarted, event_prob_start(end+1) = epoch; end %#ok<AGROW>
+    if spoofTel.info.eventProbationVetoed,  event_prob_fail(end+1)  = epoch; end %#ok<AGROW>
+    if spoofTel.info.eventHandback,         event_handback(end+1)   = epoch; end %#ok<AGROW>
 end
 
 out.ev.t_detect     = event_detect;

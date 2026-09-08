@@ -1,29 +1,32 @@
 function [state, covariance, innovation, innovation_cov, kalman_gain, ...
-          predicted_state] = ...
+          predicted_state, predicted_covariance] = ...
     kalman_update_step(state, covariance, measurement, obs_matrix, ...
-                       spoofInfo, meas_noise_cov)
+                       propTel, meas_noise_cov)
 %KALMAN_UPDATE_STEP  One complete Kalman filter epoch (time + measurement).
+%                    HARNESS ONLY - the host uses its own extrapolation and
+%                    kfUpdate; this mimics them for the linear test data.
 %
 % INPUTS
 %   state            [n x 1]  filter state at previous epoch (post-update)
 %   covariance       [n x n]  filter covariance at previous epoch
 %   measurement      [m x 1]  GNSS measurement vector z
 %   obs_matrix       [m x n]  observation matrix H
-%   spoofInfo        .phiAcc/.qAcc [n x n] state transition and process noise
+%   propTel          .accumPhi/.accumQ [n x n] interval transition / process noise
 %   meas_noise_cov   [m x m]  measurement noise covariance V
 %
 % OUTPUTS
-%   state            [n x 1]  updated filter state
-%   covariance       [n x n]  updated filter covariance
+%   state            [n x 1]  updated filter state  (x+)
+%   covariance       [n x n]  updated filter covariance (P+)
 %   innovation       [m x 1]  gamma = z - H*x_bar                (paper Eq. 3)
 %   innovation_cov   [m x m]  S = H*P_bar*H' + V
 %   kalman_gain      [n x m]  L = P_bar*H'/S
 %   predicted_state  [n x 1]  x_bar = Phi*x (the prior the innovation refers to)
+%   predicted_covariance [n x n]  P_bar
 %
 % NOTE  Linear measurement model (harness). In a real EKF, replace
 %       obs_matrix*predicted_state with your nonlinear h(x).
-Phi = spoofInfo.phiAcc;
-Q = spoofInfo.qAcc;
+Phi = propTel.accumPhi;
+Q   = propTel.accumQ;
 % ---- time update ----
 predicted_state      = Phi * state;
 predicted_covariance = Phi * covariance * Phi' + Q;

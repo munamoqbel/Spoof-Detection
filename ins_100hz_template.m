@@ -4,7 +4,8 @@ function ins_100hz_template()
 %                    TODO lines mark your existing code.
 %
 % Additions (three items only):
-%   1. Phi_acc / Q_acc accumulators   (interval matrices for the 2 Hz side)
+%   1. accumPhi / accumQ accumulators (interval matrices for the 2 Hz side;
+%                                     the host's spfAccumProp already does this)
 %   2. feedback ON/OFF                (OFF in COAST and PROBATION)
 %   3. reset consumption              (load state at latch / commit)
 
@@ -54,15 +55,13 @@ end
 % ======================================================================
 %  4. at each GNSS epoch (every ~50th call): hand off and reset
 % ======================================================================
-% TODO: pass spoofInfo.phiAcc = Phi_acc, spoofInfo.qAcc = Q_acc to the
-%       2 Hz function (spoof_monitor_2hz), receive
-%       (mode_flag, reset_flag, reset_state), then:
+% TODO: pass propTel = STRUCT_SPF.setPropTel(Phi_acc, Q_acc) to the
+%       2 Hz function (spoofMonitor2hz via the host wiring in
+%       docs/HOST_2HZ_WIRING.m), receive spoofTel, then:
 %
-%   feedback_enabled = (mode_flag == CST_spfMode.NOMINAL);
-%   if reset_flag
-%       pending_reset       = true;                 % consumed at next cycle
-%       pending_reset_state = reset_state;
-%   end
+%   feedback_enabled = (spoofTel.info.mode == CST_spfMode.NOMINAL);
+%   (with the host contract the latch/commit corrections go through the
+%    2 Hz setKF bookkeeping, so no separate reset consumption is needed)
 %   Phi_acc = eye(n);                               % restart the interval
 %   Q_acc   = zeros(n);
 

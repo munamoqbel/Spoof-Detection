@@ -13,7 +13,7 @@
 %     window length N_c = max(N_min): longer-than-solved N only lowers
 %     P_MD, and T_N / k_FA are recomputed at N_c with the split budgets.
 %
-% Run test_all.m first (all existing tests must still pass).
+% Run run_scheduler_test.m and tests/test_monitors.m first.
 
 clear; clc; close all;
 
@@ -37,8 +37,7 @@ prm_boot = kujur_params();
 [~, S_all, H_all, xh_base, ~, Phi, Q, scn, z_all, V, P0] = ...
     generate_test_data(prm_boot, seed, sigma_t_attack, ramp_rate, attack_dir);
 
-spoofInfo.phiAcc = Phi;
-spoofInfo.qAcc   = Q;
+propTel = STRUCT_SPF.setPropTel(Phi, Q);   % interval matrices (constant in the harness)
 
 N  = scn.N_total;
 fs = prm_boot.fs;
@@ -117,9 +116,8 @@ for c = 1:size(chk, 1)
     end
 end
 
-%% Step 3 - run the protected system
-use_fed = true;
-out = recovery_nav_sim(z_all, H_all, V, spoofInfo, P0, prm, use_fed);
+%% Step 3 - run the protected system (host-owned filters, see docs/HOST_2HZ_WIRING.m)
+out = recovery_nav_sim(z_all, H_all, V, propTel, P0, prm);
 
 %% Step 4 - report (3-D position error norm; panel 1 shows dominant axis)
 ia       = scn.idx_attack;                        % dominant attack axis
@@ -232,11 +230,11 @@ figure; plot(t, out.SS_PL, 'm-'); grid on; ylabel('SS PL(m)'); xlabel('Time(s)')
 alertLimt = 10;
 P=P0;
 for k =1:10
-    P = spoofInfo.phiAcc * P * (spoofInfo.phiAcc)' + spoofInfo.qAcc;
+    P = propTel.accumPhi * P * (propTel.accumPhi)' + propTel.accumQ;
 end
 horiz = zeros(600, 1);
 for k=1:600
-    P = spoofInfo.phiAcc * P * (spoofInfo.phiAcc)' + spoofInfo.qAcc;
+    P = propTel.accumPhi * P * (propTel.accumPhi)' + propTel.accumQ;
     horiz(k) = 3*sqrt(P(1,1) + P(2,2));
 end
 maxAnchorAge = find(horiz < alertLimt, 1, 'last');

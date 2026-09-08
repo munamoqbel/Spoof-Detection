@@ -4,7 +4,7 @@
 % WHAT IS TESTED (and what each test would catch):
 % T1 Accumulator correctness: Phi_step^50 vs the interval Phi.
 % T2 EQUIVALENCE: the scheduler path (100 Hz loop + persistent
-%    spoof_monitor_2hz) must reproduce the flat reference
+%    spoofMonitor2hz) must reproduce the flat reference
 %    (recovery_nav_sim) EXACTLY when both use the same interval
 %    matrices. Catches: broken handoff, wrong persistent state,
 %    double/missed epochs, accumulator reset errors.
@@ -18,7 +18,7 @@
 %    the first exactly (proves re-initialisation is complete).
 %
 % NOTE: this validates the ARCHITECTURE/WIRING. The design constants
-% are the ones baked into spoof_monitor_2hz (the validated diagonal-
+% are the ones baked into CST_spfParam (the validated diagonal-
 % attack design), not re-derived here.
 
 clear; clc; close all;
@@ -62,7 +62,7 @@ sch = scheduler_sim(z_all, H_all, V, Phi_step, Q_step, ...
     ticks_per_epoch, x0, P0);
 
 fprintf(' Q_acc vs interval Q : rel diff = %.2e (informational)\n\n', ...
-    norm(sch.spoofInfo.qAcc - Q_2hz, 'fro') / norm(Q_2hz, 'fro'));
+    norm(sch.propTel.accumQ - Q_2hz, 'fro') / norm(Q_2hz, 'fro'));
 
 %% T2 - equivalence against the flat reference
 % Reference uses the SAME accumulated matrices, so any difference is
@@ -73,8 +73,7 @@ rec.T_reval = 39.25;
 rec.M_dwell = 10;
 rec.M_prob = 18;
 
-use_fed = true;
-ref = recovery_nav_sim(z_all, H_all, V, sch.spoofInfo, P0, prm, use_fed);
+ref = recovery_nav_sim(z_all, H_all, V, sch.propTel, P0, prm);
 
 d_nav = max(max(abs(sch.x_nav - ref.x_nav)));
 same_seq = isequal(sch.state, ref.state);

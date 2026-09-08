@@ -20,9 +20,12 @@
 %  inputs the gate needs from kfUpdate (this epoch, first numMeas rows)
 % ----------------------------------------------------------------------
 %   kfUpdate must add four outputs it already computes internally:
-%   y       = z - h(xPrior)   the innovation actually used by the update,
-%             recomputed at kfUpdate level (same expression as inside,
-%             including any -H*xPrior term if your states persist)   [numMeas x 1]
+%   y       = z - h(x)        the innovation actually used by the update,
+%             recomputed at kfUpdate level with the PRIOR states. With the
+%             host's definitions z = rho(p_nav) - rho_meas and
+%             h(x) = rho(p_nav) - rho(p_nav - dp), y is the residual of the
+%             KF-corrected position: the prior enters through h(x), so NO
+%             extra H*xPrior term is added.                          [numMeas x 1]
 %   H       = H(xPrior)       Jacobian                                [numMeas x 60]
 %   R       = diag(measurementZ)^2                                    [numMeas x numMeas]
 %   numMeas                   valid rows this epoch (0 = no GNSS)

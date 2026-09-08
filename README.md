@@ -26,7 +26,17 @@ two-rate host: a 100 Hz navigation loop and a 2 Hz GNSS/monitor task.
 `scheduler_sim.m` (100 Hz + 2 Hz split-rate architecture test),
 `generate_test_data.m`, `build_Phi_Q.m`, `kalman_update_step.m`,
 `kujur_params.m`, `solve_N_min.m`, `compute_PMD_eq38.m`,
-`recovery_nav_sim.m`, `protected_nav_step.m` (legacy self-contained FSM).
+`recovery_nav_sim.m`, `protected_nav_step.m` (legacy self-contained FSM),
+`ins_100hz_template.m` (what the host's 100 Hz function must add).
+
+## Tests
+
+- `run_scheduler_test.m` — 100 Hz + 2 Hz architecture (T1-T6)
+- `tests/test_monitors.m` — engine unit + Monte-Carlo checks (replaces the
+  dual_monitor-era `test_all.m`, which cannot drive `cpiMonitor` since the
+  window length / thresholds moved into `CST_spfParam`)
+- `tests/test_variable_numMeas.m` — varying satellite count, padded vs exact
+- `run_recovery.m` — end-to-end demo with offline design and plots
 
 ## Regression
 

@@ -10,7 +10,9 @@
 %   - coast_covariance     [n x n]  its covariance
 %   - kf_state             [n x 1]  current filter state (post-update)
 %   - kf_covariance        [n x n]  current filter covariance (post-update)
-%   - Phi, Q               [n x n]  state transition and process noise
+%   - spoofInfo            .phiAcc / .qAcc [n x n] interval Phi / Q
+%   - kFalseAlert, kMissedDetection (OPTIONAL, tests only) override
+%                          the CST_spfParam constants
 %
 % OUTPUTS:
 %   - coast_state          propagated to this epoch
@@ -31,12 +33,15 @@
 %******************************************************************************************
 %#codegen
 function [coastState, coastCovariance, ssResult] = ssMonitor...
-    (coastState, coastCovariance, kfState, kfCovariance, spoofInfo)
+    (coastState, coastCovariance, kfState, kfCovariance, spoofInfo, ...
+     kFalseAlert, kMissedDetection)
 
 % Define variables
 monitoredAxes      = CST_spfParam.MONITORED_AXES;
-kFalseAlert        = CST_spfParam.K_FALSE_ALERT;
-kMissedDetection   = CST_spfParam.K_MISSED_DETECTION;
+if (nargin < 7)
+    kFalseAlert      = CST_spfParam.K_FALSE_ALERT;
+    kMissedDetection = CST_spfParam.K_MISSED_DETECTION;
+end
 numAxes            = cast(numel(monitoredAxes), 'uint8');
 separation         = zeros(1, numAxes);
 sigmaSeparation    = zeros(1, numAxes);

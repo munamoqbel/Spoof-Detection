@@ -9,6 +9,8 @@
 %   - numMeasBuffer             [N x 1] valid measurement count per epoch
 %                               (rows/cols beyond it are padding)
 %   - axisIdx                   monitored position state index
+%   - windowLength, cpiThreshold (OPTIONAL, tests only) override the
+%                               CST_spfParam constants
 %
 % OUTPUTS:
 %   - cpiAlarm                  logical
@@ -30,11 +32,14 @@
 %******************************************************************************************
 %#codegen
 function [cpiAlarm, qStatistic, xiHistory] = cpiMonitor...
-    (innovationBuffer, innovationCovBuffer, obsMatrixBuffer, numMeasBuffer, axisIdx)
+    (innovationBuffer, innovationCovBuffer, obsMatrixBuffer, numMeasBuffer, axisIdx, ...
+     windowLength, cpiThreshold)
 
 % Define variables
-windowLength = CST_spfParam.WINDOW_LENGTH;
-cpiThreshold = CST_spfParam.CPI_THRESHOLD;
+if (nargin < 7)
+    windowLength = CST_spfParam.WINDOW_LENGTH;
+    cpiThreshold = CST_spfParam.CPI_THRESHOLD;
+end
 xiHistory    = zeros(windowLength, 1);
 qStatistic   = 0.0;
 cpiAlarm     = false;

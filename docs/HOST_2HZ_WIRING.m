@@ -19,18 +19,24 @@
 % ----------------------------------------------------------------------
 %  inputs the gate needs from kfUpdate (this epoch, first numMeas rows)
 % ----------------------------------------------------------------------
-%   y       = z - h(xPrior)                innovation            [numMeas x 1]
-%   S       = H*P*H' + R                   innovation covariance [numMeas x numMeas]
-%   H       = H(xPrior)                    Jacobian              [numMeas x 60]
-%   R       = diag(measurementZ)^2                               [numMeas x numMeas]
-%   xPrior  = KF.states going INTO the update (as extrapolated at 100 Hz)
+%   kfUpdate must add four outputs it already computes internally:
+%   y       = z - h(xPrior)   the innovation actually used by the update,
+%             recomputed at kfUpdate level (same expression as inside,
+%             including any -H*xPrior term if your states persist)   [numMeas x 1]
+%   H       = H(xPrior)       Jacobian                                [numMeas x 60]
+%   R       = diag(measurementZ)^2                                    [numMeas x numMeas]
+%   numMeas                   valid rows this epoch (0 = no GNSS)
+%   NOT needed from kfUpdate: S. The gate forms S = H*P_bar*H' + R from
+%   P_bar = activeKF.covariance as it goes INTO kfUpdate (extrapolated at
+%   100 Hz), so the SVD-based inverse deep inside stays untouched.
+%   xPrior  = activeKF.states going INTO the update
 %   xPost, PPost = x+, P+ straight OUT of kfUpdate, BEFORE setKF's
 %                  feedback / gain bookkeeping
-%   numMeas                                valid rows this epoch (0 = no GNSS)
-%   propTel.accumPhi, .accumQ              from spfAccumProp (published before
-%                                          its reset, as it already does)
-%   kfMeas = STRUCT_SPF.setKfMeas(y, S, H, R, numMeas, xPrior, xPost, PPost);
-%   (arrays may be exact-size or padded to CST_spfParam.MAX_MEAS = 30)
+%   propTel.accumPhi, .accumQ from spfAccumProp (published before its reset)
+%
+%   kfMeas = STRUCT_SPF.kfMeasFromUpdate(y, H, R, numMeas, xPrior, PPrior, xPost, PPost);
+%   (arrays may be exact-size or padded to CST_spfParam.MAX_MEAS = 30;
+%    a host that does have S can call STRUCT_SPF.setKfMeas instead)
 %
 % ----------------------------------------------------------------------
 %  2 Hz function
@@ -59,9 +65,10 @@
 %     activeKF = KF;                      % NOMINAL: normal; COAST: scratch copy
 % end
 %
-% xPrior = activeKF.states;
-% [kfUpdate, y, S, H, R, numMeas] = kfUpdate(measurement, activeKF, ...);   % your pipeline
-% kfMeas = STRUCT_SPF.setKfMeas(y, S, H, R, numMeas, xPrior, kfUpdate.states, kfUpdate.covariance);
+% xPrior = activeKF.states;  PPrior = activeKF.covariance;
+% [kfUpdate, y, H, R, numMeas] = kfUpdate(measurement, activeKF, ...);      % your pipeline + 4 outputs
+% kfMeas = STRUCT_SPF.kfMeasFromUpdate(y, H, R, numMeas, xPrior, PPrior, ...
+%                                      kfUpdate.states, kfUpdate.covariance);
 %
 % spoofTel  = spoofMonitor2hz(kfMeas, propTel, firstCall);
 % firstCall = false;

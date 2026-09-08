@@ -2,8 +2,8 @@
 % The gate must accept a measurement count that changes every epoch
 % (satellites rise/set). Runs the host contract (docs/HOST_2HZ_WIRING.m)
 % on the harness scenario with 5..8 satellites visible per epoch, two ways:
-%   (a) kfMeas arrays padded to CST_spfParam.MAX_MEAS rows (Coder style)
-%   (b) kfMeas arrays at their exact size (numMeas rows)
+%   (a) setKfMeas with S from the host, arrays padded to MAX_MEAS (Coder style)
+%   (b) kfMeasFromUpdate with y, H, R, P_bar at exact size (S formed by the gate)
 % and checks (a) == (b) bit-for-bit, no alarm before the attack, a latch
 % after attack onset, and a handback before the end.
 % Run from the repo root (MATLAB, or Octave with tools/octave_shim).
@@ -32,21 +32,21 @@ for variant = 1:2
         z = z_all(1:m, k); H = H_all(1:m, :, k); R = V(1:m, 1:m);
         inProb = (mode == CST_spfMode.PROBATION); kfUpd = (mode == CST_spfMode.NOMINAL);
         if inProb
-            [tr_x, tr_P, y, S, ~, xp] = kalman_update_step(tr_x, tr_P, z, H, propTel, R);
+            [tr_x, tr_P, y, S, ~, xp, xpP] = kalman_update_step(tr_x, tr_P, z, H, propTel, R);
             post = tr_x; postP = tr_P;
         else
-            [ax, aP, y, S, ~, xp] = kalman_update_step(kf_x, kf_P, z, H, propTel, R);
+            [ax, aP, y, S, ~, xp, xpP] = kalman_update_step(kf_x, kf_P, z, H, propTel, R);
             post = ax; postP = aP;
         end
-        if padded
+        if padded      % (a) host supplies S, arrays padded to MAX_MEAS
             yP = zeros(mMax, 1); yP(1:m) = y;
             SP = zeros(mMax);    SP(1:m, 1:m) = S;
             HP = zeros(mMax, n); HP(1:m, :) = H;
             RP = zeros(mMax);    RP(1:m, 1:m) = R;
-        else
-            yP = y; SP = S; HP = H; RP = R;
+            kfMeas = STRUCT_SPF.setKfMeas(yP, SP, HP, RP, m, xp, post, postP);
+        else           % (b) host supplies y, H, R, P_bar at exact size; gate forms S
+            kfMeas = STRUCT_SPF.kfMeasFromUpdate(y, H, R, m, xp, xpP, post, postP);
         end
-        kfMeas = STRUCT_SPF.setKfMeas(yP, SP, HP, RP, m, xp, post, postP);
         [sys, tel] = protectedNav(sys, kfMeas, propTel, k);
         mode = tel.info.mode;
         if kfUpd, kf_x = post; kf_P = postP; else, [kf_x, kf_P] = insCoast(kf_x, kf_P, propTel); end

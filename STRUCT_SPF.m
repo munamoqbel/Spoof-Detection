@@ -38,6 +38,34 @@ classdef STRUCT_SPF
                 'postCov',       postCov);            % P+                     [n x n]
         end
 
+        function [kfMeas] = kfMeasFromUpdate(innovation, obsMatrix, measNoiseCov, ...
+                numMeas, priorState, priorCov, postState, postCov)
+            % Host convenience: kfUpdate exposes only y, H, R, numMeas and
+            % x+, P+; the innovation covariance is formed HERE from the prior
+            % covariance the host had going into the update (KF.covariance
+            % as extrapolated at 100 Hz):  S = H P_bar H' + R.
+            % Arrays may be exact-size (numMeas rows) or padded to MAX_MEAS.
+
+            mMax = double(CST_spfParam.MAX_MEAS);
+            n    = CST_gnssHybrid.NO_STATES;
+            m    = double(numMeas);
+
+            innovationCov = zeros(mMax, mMax);
+            if (m > 0)
+                H = obsMatrix(1:m, :);
+                S = H * priorCov * H' + measNoiseCov(1:m, 1:m);
+                innovationCov(1:m, 1:m) = (S + S') / 2;
+            end % ELSE: no GNSS this epoch
+
+            % pad the host arrays to the fixed layout
+            innovationP = zeros(mMax, 1);  innovationP(1:m)     = innovation(1:m);
+            obsMatrixP  = zeros(mMax, n);  obsMatrixP(1:m, :)   = obsMatrix(1:m, :);
+            measNoiseP  = zeros(mMax);     measNoiseP(1:m, 1:m) = measNoiseCov(1:m, 1:m);
+
+            kfMeas = STRUCT_SPF.setKfMeas(innovationP, innovationCov, obsMatrixP, ...
+                measNoiseP, numMeas, priorState, postState, postCov);
+        end
+
         function [kfMeas] = zeroKfMeas
             m = double(CST_spfParam.MAX_MEAS);
             n = CST_gnssHybrid.NO_STATES;

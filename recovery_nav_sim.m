@@ -64,15 +64,17 @@ for epoch = 1:num_epochs
 
     % ---- host: update the ACTIVE filter (your kfUpdate) ----
     if inProbation
-        [tr_x, tr_P, y, S, ~, prior] = kalman_update_step(tr_x, tr_P, ...
+        [tr_x, tr_P, y, ~, ~, prior, priorP] = kalman_update_step(tr_x, tr_P, ...
             z_all(:, epoch), H_all(:, :, epoch), propTel, V);
         post = tr_x; postP = tr_P;
     else
-        [ax, aP, y, S, ~, prior] = kalman_update_step(kf_x, kf_P, ...
+        [ax, aP, y, ~, ~, prior, priorP] = kalman_update_step(kf_x, kf_P, ...
             z_all(:, epoch), H_all(:, :, epoch), propTel, V);
         post = ax; postP = aP;
     end
-    kfMeas = STRUCT_SPF.setKfMeas(y, S, H_all(:, :, epoch), V, num_meas, prior, post, postP);
+    % as the host: kfUpdate exposes y, H, R, numMeas, x+, P+; S is formed by the gate
+    kfMeas = STRUCT_SPF.kfMeasFromUpdate(y, H_all(:, :, epoch), V, num_meas, ...
+        prior, priorP, post, postP);
 
     % ---- gate ----
     [sys, spoofTel] = protectedNav(sys, kfMeas, propTel, epoch);

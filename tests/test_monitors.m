@@ -131,18 +131,19 @@ N_run = 600 * N;                              % 600 independent windows
 x_true = zeros(n_states,1); x_hat = zeros(n_states,1);
 r_all = zeros(1, 3 * (N-1) * 600); n_r = 0;
 n_1e3 = 0; k_1e3 = norminv(1 - 1e-3/2);
-dS = zeros(n_states, 1); cP = P; x_prev = x_hat;
+dS = zeros(n_states, 1); cP = P; x_prev = x_hat; P_prev = P;
 for k = 1:N_run
     x_true = Phi*x_true + sqQ .* randn(n_states,1);
     z  = H_t*x_true + sqV .* randn(m_meas,1);
+    P_prev = P;
     xb = Phi*x_hat; Pb = Phi*P*Phi' + Q;
     Sk = H_t*Pb*H_t' + V; Sk = (Sk+Sk')/2; L = Pb*H_t'/Sk;
     x_hat = xb + L*(z - H_t*xb);
     P = (eye(n_states) - L*H_t)*Pb; P = (P+P')/2;
+    inc = x_hat - Phi * x_prev;               % K*y (increment form) of this epoch
     if mod(k, N) == 1                         % open a fresh window on this epoch
         dS = zeros(n_states, 1); cP = P;
     else
-        inc = x_hat - Phi * x_prev;           % K*y (increment form)
         [dS, cP, r] = ssMonitor(dS, cP, inc, P, propTel, 2.0, k_MD_t);   % gate at 2 sigma
         rr = r.separation ./ max(r.sigmaSeparation, 1e-12);
         r_all(n_r+1 : n_r+3) = rr; n_r = n_r + 3;
@@ -164,9 +165,11 @@ end
 
 %% Test 8: SS detects a 1 m KF-vs-coast separation with the design gate
 fprintf('Test 8: SS detection under a separation ...\n');
-dS = zeros(n_states, 1); cP = Ph_all(:, :, 100);
-inc = xh_all(:, 101) - Phi * xh_all(:, 100); inc(3) = inc(3) + 1.0;
-[~, ~, r] = ssMonitor(dS, cP, inc, Ph_all(:, :, 101), propTel);
+% last epoch of the Test-7 run: window opened at k-1 (cov P_prev), tested at
+% k with that epoch's real increment plus 1 m on axis 3
+dS = zeros(n_states, 1); cP = P_prev;
+inc(3) = inc(3) + 1.0;
+[~, ~, r] = ssMonitor(dS, cP, inc, P, propTel);
 if r.anyAlarm && r.alarmPerAxis(3) && ~r.alarmPerAxis(1)
     fprintf('  PASS  axis-3 alarm, PL=%.3f m\n\n', r.maxProtectionLevel); pass=pass+1;
 else
@@ -175,7 +178,7 @@ end
 
 %% Test 9: revalidation passes on consistent GNSS, fails on a 2 m offset
 fprintf('Test 9: revalidation ...\n');
-cP = Ph_all(:, :, 200); cmp = zeros(n_states, 1);      % coast - prior = 0 (host not updating)
+cP = P; cmp = zeros(n_states, 1);      % coast - prior = 0 (host not updating)
 S_r = H_t * cP * H_t' + V; S_r = (S_r + S_r')/2;
 [U_r, D_r] = eig(S_r); L_r = U_r * diag(sqrt(max(diag(D_r), 0)));
 n_ok = 0; n_tr = 500;

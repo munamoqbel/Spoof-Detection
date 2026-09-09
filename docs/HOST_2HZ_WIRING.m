@@ -75,10 +75,10 @@
 %   xPrior  = activeKF.states going INTO the update
 %   xPost, PPost = x+, P+ straight OUT of kfUpdate, BEFORE setKF's
 %                  feedback / gain bookkeeping. The host's kfUpdate returns
-%                  x+ = KF.states + stateUpdate with stateUpdate = K*y, so
-%                  xPost - xPrior = K*y is the increment the gate uses; keep
-%                  returning x+ itself (the gate hands back nav.state in the
-%                  same absolute KF.states space), not the update term alone.
+%                  x+ = activeKF.states + stateUpdate with stateUpdate = K*y,
+%                  so xPost - xPrior = K*y is the increment the gate uses;
+%                  keep returning x+ itself (the gate hands back nav.state in
+%                  the same absolute states space), not the update term alone.
 %   propTel.accumPhi, .accumQ from spfAccumProp (published before its reset)
 %
 %   kfMeas = STRUCT_SPF.kfMeasFromUpdate(y, H, R, numMeas, xPrior, PPrior, xPost, PPost);

@@ -1,20 +1,44 @@
 %% HOST_2HZ_WIRING.m   (read-me file - do not run)
 % How the host's 2 Hz function drives spoofMonitor2hz. Written against the
 % host's own design: operational KF struct 'KF' (.states, .covariance,
-% .stateFB, .inValid); the 100 Hz function extrapolates KF every tick,
-% applies KF.stateFB to the mechanization and resets it (biases excluded),
-% and accumulates propTel.accumPhi / accumQ in spfAccumProp; the 2 Hz
-% setKF loads stateFB from the updated states and reduces KF.states by
-% gain*states.
+% .stateFB); the 100 Hz function extrapolates states and covariance every
+% tick (state = phi*state), applies KF.stateFB to the mechanization and
+% resets it (biases excluded), and accumulates propTel.accumPhi / accumQ
+% in spfAccumProp. The navigation output sees ONLY stateFB; KF.states is
+% used only for estimation and extrapolation.
 %
-% WHY INCREMENTS. Because setKF splits the estimate between the
-% mechanization (via stateFB) and the residual KF.states, KF.states alone
-% is not the navigation error. The gate therefore never uses an absolute
-% state: it accumulates the update increments  dx = xPost - xPrior  (= K*y)
-% of whichever filter is ACTIVE, propagated with the host's own interval
-% matrices. Every decision it returns is either a mode or a complete
-% (x+, P+) for the operational KF to be passed through the host's normal
-% setKF, unchanged.
+% HOST setKF AS IT EXISTS TODAY (feedback gain GAIN, one constant)
+%   normal        stateFB = GAIN*xPlus;  states = xPlus - GAIN*xPlus;  cov = PPlus
+%   no satellite  stateFB zeroed except biases; states = xPlus except the
+%                 pressure-altitude state (1-GAIN)*xPlus; cov = PPlus
+%   invalid       stateFB = 0, states = 0
+%
+% WHY INCREMENTS. The gate never uses an absolute state: it accumulates
+% the update increments  dx = xPost - xPrior  (= K*y) of whichever filter
+% is ACTIVE, propagated with the host's own interval matrices. The filter's
+% estimate moves by exactly dx per update whatever GAIN does with it, so
+% the monitors are invariant to the feedback split. Every decision the gate
+% returns is either a mode or a complete (x+, P+) with the SAME definition
+% as the kfUpdate outputs, to be passed through the normal setKF.
+%
+% HOST BEHAVIOUR ADDED WITH THE GATE
+%   COAST         no setKF update: states and covariance stay as the 100 Hz
+%                 side extrapolated them; position/velocity feedback zero;
+%                 bias feedback kept. Keep the coast PURE (no baro update
+%                 either): the gate's coast covariance is Phi*P*Phi' + Q of
+%                 exactly this filter.
+%   LATCH/COMMIT  nav.applyCorrection: (nav.state, nav.covar) through the
+%                 NORMAL setKF case, nothing else that epoch.
+%   invalid epoch present it to the gate as numMeas = 0 with xPost = xPrior,
+%                 PPost = PPrior (no GNSS, no increment).
+%
+%   OPEN CHOICE (host side only). The normal setKF leaves (1-GAIN)*nav.state
+%   in KF.states at the latch. In COAST nothing drains it, so the OUTPUT
+%   receives only the GAIN fraction of the anti-spoof correction until
+%   hand-back (the filter estimate is right, the displayed solution is
+%   not). Either apply the normal split to the extrapolated state on every
+%   COAST epoch (drains at the usual rate), or feed nav.state fully on the
+%   latch epoch (GAIN = 1 for that call). Both are consistent with the gate.
 %
 % ----------------------------------------------------------------------
 %  inputs the gate needs from kfUpdate (this epoch, first numMeas rows)
@@ -99,8 +123,9 @@
 % elseif ~inProbation && (spoofMode == CST_spfMode.NOMINAL)
 %     KF = setKF(kfUpdate, KF);              % NOMINAL -> NOMINAL: your existing path
 % end
-% % COAST (and the PROBATION epochs): KF is left exactly as the 100 Hz side
-% % extrapolated it (= the INS-only coast); no stateFB is produced.
+% % COAST (and the PROBATION epochs): KF stays exactly as the 100 Hz side
+% % extrapolated it (= the INS-only coast); position/velocity feedback is
+% % zero, bias feedback kept (see OPEN CHOICE in the header for draining).
 %
 % % ---- 5. trial bookkeeping ----
 % if inProbation

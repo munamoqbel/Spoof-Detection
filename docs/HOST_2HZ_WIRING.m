@@ -1,4 +1,6 @@
 %% HOST_2HZ_WIRING.m   (read-me file - do not run)
+% Decision tables (setKF per case, trial handling, what each mode compares
+% against, gate outputs per event): docs/HOST_DECISIONS.md
 % How the host's 2 Hz function drives spoofMonitor2hz. Written against the
 % host's own design: operational KF struct 'KF' (.states, .covariance,
 % .stateFB); the 100 Hz function extrapolates states and covariance every

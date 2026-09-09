@@ -49,6 +49,13 @@ order and prints one PASS/FAIL line each.
   then a scripted attack with authority (latch, vetoes, one commit)
 - `run_recovery.m` — end-to-end demo with offline design and plots
 
+## Host decisions
+
+`docs/HOST_DECISIONS.md` tabulates, per mode and event, what `setKF` sets
+(`stateFB`, `KF.states`, `KF.covariance`), how the trial is handled, what
+each mode compares against, and the gate outputs. `docs/HOST_2HZ_WIRING.m`
+is the code-level contract.
+
 ## Code generation
 
 The runtime path (`spoofMonitor2hz` and everything it calls) is written for

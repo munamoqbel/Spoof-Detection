@@ -90,91 +90,99 @@
 % ----------------------------------------------------------------------
 %  2 Hz function (complete skeleton; ONE setKF per epoch, never two)
 % ----------------------------------------------------------------------
-% function [KF, kfTel, spoofTel] = twoHzFunction(navOut, KF, satellite, propTel, inNavigationMode, ...)
+% function [KF, ...] = twoHzFunction(KF, satData, propTel, inNavigationMode, ...)
 %
-% persistent trialKF spoofMode firstCall
+% persistent trialKF spfMode kfCommand needReset
 % if isempty(trialKF)
 %     trialKF   = KF;                        % set once as a KF structure
-%     spoofMode = CST_spfMode.NOMINAL;
-%     firstCall = true;
+%     spfMode   = CST_spfMode.NOMINAL;
+%     kfCommand = STRUCT_SPF.zeroCommand;
+%     needReset = true;
 % end
+% if ~inNavigationMode, needReset = true; end   % alignment: gate off, re-arm
+% firstCall = needReset;
 %
-% inProbation = (spoofMode == CST_spfMode.PROBATION);   % mode BEFORE this epoch's gate call
+% inProbation = (spfMode == CST_spfMode.PROBATION);   % mode BEFORE this epoch's gate call
 %
 % % ---- 1. active filter: trial in PROBATION, operational KF otherwise ----
 % if inProbation
-%     % bring the trial to this epoch with the SAME interval matrices the
-%     % 100 Hz side used for KF, then let it eat the GNSS. NO setKF
-%     % bookkeeping on the trial: its states keep the full increments.
-%     trialKF.states     = propTel.accumPhi * trialKF.states;
-%     trialKF.covariance = propTel.accumPhi * trialKF.covariance * propTel.accumPhi' + propTel.accumQ;
-%     trialKF.covariance = (trialKF.covariance + trialKF.covariance') / 2;
+%     if kfCommand.startTrial
+%         % probation opened last epoch: the trial starts as the coasting KF.
+%         % KF has ALREADY been extrapolated to this epoch by the 100 Hz side,
+%         % so copy it as is (states AND covariance) and do not propagate.
+%         trialKF = KF;
+%     else
+%         % bring the trial to this epoch with the SAME interval matrices the
+%         % 100 Hz side used for KF (the trial has no 100 Hz extrapolation)
+%         trialKF.states     = propTel.accumPhi * trialKF.states;
+%         trialKF.covariance = propTel.accumPhi * trialKF.covariance * transpose(propTel.accumPhi) + propTel.accumQ;
+%         trialKF.covariance = (trialKF.covariance + transpose(trialKF.covariance)) / 2;
+%     end
 %     activeKF = trialKF;
 % else
 %     activeKF = KF;                         % NOMINAL: normal; COAST: scratch copy
 % end
 %
-% % ---- 2. your pipeline on the active filter (+ 4 new outputs) ----
-% xPrior = activeKF.states;  PPrior = activeKF.covariance;
-% [kfUpdate, y, H, R, numMeas] = kfUpdate(measurement, activeKF, ...);
-% kfMeas = STRUCT_SPF.kfMeasFromUpdate(y, H, R, numMeas, xPrior, PPrior, ...
-%                                      kfUpdate.states, kfUpdate.covariance);
+% % ---- 2. your pipeline on the active filter ----
+% measurement       = calMeas(satData, ..., activeKF);     % z and h(x) with the ACTIVE states
+% [kfPost, spfMeas] = kfUpdate(measurement, activeKF);
+% %   inside kfUpdate: spfMeas = STRUCT_SPF.kfMeasFromUpdate(y, H, R, numMeas, ...
+% %       activeKF.states, activeKF.covariance, kfPost.states, kfPost.covariance)
+% %   with the INPUT states/covariance as the prior; on an invalid update pass
+% %   numMeas = 0, kfPost.states = activeKF.states, kfPost.covariance = activeKF.covariance.
+% %   (kfPost, not 'kfUpdate': a variable named like the function shadows it.)
 %
-% % ---- 3. gate (navigation mode only, see next section) ----
+% % ---- 3. gate (navigation mode only) ----
 % if inNavigationMode
-%     spoofTel  = spoofMonitor2hz(kfMeas, propTel, firstCall);
-%     firstCall = false;
+%     spfTel    = spoofMonitor2hz(spfMeas, propTel, firstCall);
+%     needReset = false;
 % else
-%     spoofTel  = STRUCT_SPF.zeroTel;        % NOMINAL, no commands
-%     firstCall = true;                      % re-arm on the first navigation epoch
+%     spfTel    = STRUCT_SPF.zeroTel;        % NOMINAL, no commands
 % end
-% spoofMode = spoofTel.info.mode;            % mode AFTER the gate call
+% spfMode   = spfTel.info.mode;              % mode AFTER the gate call
+% kfCommand = spfTel.kfCommand;              % startTrial acted on at the START of the next epoch
 %
 % % ---- 4. apply the epoch's result: exactly ONE setKF on the operational KF ----
-% if spoofTel.nav.applyCorrection
+% if spfTel.nav.applyCorrection
 %     % LATCH (x+ of the operational KF minus the anchor separation) or
 %     % COMMIT (the trial's x+): a complete (x+, P+) for the OPERATIONAL KF.
 %     % Hand it to your normal setKF so stateFB and states are set as usual.
-%     % Do NOT also run the normal setKF this epoch, and do NOT write
-%     % KF.states / KF.covariance directly (the mechanization would never
-%     % receive the correction).
-%     kfClean            = kfUpdate;
-%     kfClean.states     = spoofTel.nav.state;
-%     kfClean.covariance = spoofTel.nav.covar;
+%     % Never write KF.states / KF.covariance directly and then call the
+%     % normal setKF on kfPost: that overwrites the clean state with the
+%     % scratch update and feeds the spoofed GNSS to the mechanization.
+%     kfClean            = kfPost;
+%     kfClean.states     = spfTel.nav.state;
+%     kfClean.covariance = spfTel.nav.covar;
 %     KF = setKF(kfClean, KF);
-% elseif ~inProbation && (spoofMode == CST_spfMode.NOMINAL)
-%     KF = setKF(kfUpdate, KF);              % NOMINAL -> NOMINAL: your existing path
-% end
-% elseif spoofMode == CST_spfMode.COAST
+% elseif ~inProbation && (spfMode == CST_spfMode.NOMINAL)
+%     KF = setKF(kfPost, KF);                % NOMINAL -> NOMINAL: your existing path (also alignment)
+% elseif spfMode == CST_spfMode.COAST
 %     % the operational KF is the INS-only coast; drain the leftover of the
 %     % latch correction smoothly (covariance untouched, as extrapolated):
 %     KF.stateFB = GAIN * KF.states;          % pos/vel/att; biases as today
 %     KF.states  = KF.states - GAIN * KF.states;
+% else
+%     % PROBATION: operational KF frozen as extrapolated; pos/vel feedback
+%     % zero, biases kept; states and covariance unchanged.
 % end
-% % PROBATION: operational KF frozen as extrapolated, pos/vel feedback zero.
 %
 % % ---- 5. trial bookkeeping ----
 % if inProbation
-%     trialKF = kfUpdate;                    % trial keeps its update (no setKF); on
-% end                                        % VETO it is simply never used again
-% if spoofTel.kfCommand.startTrial             % probation opens THIS epoch
-%     trialKF            = KF;               % trial starts ON the coast
-%     trialKF.covariance = spoofTel.kfCommand.trialCovar;   % (equals KF.covariance)
-% end
+%     trialKF = kfPost;                      % trial keeps its update (no setKF, no drain);
+% end                                        % on VETO it is simply never used again
 %
 % Epoch-by-epoch this gives:
-%   NOMINAL->NOMINAL   setKF(kfUpdate)
+%   NOMINAL->NOMINAL   setKF(kfPost)
 %   NOMINAL->COAST     setKF(kfClean) only            (latch)
 %   COAST->COAST       drain                          (KF coasts)
-%   COAST->PROBATION   frozen; trialKF <- KF          (start trial)
-%   PROBATION->PROB.   frozen; trialKF <- kfUpdate    (trial: no setKF ever)
+%   COAST->PROBATION   frozen; next epoch trialKF <- KF (start trial)
+%   PROBATION->PROB.   frozen; trialKF <- kfPost      (trial: no setKF ever)
 %   PROBATION->COAST   drain                          (veto, trial dropped)
 %   PROBATION->NOMINAL setKF(kfClean) only            (commit)
 %
-% If you prefer to start the trial at the START of the next probation epoch (as in
-% an earlier sketch), copy KF there and skip step 1's propagation for that
-% one epoch: KF.states / KF.covariance were already extrapolated by the
-% 100 Hz side, so a second propagation would double it.
+% Same-epoch alternative: copy the trial right after the gate call
+% (trialKF = KF; trialKF.covariance = spfTel.kfCommand.trialCovar) and
+% then step 1 propagates it on EVERY probation epoch. Do not mix the two.
 %
 % ----------------------------------------------------------------------
 %  alignment vs navigation mode

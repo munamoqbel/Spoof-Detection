@@ -32,13 +32,20 @@
 %   invalid epoch present it to the gate as numMeas = 0 with xPost = xPrior,
 %                 PPost = PPrior (no GNSS, no increment).
 %
-%   OPEN CHOICE (host side only). The normal setKF leaves (1-GAIN)*nav.state
-%   in KF.states at the latch. In COAST nothing drains it, so the OUTPUT
-%   receives only the GAIN fraction of the anti-spoof correction until
-%   hand-back (the filter estimate is right, the displayed solution is
-%   not). Either apply the normal split to the extrapolated state on every
-%   COAST epoch (drains at the usual rate), or feed nav.state fully on the
-%   latch epoch (GAIN = 1 for that call). Both are consistent with the gate.
+%   DRAIN IN COAST (decided: smooth transition). The normal setKF leaves
+%   (1-GAIN)*nav.state in KF.states at the latch and nothing would feed it
+%   while coasting, so the OUTPUT would keep the GAIN fraction of the
+%   spoof offset. Therefore on every epoch with no kfUpdate result for the
+%   operational KF (COAST, and PROBATION where it is still coasting) apply
+%   the normal split to the EXTRAPOLATED state instead of zeroing feedback:
+%       stateFB   = GAIN * KF.states;            (pos/vel/att; biases as today)
+%       KF.states = KF.states - GAIN * KF.states;
+%       KF.covariance unchanged
+%   The estimate does not move (only where it is held), so the gate's coast
+%   covariance stays valid. The leftover decays by (1-GAIN) per epoch:
+%   with GAIN = 0.4, a 30 m latch correction shows 18 m after the latch
+%   epoch, 3.9 m after 3 epochs, 0.1 m after 10 epochs (5 s), no step.
+%   A smaller GAIN in this branch only slows the transition further.
 %
 % ----------------------------------------------------------------------
 %  inputs the gate needs from kfUpdate (this epoch, first numMeas rows)
@@ -123,9 +130,13 @@
 % elseif ~inProbation && (spoofMode == CST_spfMode.NOMINAL)
 %     KF = setKF(kfUpdate, KF);              % NOMINAL -> NOMINAL: your existing path
 % end
-% % COAST (and the PROBATION epochs): KF stays exactly as the 100 Hz side
-% % extrapolated it (= the INS-only coast); position/velocity feedback is
-% % zero, bias feedback kept (see OPEN CHOICE in the header for draining).
+% else
+%     % COAST (and the PROBATION epochs): the operational KF is the INS-only
+%     % coast. Drain the leftover of the latch correction smoothly:
+%     KF.stateFB = GAIN * KF.states;          % pos/vel/att; biases as today
+%     KF.states  = KF.states - GAIN * KF.states;
+%     % KF.covariance unchanged (extrapolated by the 100 Hz side)
+% end
 %
 % % ---- 5. trial bookkeeping ----
 % if inProbation
@@ -139,10 +150,10 @@
 % Epoch-by-epoch this gives:
 %   NOMINAL->NOMINAL   setKF(kfUpdate)
 %   NOMINAL->COAST     setKF(kfClean) only            (latch)
-%   COAST->COAST       nothing                        (KF coasts)
-%   COAST->PROBATION   nothing; trialKF <- KF         (reseed)
-%   PROBATION->PROB.   trialKF <- kfUpdate
-%   PROBATION->COAST   nothing                        (veto, trial dropped)
+%   COAST->COAST       drain                          (KF coasts)
+%   COAST->PROBATION   drain; trialKF <- KF           (reseed)
+%   PROBATION->PROB.   drain; trialKF <- kfUpdate
+%   PROBATION->COAST   drain                          (veto, trial dropped)
 %   PROBATION->NOMINAL setKF(kfClean) only            (commit)
 %
 % If you prefer to reseed at the START of the next probation epoch (as in

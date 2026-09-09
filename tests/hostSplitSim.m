@@ -75,7 +75,7 @@ for k = 1:N
         end
     end
     if inProbation, t = xPlus; tP = PPlus; end       % trial keeps its update, no split
-    if tel.kfCommand.reseedKF, t = r; tP = tel.kfCommand.reseedCov; end
+    if tel.kfCommand.startTrial, t = r; tP = tel.kfCommand.trialCovar; end
 
     out.estimate(:, k) = fed + r;  out.output(:, k) = fed;  out.residual(:, k) = r;
     out.mode(k) = double(mode);

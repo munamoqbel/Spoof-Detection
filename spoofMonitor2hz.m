@@ -14,8 +14,8 @@
 %   spoofTel.nav.applyCorrection    true on LATCH and COMMIT epochs:
 %   spoofTel.nav.correction         x+ = KF.states + correction, P+ = nav.covar
 %   spoofTel.nav.covar              -> run the usual setKF bookkeeping on it
-%   spoofTel.kfCommand.reseedKF     true when probation opens: trial <- copy
-%                                   of the operational KF (cov reseedCov)
+%   spoofTel.kfCommand.startTrial     true when probation opens: trial <- copy
+%                                   of the operational KF (cov trialCovar)
 %   spoofTel.info.*                 alarms per axis, PL, qReval, dwell,
 %                                   coastEpochs, events
 %

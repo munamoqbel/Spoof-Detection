@@ -157,21 +157,21 @@
 % if inProbation
 %     trialKF = kfUpdate;                    % trial keeps its update (no setKF); on
 % end                                        % VETO it is simply never used again
-% if spoofTel.kfCommand.reseedKF             % probation opens THIS epoch
+% if spoofTel.kfCommand.startTrial             % probation opens THIS epoch
 %     trialKF            = KF;               % trial starts ON the coast
-%     trialKF.covariance = spoofTel.kfCommand.reseedCov;   % (equals KF.covariance)
+%     trialKF.covariance = spoofTel.kfCommand.trialCovar;   % (equals KF.covariance)
 % end
 %
 % Epoch-by-epoch this gives:
 %   NOMINAL->NOMINAL   setKF(kfUpdate)
 %   NOMINAL->COAST     setKF(kfClean) only            (latch)
 %   COAST->COAST       drain                          (KF coasts)
-%   COAST->PROBATION   frozen; trialKF <- KF          (reseed)
+%   COAST->PROBATION   frozen; trialKF <- KF          (start trial)
 %   PROBATION->PROB.   frozen; trialKF <- kfUpdate    (trial: no setKF ever)
 %   PROBATION->COAST   drain                          (veto, trial dropped)
 %   PROBATION->NOMINAL setKF(kfClean) only            (commit)
 %
-% If you prefer to reseed at the START of the next probation epoch (as in
+% If you prefer to start the trial at the START of the next probation epoch (as in
 % an earlier sketch), copy KF there and skip step 1's propagation for that
 % one epoch: KF.states / KF.covariance were already extrapolated by the
 % 100 Hz side, so a second propagation would double it.

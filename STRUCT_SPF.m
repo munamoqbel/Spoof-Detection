@@ -384,25 +384,25 @@ classdef STRUCT_SPF
                 eventProbationVetoed, eventHandback, anchorMissing, coastEpochs);
         end
 
-        function [command] = setCommand(reseedKF, reseedCov)
-            % reseedKF true = probation opens: the host must start its TRIAL
+        function [command] = setCommand(startTrial, trialCovar)
+            % startTrial true = probation opens: the host must start its TRIAL
             % filter as a copy of the operational (coasting) KF, with
-            % covariance reseedCov (equals the coast covariance).
+            % covariance trialCovar (equals the coast covariance).
 
             % Define structure
             command = struct( ...
-                'reseedKF',  logical(reseedKF), ...
-                'reseedCov', reseedCov);
+                'startTrial', logical(startTrial), ...
+                'trialCovar', trialCovar);
         end
 
         function [command] = zeroCommand
 
             % Init values
-            reseedKF = false;
-            reseedCov = zeros(CST_gnssHybrid.NO_STATES, CST_gnssHybrid.NO_STATES);
+            startTrial = false;
+            trialCovar = zeros(CST_gnssHybrid.NO_STATES, CST_gnssHybrid.NO_STATES);
 
             % Define structure
-            command = STRUCT_SPF.setCommand(reseedKF, reseedCov);
+            command = STRUCT_SPF.setCommand(startTrial, trialCovar);
         end
 
         function [nav] = setNav(applyCorrection, state, correction, covar, sigmaPosition)

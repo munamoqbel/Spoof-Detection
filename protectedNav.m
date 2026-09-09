@@ -22,8 +22,8 @@
 %     KF (LATCH: x+ of the operational KF minus the anchor separation;
 %     COMMIT: the trial's x+, which by construction equals the coasting
 %     KF.states plus the accumulated trial increments)
-%   - kfCommand.reseedKF true (probation opens): trial <- copy of the
-%     operational KF (covariance kfCommand.reseedCov)
+%   - kfCommand.startTrial true (probation opens): trial <- copy of the
+%     operational KF (covariance kfCommand.trialCovar)
 %
 % INPUTS:
 %   - sys      STRUCT_SPF.setSys (persistent)

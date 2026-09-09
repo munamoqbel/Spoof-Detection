@@ -90,7 +90,7 @@ for epoch = 1:num_epochs
         kf_x = spoofTel.nav.state;
         kf_P = spoofTel.nav.covar;
     end
-    if spoofTel.kfCommand.reseedKF                       % probation opens
+    if spoofTel.kfCommand.startTrial                       % probation opens
         tr_x = kf_x; tr_P = kf_P;
     end
 

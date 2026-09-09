@@ -35,9 +35,8 @@
 %   DRAIN IN COAST (decided: smooth transition). The normal setKF leaves
 %   (1-GAIN)*nav.state in KF.states at the latch and nothing would feed it
 %   while coasting, so the OUTPUT would keep the GAIN fraction of the
-%   spoof offset. Therefore on every epoch with no kfUpdate result for the
-%   operational KF (COAST, and PROBATION where it is still coasting) apply
-%   the normal split to the EXTRAPOLATED state instead of zeroing feedback:
+%   spoof offset. Therefore on every COAST epoch apply the normal split to
+%   the EXTRAPOLATED state of the operational KF instead of zeroing feedback:
 %       stateFB   = GAIN * KF.states;            (pos/vel/att; biases as today)
 %       KF.states = KF.states - GAIN * KF.states;
 %       KF.covariance unchanged
@@ -46,7 +45,17 @@
 %   with GAIN = 0.4, a 30 m latch correction shows 18 m after the latch
 %   epoch, 3.9 m after 3 epochs, 0.1 m after 10 epochs (5 s), no step.
 %   A smaller GAIN in this branch only slows the transition further.
-%
+%   PROBATION: no drain needed and none on the trial. The dwell guarantees
+%   >= 10 COAST epochs before a probation opens, so the residual is already
+%   < 1 % of its latch value; freeze the operational KF (pass-through, zero
+%   pos/vel feedback, biases kept). The TRIAL never goes through setKF: it
+%   has no mechanization of its own, its states must keep the full
+%   increments, and at COMMIT its x+ goes through the normal setKF once.
+%   The size of the latch correction is bounded by the protection level
+%   (the monitors fire before the spoofer gets further), not by the attack.
+%   Verified by tests/test_feedback_split.m (tests/hostSplitSim.m emulates
+%   this setKF; estimate identical to the bare host to 1e-15 for GAIN 0.1,
+%   0.4 and 1.0; residual < 2 % after 10 drained epochs).
 % ----------------------------------------------------------------------
 %  inputs the gate needs from kfUpdate (this epoch, first numMeas rows)
 % ----------------------------------------------------------------------
@@ -130,13 +139,13 @@
 % elseif ~inProbation && (spoofMode == CST_spfMode.NOMINAL)
 %     KF = setKF(kfUpdate, KF);              % NOMINAL -> NOMINAL: your existing path
 % end
-% else
-%     % COAST (and the PROBATION epochs): the operational KF is the INS-only
-%     % coast. Drain the leftover of the latch correction smoothly:
+% elseif spoofMode == CST_spfMode.COAST
+%     % the operational KF is the INS-only coast; drain the leftover of the
+%     % latch correction smoothly (covariance untouched, as extrapolated):
 %     KF.stateFB = GAIN * KF.states;          % pos/vel/att; biases as today
 %     KF.states  = KF.states - GAIN * KF.states;
-%     % KF.covariance unchanged (extrapolated by the 100 Hz side)
 % end
+% % PROBATION: operational KF frozen as extrapolated, pos/vel feedback zero.
 %
 % % ---- 5. trial bookkeeping ----
 % if inProbation
@@ -151,8 +160,8 @@
 %   NOMINAL->NOMINAL   setKF(kfUpdate)
 %   NOMINAL->COAST     setKF(kfClean) only            (latch)
 %   COAST->COAST       drain                          (KF coasts)
-%   COAST->PROBATION   drain; trialKF <- KF           (reseed)
-%   PROBATION->PROB.   drain; trialKF <- kfUpdate
+%   COAST->PROBATION   frozen; trialKF <- KF          (reseed)
+%   PROBATION->PROB.   frozen; trialKF <- kfUpdate    (trial: no setKF ever)
 %   PROBATION->COAST   drain                          (veto, trial dropped)
 %   PROBATION->NOMINAL setKF(kfClean) only            (commit)
 %

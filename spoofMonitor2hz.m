@@ -22,9 +22,9 @@
 %                                   coastEpochs, events
 %
 % INPUTS:
-%   - kfMeas        STRUCT_SPF.setKfMeas / kfMeasFromUpdate: GNSS rows ONLY
-%                   (y, H, R of the range / range-rate rows; the pressure
-%                   row excluded), numMeas = GNSS rows (0 = no GNSS), and
+%   - kfMeas        STRUCT_SPF.setKfMeas / kfMeasFromUpdate: the rows the
+%                   filter used (y, H, R; the pressure-altitude row may stay,
+%                   see CST_spfParam.REVAL_MIN_MEAS), numMeas valid rows, and
 %                   xPrior, xPost, PPost of the ACTIVE filter's update
 %   - propTel       STRUCT_SPF.setPropTel(accumPhi, accumQ): interval Phi / Q
 %                   accumulated on the 100 Hz side since the previous epoch

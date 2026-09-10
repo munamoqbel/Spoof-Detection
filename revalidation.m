@@ -28,11 +28,14 @@
 %   - coastCovariance   [n x n]  P_C of the coast
 %
 % OUTPUTS:
-%   - passed     logical, qValue < threshold(numMeas); false if numMeas = 0
+%   - passed     logical, qValue < threshold(numMeas) AND numMeas >=
+%                CST_spfParam.REVAL_MIN_MEAS; false if numMeas = 0
 %   - qValue     the chi-square statistic (log it for diagnostics)
 %
 % ASSUMPTIONS AND LIMITATIONS:
-% Threshold from CST_spfParam.REVAL_THRESHOLD_TABLE(numMeas).
+% Threshold from CST_spfParam.REVAL_THRESHOLD_TABLE(numMeas). The rows may
+% include non-GNSS measurements (pressure altitude); REVAL_MIN_MEAS keeps
+% an epoch with too few rows from counting as a pass.
 %
 % REQUIREMENT TRACEABILITY:
 %
@@ -54,10 +57,10 @@ if (numMeas > 0)
     residualCov = (residualCov + residualCov') / 2;
 
     qValue = residual' * (residualCov \ residual);
-    if (qValue < threshold)
+    if (qValue < threshold) && (numMeas >= CST_spfParam.REVAL_MIN_MEAS)
         passed  = true;
-    end % ELSE is trivial
-end % ELSE: no GNSS this epoch -> cannot validate
+    end % ELSE: inconsistent, or too few rows to certify (e.g. pressure only)
+end % ELSE: no measurement this epoch -> cannot validate
 
 end
 %------------------------------------------------------------------------

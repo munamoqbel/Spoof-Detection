@@ -74,12 +74,11 @@
 %   NOT needed from kfUpdate: S. The gate forms S = H*P_bar*H' + R from
 %   P_bar = activeKF.covariance as it goes INTO kfUpdate (extrapolated at
 %   100 Hz), so the SVD-based inverse deep inside stays untouched.
-%   GNSS ROWS ONLY: build spfMeas from the range / range-rate rows and drop
-%   the pressure row from y, H and R; numMeas = number of GNSS rows (0 on
-%   an outage). The increment xPost - xPrior still contains everything the
-%   filter did, baro included, which is what the monitors expect. Keeping
-%   the baro row out matters in COAST: ten baro-only epochs would otherwise
-%   pass re-validation with no GNSS evidence.
+%   ALL ROWS AS THE FILTER USES THEM: y, H, R may keep the pressure-altitude
+%   row and numMeas is the host's total valid row count (>= 1 even in a
+%   GNSS outage). The monitors treat the baro as the genuine measurement it
+%   is; CST_spfParam.REVAL_MIN_MEAS (4 rows) keeps baro-only or
+%   single-satellite epochs from counting as a re-validation pass in COAST.
 %   xPrior  = activeKF.states going INTO the update
 %   xPost, PPost = x+, P+ straight OUT of kfUpdate, BEFORE setKF's
 %                  feedback / gain bookkeeping. The host's kfUpdate returns
@@ -206,8 +205,9 @@
 %   on the first navigation epoch, whose (x+, P+) become the startup anchor).
 %
 %   GNSS outage (only the pressure row available): STILL call the gate,
-%   with numMeas = 0. It contributes xi = 0 to the CPI windows, cannot pass
-%   re-validation, and keeps windows, anchor and coast covariances
+%   with the rows the filter used (numMeas = 1 in the host). The baro row
+%   feeds the vertical CPI legitimately, cannot pass re-validation
+%   (REVAL_MIN_MEAS), and windows, anchor and coast covariances keep
 %   propagating. Skipping the call would lose one interval of Phi/Q and one
 %   increment. The epoch counter counts gate calls (anchor age is a time),
 %   and is reset only in alignment.

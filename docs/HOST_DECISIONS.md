@@ -13,7 +13,7 @@ feedback gain (0.4). "Mode" is the gate mode **after** this epoch's call to
 | `xPrior` | `activeKF.states` captured before calling `kfUpdate` (extrapolated at 100 Hz) |
 | `xPost` | `kfUpdate` output: `activeKF.states + K*y` |
 | `PPrior`, `PPost` | `activeKF.covariance` before, `kfUpdate` covariance after |
-| `y`, `H`, `R`, `numMeas` | innovation `z - h(xPrior)`, Jacobian, measurement noise, valid rows: GNSS rows only, pressure row excluded, `numMeas = 0` on an outage |
+| `y`, `H`, `R`, `numMeas` | innovation `z - h(xPrior)`, Jacobian, measurement noise, valid rows as the filter used them (pressure row included; `numMeas = 1` on a GNSS outage) |
 | increment | `xPost - xPrior = K*y`: the only thing the monitors consume |
 | separation | sum of Phi-propagated increments since a reference epoch = host solution minus the coast of that reference |
 | anchor | last alarm-free closed window: `separation` (kept live) and coast covariance |
@@ -46,7 +46,7 @@ cumulative rule in every case.
 | COMMIT (PROBATION -> NOMINAL) | `nav.applyCorrection`, `info.eventHandback` | `GAIN * nav.state` | `nav.state - GAIN * nav.state` | `nav.covar` (trial `PPost`) | `nav.state` is the trial's `xPost` |
 | No usable anchor at alarm | `info.anchorMissing`, no correction | as COAST | as COAST | input unchanged | discarded |
 | Alignment (`navActive = false`) | gate called, returns `zeroTel` and re-arms itself | as today | as today | as today | as today |
-| GNSS outage in navigation (pressure row only) | gate called with `numMeas = 0` | as today (no-satellite case) | as today | as today | used |
+| GNSS outage in navigation (pressure row only) | gate called with `numMeas = 1`; cannot pass re-validation (`REVAL_MIN_MEAS = 4`) | as today (no-satellite case) | as today | as today | used |
 
 Implementation: `setKF` itself is unchanged. The host selects its input
 before the one call per epoch: `nav.state` / `nav.covar` on latch and commit,
@@ -88,7 +88,7 @@ Rules behind the table:
 |---|---|---|---|---|---|---|
 | NOMINAL | operational KF, updated normally | SS, every open window, every monitored axis, every epoch | window separation (increments since the window opened) | that window's INS-only coast | `abs(d_axis) > K_FALSE_ALERT * sqrt(P_C - P_KF)` | any alarm: LATCH to the anchor |
 | NOMINAL | same | CPI, when a window reaches N = 10 | normalised innovation projections on the axis, `xi = f'S^-1 y / sqrt(f'S^-1 f)` | N(0,1) under no attack | `sum(xi^2) > CPI_THRESHOLD` (Gamma, 45.64) | any alarm: LATCH; a window alarm-free for its whole life refreshes the anchor |
-| COAST | operational KF **not** updated (scratch update feeds `y, H, R` only) | re-validation, every epoch | raw GNSS innovation `y` | the INS-only coast (the operational KF's own prior) with its grown covariance | `y' (H P_C H' + R)^-1 y < chi2inv(1 - 1e-3, numMeas)`; `numMeas = 0` cannot pass | 10 consecutive passes: PROBATION; a fail resets the dwell. Monitors do not run |
+| COAST | operational KF **not** updated (scratch update feeds `y, H, R` only) | re-validation, every epoch | raw innovation `y` (all rows) | the INS-only coast (the operational KF's own prior) with its grown covariance | `y' (H P_C H' + R)^-1 y < chi2inv(1 - 1e-3, numMeas)` and `numMeas >= REVAL_MIN_MEAS` (4); baro-only epochs cannot pass | 10 consecutive passes: PROBATION; a fail resets the dwell. Monitors do not run |
 | PROBATION | trial KF, updated | SS and CPI on the trial, same as NOMINAL | trial increments (`probSep`) | the coast (`P_C - P_trial`) | as NOMINAL | any alarm: VETO to COAST (dwell reset); 18 quiet epochs: COMMIT |
 | PROBATION | same | re-validation, diagnostic only | `y - H * (-Phi * probSep)` | the coast | same statistic, logged as `info.qReval` | no decision |
 

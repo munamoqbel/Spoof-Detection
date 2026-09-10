@@ -13,6 +13,12 @@
 % - MAX_MEAS:
 % Upper bound on GNSS measurements per epoch. All monitor buffers are sized
 % to it; the per-epoch valid count (numMeas) selects the live rows.
+% - REVAL_MIN_MEAS:
+% Minimum valid rows for a re-validation pass. The host's measurement
+% vector always carries the pressure-altitude row, so numMeas >= 1 even in
+% a GNSS outage; without this floor ten baro-only epochs in COAST would
+% open a probation with no GNSS evidence. qReval is still computed and
+% logged whenever numMeas > 0.
 % - REVAL_THRESHOLD_TABLE(m) = chi2inv(1 - 1e-3, m), m = 1..MAX_MEAS (30)
 % (Implementation Guide Sec. 5: one gate per possible satellite count).
 % Recompute offline if MAX_MEAS or the 1e-3 allocation changes.
@@ -43,6 +49,8 @@ classdef CST_spfParam
             52.61965577617, 54.05196238858, 55.47602020575, 56.89228539335, ...
             58.30117348979, 59.70306430443];
         REVAL_DWELL_REQUIRED = uint8(10);         % passes -> probation
+        REVAL_MIN_MEAS = uint8(4);                % rows needed for a re-validation PASS (3-D fix + clock;
+                                                  % a pressure-only or single-satellite epoch cannot certify)
         PROBATION_LENGTH = uint8(18);             % quiet epochs -> commit
         MAX_ANCHOR_AGE = uint32(234);             % epochs, 0.5 s each
         MAX_MEAS = uint8(30);                     % max measurements per epoch (host arrays are sized to 30)

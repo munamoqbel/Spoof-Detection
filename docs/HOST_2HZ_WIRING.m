@@ -39,9 +39,9 @@
 %   while coasting, so the OUTPUT would keep the GAIN fraction of the
 %   spoof offset. Therefore on every COAST epoch apply the normal split to
 %   the EXTRAPOLATED state of the operational KF instead of zeroing feedback:
-%       stateFB   = GAIN * KF.states;            (pos/vel/att; biases as today)
-%       KF.states = KF.states - GAIN * KF.states;
-%       KF.covariance unchanged
+%       input to setKF: states = extrapolated KF.states, covar = KF.covariance
+%       setKF normal case then gives stateFB = GAIN*states,
+%       states = states - GAIN*states, covar unchanged (pos/vel/att; biases as today)
 %   The estimate does not move (only where it is held), so the gate's coast
 %   covariance stays valid. The leftover decays by (1-GAIN) per epoch:
 %   with GAIN = 0.4, a 30 m latch correction shows 18 m after the latch
@@ -158,9 +158,12 @@
 % elseif spfMode ~= CST_spfMode.NOMINAL
 %     % COAST or PROBATION: the operational KF is the INS-only coast. Feed
 %     % the EXTRAPOLATED prior (KF is untouched at this point), not the
-%     % scratch update. The normal case on the prior IS the drain:
-%     %   stateFB = GAIN*KF.states; states = KF.states - GAIN*KF.states;
-%     %   covar = KF.covariance unchanged; imuDrift integrates as usual.
+%     % scratch update. setKF reads only its input struct, so with this
+%     % input its normal case IS the drain:
+%     %   stateFB = GAIN*kfEstimatedUpdate.states
+%     %   states  = kfEstimatedUpdate.states - GAIN*kfEstimatedUpdate.states
+%     %   covar   = kfEstimatedUpdate.covar (= the extrapolated covariance)
+%     %   imuDrift integrates as usual.
 %     kfEstimatedUpdate.states = KF.states;
 %     kfEstimatedUpdate.covar  = KF.covariance;
 %     kfEstimatedUpdate.failed = false;      % a failed scratch update must not reset the KF

@@ -41,11 +41,19 @@ cumulative rule in every case.
 | LATCH (NOMINAL -> COAST) | `nav.applyCorrection`, `info.eventLatched` | `GAIN * nav.state` | `nav.state - GAIN * nav.state` | `nav.covar` (anchor coast covariance) | discarded |
 | COAST (stays) | none | `GAIN * states_extrap` (drain) | `states_extrap - GAIN * states_extrap` | input `KF.covariance` unchanged (extrapolated) | discarded; only `y, H, R, numMeas` feed the gate |
 | COAST -> PROBATION | `kfCommand.startTrial`, `info.eventProbationStarted` | drain, as COAST | drain, as COAST | input unchanged | discarded; next epoch `trialKF = KF` (states and covariance, already extrapolated) |
-| PROBATION (stays) | none | zero except biases (frozen) | extrapolated, unchanged | input unchanged | belongs to the trial (see section 3) |
+| PROBATION (stays) | none | drain, as COAST | drain, as COAST | input unchanged | belongs to the trial (see section 3) |
 | VETO (PROBATION -> COAST) | `info.eventProbationVetoed` | drain, as COAST | drain, as COAST | input unchanged | trial discarded |
 | COMMIT (PROBATION -> NOMINAL) | `nav.applyCorrection`, `info.eventHandback` | `GAIN * nav.state` | `nav.state - GAIN * nav.state` | `nav.covar` (trial `PPost`) | `nav.state` is the trial's `xPost` |
 | No usable anchor at alarm | `info.anchorMissing`, no correction | as COAST | as COAST | input unchanged | discarded |
 | Alignment | gate not called (`zeroTel`), `firstCall = true` | as today | as today | as today | as today |
+
+Implementation: `setKF` itself is unchanged. The host selects its input
+before the one call per epoch: `nav.state` / `nav.covar` on latch and commit,
+the extrapolated `KF.states` / `KF.covariance` on COAST and PROBATION (the
+normal case on the prior is the drain), `kfPost` otherwise. On the two
+overriding branches the fields that select the case (`failed`, satellite
+count) are forced to the normal case, so a failed or no-satellite scratch
+update can neither zero the clean state nor trigger the 100 Hz reset.
 
 Rules behind the table:
 
@@ -66,7 +74,7 @@ Rules behind the table:
 
 | Step | Action |
 |---|---|
-| Probation opens (`startTrial`, acted on at the start of the next epoch) | `trialKF = KF`, states and covariance as the 100 Hz side extrapolated them; no propagation on that epoch |
+| Probation opens (`startTrial`, acted on at the start of the next epoch) | `trialKF = KF`, states and covariance as the 100 Hz side extrapolated them; no propagation on that epoch. The operational KF keeps draining meanwhile (negligible by then) |
 | Start of each PROBATION epoch | `trialKF.states = accumPhi * trialKF.states`; `trialKF.covariance = accumPhi * P * accumPhi' + accumQ`, symmetrised (the trial has no 100 Hz extrapolation of its own) |
 | Update | `kfUpdate(measurement, trialKF)`; `h(x)` must use the states of the struct passed in |
 | After the gate call | `trialKF = kfUpdate result` (states and covariance). No `setKF`, no feedback, no drain: the trial has no mechanization of its own and its states must keep the full increments |

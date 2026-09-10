@@ -47,10 +47,10 @@
 %   with GAIN = 0.4, a 30 m latch correction shows 18 m after the latch
 %   epoch, 3.9 m after 3 epochs, 0.1 m after 10 epochs (5 s), no step.
 %   A smaller GAIN in this branch only slows the transition further.
-%   PROBATION: no drain needed and none on the trial. The dwell guarantees
-%   >= 10 COAST epochs before a probation opens, so the residual is already
-%   < 1 % of its latch value; freeze the operational KF (pass-through, zero
-%   pos/vel feedback, biases kept). The TRIAL never goes through setKF: it
+%   PROBATION: same drain branch (one branch is simpler; the dwell
+%   guarantees >= 10 COAST epochs before a probation opens, so the residual
+%   is already < 1 % of its latch value and what the drain moves during
+%   probation is negligible). The TRIAL never goes through setKF: it
 %   has no mechanization of its own, its states must keep the full
 %   increments, and at COMMIT its x+ goes through the normal setKF once.
 %   The size of the latch correction is bounded by the protection level
@@ -143,28 +143,30 @@
 % kfCommand = spfTel.kfCommand;              % startTrial acted on at the START of the next epoch
 %
 % % ---- 4. apply the epoch's result: exactly ONE setKF on the operational KF ----
+% %  Your setKF (normal / no-satellite / failed cases) is not changed. The
+% %  INPUT is selected before the call:
+% kfEstimatedUpdate = kfPost;
 % if spfTel.nav.applyCorrection
 %     % LATCH (x+ of the operational KF minus the anchor separation) or
-%     % COMMIT (the trial's x+): a complete (x+, P+) for the OPERATIONAL KF.
-%     % Hand it to your normal setKF so stateFB and states are set as usual.
-%     % Never write KF.states / KF.covariance directly and then call the
-%     % normal setKF on kfPost: that overwrites the clean state with the
-%     % scratch update and feeds the spoofed GNSS to the mechanization.
-%     kfClean            = kfPost;
-%     kfClean.states     = spfTel.nav.state;
-%     kfClean.covariance = spfTel.nav.covar;
-%     KF = setKF(kfClean, KF);
-% elseif ~inProbation && (spfMode == CST_spfMode.NOMINAL)
-%     KF = setKF(kfPost, KF);                % NOMINAL -> NOMINAL: your existing path (also alignment)
-% elseif spfMode == CST_spfMode.COAST
-%     % the operational KF is the INS-only coast; drain the leftover of the
-%     % latch correction smoothly (covariance untouched, as extrapolated):
-%     KF.stateFB = GAIN * KF.states;          % pos/vel/att; biases as today
-%     KF.states  = KF.states - GAIN * KF.states;
-% else
-%     % PROBATION: operational KF frozen as extrapolated; pos/vel feedback
-%     % zero, biases kept; states and covariance unchanged.
+%     % COMMIT (the trial's x+): a complete (x+, P+) for the OPERATIONAL KF,
+%     % through the normal case. Never write KF.states / KF.covariance
+%     % directly and then call setKF on kfPost: that overwrites the clean
+%     % state with the scratch update.
+%     kfEstimatedUpdate.states = spfTel.nav.state;
+%     kfEstimatedUpdate.covar  = spfTel.nav.covar;
+%     kfEstimatedUpdate.failed = false;      % force the normal case (kfPost may be failed / no-sat)
+% elseif spfMode ~= CST_spfMode.NOMINAL
+%     % COAST or PROBATION: the operational KF is the INS-only coast. Feed
+%     % the EXTRAPOLATED prior (KF is untouched at this point), not the
+%     % scratch update. The normal case on the prior IS the drain:
+%     %   stateFB = GAIN*KF.states; states = KF.states - GAIN*KF.states;
+%     %   covar = KF.covariance unchanged; imuDrift integrates as usual.
+%     kfEstimatedUpdate.states = KF.states;
+%     kfEstimatedUpdate.covar  = KF.covariance;
+%     kfEstimatedUpdate.failed = false;      % a failed scratch update must not reset the KF
 % end
+% % NOMINAL (and alignment): kfPost as today, your existing cases apply.
+% KF = setKF(kfEstimatedUpdate, KF);
 %
 % % ---- 5. trial bookkeeping ----
 % if inProbation
@@ -173,12 +175,12 @@
 %
 % Epoch-by-epoch this gives:
 %   NOMINAL->NOMINAL   setKF(kfPost)
-%   NOMINAL->COAST     setKF(kfClean) only            (latch)
-%   COAST->COAST       drain                          (KF coasts)
-%   COAST->PROBATION   frozen; next epoch trialKF <- KF (start trial)
-%   PROBATION->PROB.   frozen; trialKF <- kfPost      (trial: no setKF ever)
+%   NOMINAL->COAST     setKF(nav.state, nav.covar)    (latch)
+%   COAST->COAST       setKF(KF prior) = drain        (KF coasts)
+%   COAST->PROBATION   drain; next epoch trialKF <- KF (start trial)
+%   PROBATION->PROB.   drain; trialKF <- kfPost       (trial: no setKF ever)
 %   PROBATION->COAST   drain                          (veto, trial dropped)
-%   PROBATION->NOMINAL setKF(kfClean) only            (commit)
+%   PROBATION->NOMINAL setKF(nav.state, nav.covar)    (commit)
 %
 % Same-epoch alternative: copy the trial right after the gate call
 % (trialKF = KF, states and covariance) and

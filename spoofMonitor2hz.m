@@ -15,7 +15,7 @@
 %   spoofTel.nav.correction         x+ = KF.states + correction, P+ = nav.covar
 %   spoofTel.nav.covar              -> run the usual setKF bookkeeping on it
 %   spoofTel.kfCommand.startTrial     true when probation opens: trial <- copy
-%                                   of the operational KF (cov trialCovar)
+%                                   of the operational KF (states + covariance)
 %   spoofTel.info.*                 alarms per axis, PL, qReval, dwell,
 %                                   coastEpochs, events
 %

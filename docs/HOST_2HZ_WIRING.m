@@ -181,7 +181,7 @@
 %   PROBATION->NOMINAL setKF(kfClean) only            (commit)
 %
 % Same-epoch alternative: copy the trial right after the gate call
-% (trialKF = KF; trialKF.covariance = spfTel.kfCommand.trialCovar) and
+% (trialKF = KF, states and covariance) and
 % then step 1 propagates it on EVERY probation epoch. Do not mix the two.
 %
 % ----------------------------------------------------------------------

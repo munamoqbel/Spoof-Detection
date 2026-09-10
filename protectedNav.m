@@ -23,7 +23,7 @@
 %     COMMIT: the trial's x+, which by construction equals the coasting
 %     KF.states plus the accumulated trial increments)
 %   - kfCommand.startTrial true (probation opens): trial <- copy of the
-%     operational KF (covariance kfCommand.trialCovar)
+%     operational KF (states and covariance)
 %
 % INPUTS:
 %   - sys      STRUCT_SPF.setSys (persistent)
@@ -153,7 +153,7 @@ switch sys.mode
             sys.pool           = STRUCT_SPF.closeAllWindows(sys.pool);
             sys.mode           = CST_spfMode.PROBATION;
             % order the host to start its TRIAL as a copy of the coasting KF
-            kfCommand = STRUCT_SPF.setCommand(true, sys.coastCov);
+            kfCommand = STRUCT_SPF.setCommand(true);
         end
 
     % ==================================================================

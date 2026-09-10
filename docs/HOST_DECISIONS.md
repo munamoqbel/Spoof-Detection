@@ -40,7 +40,7 @@ cumulative rule in every case.
 | NOMINAL, invalid update | none | zero | zero | as today | to the gate: `numMeas = 0`, `xPost = xPrior`, `PPost = PPrior` |
 | LATCH (NOMINAL -> COAST) | `nav.applyCorrection`, `info.eventLatched` | `GAIN * nav.state` | `nav.state - GAIN * nav.state` | `nav.covar` (anchor coast covariance) | discarded |
 | COAST (stays) | none | `GAIN * states_extrap` (drain) | `states_extrap - GAIN * states_extrap` | input `KF.covariance` unchanged (extrapolated) | discarded; only `y, H, R, numMeas` feed the gate |
-| COAST -> PROBATION | `kfCommand.startTrial`, `info.eventProbationStarted` | drain, as COAST | drain, as COAST | input unchanged | discarded; then `trialKF = KF`, `trialKF.covariance = trialCovar` (equals `KF.covariance`) |
+| COAST -> PROBATION | `kfCommand.startTrial`, `info.eventProbationStarted` | drain, as COAST | drain, as COAST | input unchanged | discarded; next epoch `trialKF = KF` (states and covariance, already extrapolated) |
 | PROBATION (stays) | none | zero except biases (frozen) | extrapolated, unchanged | input unchanged | belongs to the trial (see section 3) |
 | VETO (PROBATION -> COAST) | `info.eventProbationVetoed` | drain, as COAST | drain, as COAST | input unchanged | trial discarded |
 | COMMIT (PROBATION -> NOMINAL) | `nav.applyCorrection`, `info.eventHandback` | `GAIN * nav.state` | `nav.state - GAIN * nav.state` | `nav.covar` (trial `PPost`) | `nav.state` is the trial's `xPost` |
@@ -66,7 +66,7 @@ Rules behind the table:
 
 | Step | Action |
 |---|---|
-| Probation opens (`startTrial`) | `trialKF = KF` after this epoch's drain; `trialKF.covariance = kfCommand.trialCovar` |
+| Probation opens (`startTrial`, acted on at the start of the next epoch) | `trialKF = KF`, states and covariance as the 100 Hz side extrapolated them; no propagation on that epoch |
 | Start of each PROBATION epoch | `trialKF.states = accumPhi * trialKF.states`; `trialKF.covariance = accumPhi * P * accumPhi' + accumQ`, symmetrised (the trial has no 100 Hz extrapolation of its own) |
 | Update | `kfUpdate(measurement, trialKF)`; `h(x)` must use the states of the struct passed in |
 | After the gate call | `trialKF = kfUpdate result` (states and covariance). No `setKF`, no feedback, no drain: the trial has no mechanization of its own and its states must keep the full increments |
@@ -95,7 +95,7 @@ the estimate having no information, not a sign that the attack ended.
 | Event | Flags | `nav.state` | `nav.covar` | `kfCommand` |
 |---|---|---|---|---|
 | Latch | `applyCorrection`, `eventLatched`, `eventAnchorEpoch` | operational `xPost - anchor.separation` | `anchor.covariance` | none |
-| Probation opens | `eventProbationStarted` | none | none | `startTrial = true`, `trialCovar = coast covariance` |
+| Probation opens | `eventProbationStarted` | none | none | `startTrial = true` |
 | Veto | `eventProbationVetoed` | none | none | none |
 | Commit | `applyCorrection`, `eventHandback` | trial `xPost` | trial `PPost` | none |
 | Alarm without usable anchor | `eventLatched`, `anchorMissing` | none | none | none; mode still COAST |

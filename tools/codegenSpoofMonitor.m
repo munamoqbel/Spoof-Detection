@@ -13,7 +13,7 @@
 % with STRUCT_SPF.kfMeasFromUpdate / setPropTel:
 %   kfMeas   fixed MAX_MEAS-padded arrays, numMeas uint8, 60-state vectors
 %   propTel  accumPhi / accumQ [60 x 60]
-%   resetRequest logical scalar
+%   navActive, resetRequest logical scalars
 %
 % ASSUMPTIONS AND LIMITATIONS:
 % - Requires MATLAB Coder. Not for Octave.
@@ -40,6 +40,7 @@ coder.screener('spoofMonitor2hz');
 % 2. entry-point argument types (fixed layouts)
 kfMeasType  = coder.typeof(STRUCT_SPF.zeroKfMeas);
 propTelType = coder.typeof(STRUCT_SPF.zeroPropTel);
+navType     = coder.typeof(false);
 resetType   = coder.typeof(false);
 
 % 3. build a C library with the report
@@ -49,7 +50,7 @@ cfg.GenerateReport = true;
 cfg.LaunchReport   = false;
 
 codegen('-config', cfg, 'spoofMonitor2hz', ...
-    '-args', {kfMeasType, propTelType, resetType}, '-d', outDir);
+    '-args', {kfMeasType, propTelType, navType, resetType}, '-d', outDir);
 
 fprintf('spoofMonitor2hz built with MATLAB Coder into %s\n', outDir);
 

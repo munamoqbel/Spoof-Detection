@@ -13,7 +13,7 @@ feedback gain (0.4). "Mode" is the gate mode **after** this epoch's call to
 | `xPrior` | `activeKF.states` captured before calling `kfUpdate` (extrapolated at 100 Hz) |
 | `xPost` | `kfUpdate` output: `activeKF.states + K*y` |
 | `PPrior`, `PPost` | `activeKF.covariance` before, `kfUpdate` covariance after |
-| `y`, `H`, `R`, `numMeas` | innovation `z - h(xPrior)`, Jacobian, measurement noise, valid rows |
+| `y`, `H`, `R`, `numMeas` | innovation `z - h(xPrior)`, Jacobian, measurement noise, valid rows: GNSS rows only, pressure row excluded, `numMeas = 0` on an outage |
 | increment | `xPost - xPrior = K*y`: the only thing the monitors consume |
 | separation | sum of Phi-propagated increments since a reference epoch = host solution minus the coast of that reference |
 | anchor | last alarm-free closed window: `separation` (kept live) and coast covariance |
@@ -45,7 +45,8 @@ cumulative rule in every case.
 | VETO (PROBATION -> COAST) | `info.eventProbationVetoed` | drain, as COAST | drain, as COAST | input unchanged | trial discarded |
 | COMMIT (PROBATION -> NOMINAL) | `nav.applyCorrection`, `info.eventHandback` | `GAIN * nav.state` | `nav.state - GAIN * nav.state` | `nav.covar` (trial `PPost`) | `nav.state` is the trial's `xPost` |
 | No usable anchor at alarm | `info.anchorMissing`, no correction | as COAST | as COAST | input unchanged | discarded |
-| Alignment | gate not called (`zeroTel`), `firstCall = true` | as today | as today | as today | as today |
+| Alignment (`navActive = false`) | gate called, returns `zeroTel` and re-arms itself | as today | as today | as today | as today |
+| GNSS outage in navigation (pressure row only) | gate called with `numMeas = 0` | as today (no-satellite case) | as today | as today | used |
 
 Implementation: `setKF` itself is unchanged. The host selects its input
 before the one call per epoch: `nav.state` / `nav.covar` on latch and commit,

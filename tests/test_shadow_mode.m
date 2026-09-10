@@ -24,14 +24,28 @@ nAlarm = 0; plMax = 0; modeOK = true;
 for k = 1:N
     [kf_x, kf_P, y, ~, ~, xp, xpP] = kalman_update_step(kf_x, kf_P, z_all(:, k), H_all(:, :, k), propTel, V);
     kfMeas = STRUCT_SPF.kfMeasFromUpdate(y, H_all(:, :, k), V, m, xp, xpP, kf_x, kf_P);
-    tel = spoofMonitor2hz(kfMeas, propTel, k == 1);        % outputs ignored (shadow)
+    tel = spoofMonitor2hz(kfMeas, propTel, true, k == 1);  % outputs ignored (shadow)
     nAlarm = nAlarm + (tel.info.ssAlarm || tel.info.cpiAlarm);
     plMax  = max(plMax, tel.info.maxProtectionLevel);
     modeOK = modeOK && (tel.info.mode == CST_spfMode.NOMINAL);
 end
 ok1 = (nAlarm == 0) && modeOK && (plMax < 1.0);
-fprintf('  alarms = %d (expect 0) | stayed NOMINAL = %d | max PL = %.3f m -> %s\n\n', ...
+fprintf('  alarms = %d (expect 0) | stayed NOMINAL = %d | max PL = %.3f m -> %s\n', ...
     nAlarm, modeOK, plMax, pf(ok1));
+
+% alignment: navActive = false must return zeroTel and re-arm the gate; the
+% first active call afterwards re-initialises (no alarm, coastEpochs 0)
+alignOK = true;
+for k = 1:5
+    tel = spoofMonitor2hz(kfMeas, propTel, false, false);
+    alignOK = alignOK && (tel.info.mode == CST_spfMode.NOMINAL) && ~tel.nav.applyCorrection ...
+        && ~tel.kfCommand.startTrial && ~tel.info.ssAlarm && ~tel.info.cpiAlarm;
+end
+tel = spoofMonitor2hz(kfMeas, propTel, true, false);       % re-entry, no resetRequest
+alignOK = alignOK && (tel.info.mode == CST_spfMode.NOMINAL) && ~tel.info.ssAlarm ...
+    && ~tel.info.cpiAlarm && (tel.info.coastEpochs == 0);
+fprintf('  alignment (navActive = false): zeroTel, then clean re-init on re-entry -> %s\n\n', pf(alignOK));
+ok1 = ok1 && alignOK;
 
 %% 2. scripted attack, gate has authority
 fprintf('Scripted attack (oblique ramp + dither, gate has authority) ...\n');

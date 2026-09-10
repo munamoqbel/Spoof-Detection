@@ -74,6 +74,12 @@
 %   NOT needed from kfUpdate: S. The gate forms S = H*P_bar*H' + R from
 %   P_bar = activeKF.covariance as it goes INTO kfUpdate (extrapolated at
 %   100 Hz), so the SVD-based inverse deep inside stays untouched.
+%   GNSS ROWS ONLY: build spfMeas from the range / range-rate rows and drop
+%   the pressure row from y, H and R; numMeas = number of GNSS rows (0 on
+%   an outage). The increment xPost - xPrior still contains everything the
+%   filter did, baro included, which is what the monitors expect. Keeping
+%   the baro row out matters in COAST: ten baro-only epochs would otherwise
+%   pass re-validation with no GNSS evidence.
 %   xPrior  = activeKF.states going INTO the update
 %   xPost, PPost = x+, P+ straight OUT of kfUpdate, BEFORE setKF's
 %                  feedback / gain bookkeeping. The host's kfUpdate returns
@@ -90,17 +96,17 @@
 % ----------------------------------------------------------------------
 %  2 Hz function (complete skeleton; ONE setKF per epoch, never two)
 % ----------------------------------------------------------------------
-% function [KF, ...] = twoHzFunction(KF, satData, propTel, inNavigationMode, ...)
+% function [KF, ...] = twoHzFunction(KF, navMode, propTel, satData, ...)
 %
-% persistent trialKF spfMode kfCommand needReset
+% persistent trialKF spfMode kfCommand
 % if isempty(trialKF)
 %     trialKF   = KF;                        % set once as a KF structure
 %     spfMode   = CST_spfMode.NOMINAL;
 %     kfCommand = STRUCT_SPF.zeroCommand;
-%     needReset = true;
+%     firstCall = true;
+% else
+%     firstCall = false;
 % end
-% if ~inNavigationMode, needReset = true; end   % alignment: gate off, re-arm
-% firstCall = needReset;
 %
 % inProbation = (spfMode == CST_spfMode.PROBATION);   % mode BEFORE this epoch's gate call
 %
@@ -132,13 +138,11 @@
 % %   numMeas = 0, kfPost.states = activeKF.states, kfPost.covariance = activeKF.covariance.
 % %   (kfPost, not 'kfUpdate': a variable named like the function shadows it.)
 %
-% % ---- 3. gate (navigation mode only) ----
-% if inNavigationMode
-%     spfTel    = spoofMonitor2hz(spfMeas, propTel, firstCall);
-%     needReset = false;
-% else
-%     spfTel    = STRUCT_SPF.zeroTel;        % NOMINAL, no commands
-% end
+% % ---- 3. gate: EVERY 2 Hz epoch, also with numMeas = 0 ----
+% spfTel    = spoofMonitor2hz(spfMeas, propTel, navMode.navigation, firstCall);
+% %   navActive = false (alignment): the gate returns zeroTel (NOMINAL, no
+% %   commands), drops its state and epoch counter and re-initialises on the
+% %   first active call. firstCall is your persistent-init flag only.
 % spfMode   = spfTel.info.mode;              % mode AFTER the gate call
 % kfCommand = spfTel.kfCommand;              % startTrial acted on at the START of the next epoch
 %
@@ -190,20 +194,23 @@
 % then step 1 propagates it on EVERY probation epoch. Do not mix the two.
 %
 % ----------------------------------------------------------------------
-%  alignment vs navigation mode
+%  alignment vs navigation mode, and GNSS outages
 % ----------------------------------------------------------------------
 %   propTel is only accumulated in NAVIGATION mode; in ALIGNMENT the host
-%   publishes the defaults (accumPhi = I, accumQ = 0). The gate must NOT
+%   publishes the defaults (accumPhi = I, accumQ = 0). The gate must not
 %   run on those: with Q = 0 its coast covariance never grows, the SS
 %   variance sigma_SS^2 = P_C - P_KF is underestimated, false alarms
 %   follow, and a latch/COAST during alignment would stop the KF updates
-%   the alignment needs. Step 3 of the skeleton above handles it: in
-%   alignment the gate is skipped, spoofTel is zeroTel (NOMINAL, no
-%   commands) and firstCall is re-armed.
+%   the alignment needs. Hence the navActive input: pass
+%   navMode.navigation; the gate handles the rest (zeroTel, reset, re-init
+%   on the first navigation epoch, whose (x+, P+) become the startup anchor).
 %
-%   On the first navigation epoch resetRequest = true makes that epoch's
-%   (x+, P+) the startup anchor and the pool starts empty; the first
-%   window closes clean 10 epochs (5 s) later and takes over as anchor.
+%   GNSS outage (only the pressure row available): STILL call the gate,
+%   with numMeas = 0. It contributes xi = 0 to the CPI windows, cannot pass
+%   re-validation, and keeps windows, anchor and coast covariances
+%   propagating. Skipping the call would lose one interval of Phi/Q and one
+%   increment. The epoch counter counts gate calls (anchor age is a time),
+%   and is reset only in alignment.
 %
 % ----------------------------------------------------------------------
 %  what the 100 Hz side must do

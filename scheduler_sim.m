@@ -106,7 +106,7 @@ for epoch = 1:num_epochs
     kfMeas = STRUCT_SPF.kfMeasFromUpdate(y, H_all(:, :, epoch), V, num_meas, ...
         prior, priorP, post, postP);
 
-    spoofTel = spoofMonitor2hz(kfMeas, propTel, epoch == 1);
+    spoofTel = spoofMonitor2hz(kfMeas, propTel, true, epoch == 1);
     mode = spoofTel.info.mode;
 
     if kfUpdated

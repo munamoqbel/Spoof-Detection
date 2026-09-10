@@ -26,16 +26,21 @@ classdef STRUCT_SPF
         function [kfMeas] = setKfMeas(innovation, innovationCov, obsMatrix, ...
                 measNoiseCov, numMeas, priorState, postState, postCov)
 
+            % Exception handler: never index past the fixed MAX_MEAS layout
+            numMeasClamped = (double(numMeas) > double(CST_spfParam.MAX_MEAS));
+            numMeasUsed    = uint8(min(double(numMeas), double(CST_spfParam.MAX_MEAS)));
+
             % Define structure (rows/cols 1:numMeas are valid)
             kfMeas = struct( ...
-                'innovation',    innovation, ...      % y = z - h(xPrior)      [MAX_MEAS x 1]
-                'innovationCov', innovationCov, ...   % S = H P H' + R         [MAX_MEAS x MAX_MEAS]
-                'obsMatrix',     obsMatrix, ...       % H(x)                   [MAX_MEAS x n]
-                'measNoiseCov',  measNoiseCov, ...    % R                      [MAX_MEAS x MAX_MEAS]
-                'numMeas',       uint8(numMeas), ...  % valid rows this epoch (0 = no GNSS)
-                'priorState',    priorState, ...      % x_bar into the update  [n x 1]
-                'postState',     postState, ...       % x+ out of the update   [n x 1]
-                'postCov',       postCov);            % P+                     [n x n]
+                'innovation',     innovation, ...      % y = z - h(xPrior)      [MAX_MEAS x 1]
+                'innovationCov',  innovationCov, ...   % S = H P H' + R         [MAX_MEAS x MAX_MEAS]
+                'obsMatrix',      obsMatrix, ...       % H(x)                   [MAX_MEAS x n]
+                'measNoiseCov',   measNoiseCov, ...    % R                      [MAX_MEAS x MAX_MEAS]
+                'numMeas',        numMeasUsed, ...     % valid rows this epoch (0 = no GNSS), <= MAX_MEAS
+                'numMeasClamped', logical(numMeasClamped), ... % host passed more rows than MAX_MEAS
+                'priorState',     priorState, ...      % x_bar into the update  [n x 1]
+                'postState',      postState, ...       % x+ out of the update   [n x 1]
+                'postCov',        postCov);            % P+                     [n x n]
         end
 
         function [kfMeas] = kfMeasFromUpdate(innovation, obsMatrix, measNoiseCov, ...
@@ -48,7 +53,7 @@ classdef STRUCT_SPF
 
             mMax = double(CST_spfParam.MAX_MEAS);
             n    = CST_gnssHybrid.NO_STATES;
-            m    = double(numMeas);
+            m    = min(double(numMeas), mMax);    % exception handler: rows beyond MAX_MEAS are dropped
 
             innovationCov = zeros(mMax, mMax);
             if (m > 0)
@@ -135,7 +140,7 @@ classdef STRUCT_SPF
 
         function [report] = setMonitorReport(alarmPerAxis, anyAlarm, ...
                 maxProtectionLevel, ssAlarm, cpiAlarm, cleanCloseFound, ...
-                cleanCloseSeparation, cleanCloseCovar)
+                cleanCloseSeparation, cleanCloseCovar, solveFault)
 
             % Define structure
             report = struct( ...
@@ -146,7 +151,8 @@ classdef STRUCT_SPF
                 'cpiAlarm',             logical(cpiAlarm), ...
                 'cleanCloseFound',      logical(cleanCloseFound), ...
                 'cleanCloseSeparation', cleanCloseSeparation, ...
-                'cleanCloseCovar',      cleanCloseCovar);
+                'cleanCloseCovar',      cleanCloseCovar, ...
+                'solveFault',           logical(solveFault));   % a CPI epoch had a non-PD S
         end
 
         function [report] = zeroMonitorReport
@@ -159,7 +165,7 @@ classdef STRUCT_SPF
             zeroCovar = zeros(CST_gnssHybrid.NO_STATES, CST_gnssHybrid.NO_STATES);
 
             report = STRUCT_SPF.setMonitorReport(axisAlarm, alarm, ...
-                scalar, alarm, alarm, alarm, zeroState, zeroCovar);
+                scalar, alarm, alarm, alarm, zeroState, zeroCovar, alarm);
         end
 
         function [poolOut] = closeAllWindows(poolIn)
@@ -337,7 +343,8 @@ classdef STRUCT_SPF
         function [info] = setInfo(mode, ssAlarm, cpiAlarm, ...
                 alarmPerAxis, maxProtectionLevel, qReval, revalComputed,...
                 dwellCount, eventLatched, eventAnchorEpoch, eventProbationStarted,...
-                eventProbationVetoed, eventHandback, anchorMissing, coastEpochs)
+                eventProbationVetoed, eventHandback, anchorMissing, coastEpochs, ...
+                inputFault, numMeasClamped, solveFault)
 
             % Define structure
             info = struct( ...
@@ -355,7 +362,10 @@ classdef STRUCT_SPF
                 'eventProbationVetoed',  logical(eventProbationVetoed), ...
                 'eventHandback',         logical(eventHandback), ...
                 'anchorMissing',         logical(anchorMissing), ...
-                'coastEpochs',           coastEpochs);
+                'coastEpochs',           coastEpochs, ...
+                'inputFault',            logical(inputFault), ...     % non-finite input: gate reset this epoch
+                'numMeasClamped',        logical(numMeasClamped), ... % host passed > MAX_MEAS rows (clamped)
+                'solveFault',            logical(solveFault));        % S or residual covariance not PD this epoch
         end
 
         function [info] = zeroInfo
@@ -376,12 +386,16 @@ classdef STRUCT_SPF
             eventHandback         = false;
             anchorMissing         = false;
             coastEpochs           = 0;
+            inputFault            = false;
+            numMeasClamped        = false;
+            solveFault            = false;
 
             % Define structure
             info = STRUCT_SPF.setInfo(mode, ssAlarm, cpiAlarm, ...
                 alarmPerAxis, maxProtectionLevel, qReval, revalComputed,...
                 dwellCount, eventLatched, eventAnchorEpoch, eventProbationStarted,...
-                eventProbationVetoed, eventHandback, anchorMissing, coastEpochs);
+                eventProbationVetoed, eventHandback, anchorMissing, coastEpochs, ...
+                inputFault, numMeasClamped, solveFault);
         end
 
         function [command] = setCommand(startTrial)

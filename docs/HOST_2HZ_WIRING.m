@@ -134,7 +134,9 @@
 % %   inside kfUpdate: spfMeas = STRUCT_SPF.kfMeasFromUpdate(y, H, R, numMeas, ...
 % %       activeKF.states, activeKF.covariance, kfPost.states, kfPost.covariance)
 % %   with the INPUT states/covariance as the prior; on an invalid update pass
-% %   numMeas = 0, kfPost.states = activeKF.states, kfPost.covariance = activeKF.covariance.
+% %   numMeas = 0, kfPost.states = activeKF.states, kfPost.covariance = activeKF.covariance
+% %   (or set the gate's resetRequest = kfPost.failed; a NaN that slips through
+% %   is caught by the gate's input check and reported as info.inputFault).
 % %   (kfPost, not 'kfUpdate': a variable named like the function shadows it.)
 %
 % % ---- 3. gate: EVERY 2 Hz epoch, also with numMeas = 0 ----

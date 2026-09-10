@@ -78,6 +78,7 @@ switch sys.mode
         info.cpiAlarm           = report.cpiAlarm;
         info.alarmPerAxis       = report.alarmPerAxis;
         info.maxProtectionLevel = report.maxProtectionLevel;
+        info.solveFault         = report.solveFault;
 
         % ---- 3. refresh anchor (only on alarm-free epochs, so the
         %         anchor always ends strictly before detection) ----
@@ -133,10 +134,11 @@ switch sys.mode
         %         the coast: x_coast - x_prior = 0 and the residual is y.
         sys.probSep = zeros(numStates, 1);
         coastMinusPrior = zeros(numStates, 1);
-        [passed, q_value] = revalidation(kfMeas.innovation, kfMeas.obsMatrix, ...
+        [passed, q_value, revalFault] = revalidation(kfMeas.innovation, kfMeas.obsMatrix, ...
             kfMeas.measNoiseCov, kfMeas.numMeas, coastMinusPrior, sys.coastCov);
         info.qReval = q_value;
         info.revalComputed = true;
+        info.solveFault = revalFault;
 
         if (passed)
             sys.dwellCount = sys.dwellCount + 1;
@@ -167,10 +169,11 @@ switch sys.mode
 
         % ---- 2. diagnostic: GNSS-vs-coast on the trial's innovation ----
         coastMinusPrior = -(Phi * sys.probSep);
-        [~, q_value] = revalidation(kfMeas.innovation, kfMeas.obsMatrix, ...
+        [~, q_value, revalFault] = revalidation(kfMeas.innovation, kfMeas.obsMatrix, ...
             kfMeas.measNoiseCov, kfMeas.numMeas, coastMinusPrior, sys.coastCov);
         info.qReval = q_value;
         info.revalComputed = true;
+        info.solveFault = revalFault;
 
         % ---- 3. trial - coast accumulates the trial's increments ----
         sys.probSep = Phi * sys.probSep + kfIncrement;
@@ -182,6 +185,7 @@ switch sys.mode
         info.cpiAlarm           = report.cpiAlarm;
         info.alarmPerAxis       = report.alarmPerAxis;
         info.maxProtectionLevel = report.maxProtectionLevel;
+        info.solveFault         = info.solveFault || report.solveFault;
         % probation windows never refresh the anchor: the trial is not
         % yet trusted, so report.cleanClose* is deliberately ignored.
 
@@ -226,9 +230,10 @@ for axisIdx = 1:3
 end
 nav = STRUCT_SPF.setNav(applyCorrection, navState, correction, sys.coastCov, sigmaPosition);
 
-info.mode        = sys.mode;
-info.dwellCount  = sys.dwellCount;
-info.coastEpochs = sys.coastCount;    % time-in-coast (COAST + PROBATION), epochs
+info.mode           = sys.mode;
+info.dwellCount     = sys.dwellCount;
+info.coastEpochs    = sys.coastCount;    % time-in-coast (COAST + PROBATION), epochs
+info.numMeasClamped = kfMeas.numMeasClamped;
 
 spoofTel = STRUCT_SPF.setTel(info, kfCommand, nav);
 

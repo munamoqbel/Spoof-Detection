@@ -66,19 +66,47 @@ if ~navActive
     return;
 end
 
+% Exception handler: a non-finite input (host update failed, uninitialised
+% propTel) must never enter the persistent state. Treat it like the host
+% treats its own failed update: report, drop this epoch, re-initialise on
+% the next good one.
+if ~spoofMonitor2hz_inputsFinite(kfMeas, propTel)
+    needInit = true;
+    epoch    = uint32(0);
+    spoofTel = STRUCT_SPF.zeroTel;
+    spoofTel.info.inputFault = true;
+    return;
+end
+
+justInit = false;
 if resetRequest || needInit
     sys = STRUCT_SPF.zeroSys;
     sys.coastCov = kfMeas.postCov;
-    % the initial solution is the fallback until the first window closes clean
-    sys.anchor = STRUCT_SPF.setAnchor(true, zeros(CST_gnssHybrid.NO_STATES, 1), ...
-        kfMeas.postCov, uint32(0));
     epoch    = uint32(0);
     needInit = false;
+    justInit = true;          % anchor seeded AFTER this epoch runs (see below)
 end
 
 epoch = epoch + uint32(1);
 
 [sys, spoofTel] = protectedNav(sys, kfMeas, propTel, epoch);
 
+if justInit
+    % the first navigation solution is the fallback until the first window
+    % closes clean: seed it as "solution now" (separation 0, covariance P+),
+    % stamped with this epoch so it is neither propagated nor aged twice
+    sys.anchor = STRUCT_SPF.setAnchor(true, zeros(CST_gnssHybrid.NO_STATES, 1), ...
+        kfMeas.postCov, epoch);
+end
+
+end
+
+function [ok] = spoofMonitor2hz_inputsFinite(kfMeas, propTel)
+%#codegen
+ok = all(isfinite(kfMeas.innovation(:))) && all(isfinite(kfMeas.innovationCov(:))) && ...
+     all(isfinite(kfMeas.obsMatrix(:)))  && all(isfinite(kfMeas.measNoiseCov(:)))  && ...
+     all(isfinite(kfMeas.priorState(:))) && all(isfinite(kfMeas.postState(:)))     && ...
+     all(isfinite(kfMeas.postCov(:)))    && all(isfinite(propTel.accumPhi(:)))     && ...
+     all(isfinite(propTel.accumQ(:)));
 end
 % ------------------------------------------------------------------------

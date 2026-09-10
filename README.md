@@ -45,6 +45,7 @@ order and prints one PASS/FAIL line each.
   window length / thresholds moved into `CST_spfParam`)
 - `tests/test_variable_numMeas.m` — varying satellite count, padded vs exact
 - `tests/test_feedback_split.m` — host setKF feedback split (GAIN), drain in COAST
+- `tests/test_error_handlers.m` — non-PD solves (Cholesky + pivot floor), numMeas clamp, NaN input, anchor stamp
 - `tests/test_shadow_mode.m` — guide Step 5: shadow mode on clean data (zero alarms),
   then a scripted attack with authority (latch, vetoes, one commit)
 - `run_recovery.m` — end-to-end demo with offline design and plots

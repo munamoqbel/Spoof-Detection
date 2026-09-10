@@ -109,12 +109,29 @@ the estimate having no information, not a sign that the attack ended.
 | Commit | `applyCorrection`, `eventHandback` | trial `xPost` | trial `PPost` | none |
 | Alarm without usable anchor | `eventLatched`, `anchorMissing` | none | none | none; mode still COAST |
 | Every epoch | `mode`, `ssAlarm`, `cpiAlarm`, `alarmPerAxis`, `maxProtectionLevel`, `qReval`, `dwellCount`, `coastEpochs` | | `coastCov` (diagnostic) | |
+| Fault telemetry | `inputFault` (non-finite input: epoch dropped, gate re-initialises on the next good epoch), `numMeasClamped` (host passed more than `MAX_MEAS` rows), `solveFault` (an S or residual covariance was not positive definite: that CPI epoch counts `xi = 0`, re-validation cannot pass) | | | |
 
 After a commit the anchor is the committed solution (separation zero,
 covariance the trial's `PPost`), the probation windows carry over, and a new
 attack goes through the same cycle with no limit on the number of cycles.
 
-## 6. Deferred
+## 6. Exception handlers (audit of the runtime path)
+
+| Hazard | Where | Handling |
+|---|---|---|
+| `S \ y`, `S \ f` on a singular or indefinite S | `cpiMonitor` | Cholesky factor with flag and relative pivot floor (`PIVOT_REL_TOL`); epoch dropped (`xi = 0`), `solveFault` |
+| `r' S_r^-1 r` negative / NaN on a non-PD residual covariance | `revalidation` | same factorisation; `q = |Rc'\r|^2 >= 0` by construction; non-PD: no pass, `solveFault` |
+| `numMeas > MAX_MEAS` slicing fixed buffers | `setKfMeas`, `kfMeasFromUpdate`, `cpiMonitor`, `revalidation` | clamped at ingress and defensively at use; `numMeasClamped` |
+| NaN / Inf in any input (failed host update, uninitialised `propTel`) | `spoofMonitor2hz` | `isfinite` check on every input; epoch dropped with `inputFault`, state and epoch counter reset, re-init on the next good epoch (mirrors the host's own failed-update reset) |
+| `sqrt` of a negative variance (`P_C - P_KF`, `P_C`, `coastCov` diagonal) | `ssMonitor`, `protectedNav` | guarded: test reported undefined (no alarm), sigma 0 |
+| division `gamma / sqrt(sigma2)` with `sigma2 = 0` (axis unobservable) | `cpiMonitor` | guarded: `xi = 0` |
+| startup anchor stamped with epoch 0 (the "no anchor" sentinel) and propagated once too often | `spoofMonitor2hz` | anchor seeded after the first epoch with that epoch's `(x+, P+)` and stamp |
+| `uint32` epoch differences, `uint8` counters and loop variables | all | checked: no wrap possible (`anchor.epoch <= epoch`), classes consistent |
+| `REVAL_THRESHOLD_TABLE(numMeas)` index | `revalidation` | `numMeas` clamped to `MAX_MEAS = 30`, table has 30 entries |
+
+Covered by `tests/test_error_handlers.m`. On a host update flagged `failed`, pass the epoch as `numMeas = 0`, `xPost = xPrior`, `PPost = PPrior`, or set `resetRequest = true` on that call; a NaN slipping through is caught by the input check.
+
+## 7. Deferred
 
 - Baro-only aiding during COAST and PROBATION (vertical channel).
 - Coast-time budget (Implementation Guide rule 4): each cycle costs a coast and

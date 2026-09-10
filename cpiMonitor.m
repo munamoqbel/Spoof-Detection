@@ -16,9 +16,19 @@
 %   - cpiAlarm                  logical
 %   - qStatistic                double Eq. 33 statistic
 %   - xiHistory                 [N x 1] normalised projections (diagnostics)
+%   - solveFault                logical, true if S of at least one epoch was
+%                               not positive definite (that epoch counted
+%                               xi = 0; host contract violation, e.g. a row
+%                               with zero noise or a duplicated row)
 %
 % ASSUMPTIONS AND LIMITATIONS:
 % An epoch with numMeas = 0 (no GNSS) contributes xi = 0 to the window.
+% S is inverted through its Cholesky factor: S = Rc'*Rc, so with
+% w_g = Rc'\gamma and w_f = Rc'\f,  f'S^-1 gamma = w_f'w_g  and
+% f'S^-1 f = w_f'w_f  (no explicit inverse, no division by a pivot that can
+% be zero). chol with two outputs never errors: p > 0 flags a non-PD S, and
+% a relative pivot floor (CST_spfParam.PIVOT_REL_TOL) rejects an S that is
+% singular up to rounding.
 %
 % REQUIREMENT TRACEABILITY:
 % - PAPER MAPPING
@@ -31,7 +41,7 @@
 %
 %******************************************************************************************
 %#codegen
-function [cpiAlarm, qStatistic, xiHistory] = cpiMonitor...
+function [cpiAlarm, qStatistic, xiHistory, solveFault] = cpiMonitor...
     (innovationBuffer, innovationCovBuffer, obsMatrixBuffer, numMeasBuffer, axisIdx, ...
      windowLength, cpiThreshold)
 
@@ -40,12 +50,14 @@ if (nargin < 7)
     windowLength = CST_spfParam.WINDOW_LENGTH;
     cpiThreshold = CST_spfParam.CPI_THRESHOLD;
 end
+maxMeas      = uint8(size(innovationBuffer, 1));
 xiHistory    = zeros(windowLength, 1);
 qStatistic   = 0.0;
 cpiAlarm     = false;
+solveFault   = false;
 
 for idx = 1:windowLength
-    numMeas = numMeasBuffer(idx);
+    numMeas = min(numMeasBuffer(idx), maxMeas);       % defensive: never past the buffer
     xiNormalised = 0.0;
 
     if (numMeas > 0)
@@ -54,23 +66,37 @@ for idx = 1:windowLength
         projection    = obsMatrixBuffer(1:numMeas, axisIdx, idx);       % f = H(:,axis). From Eq. 17
 
         % ------------------------------------------------------------------------
-        % WARNING: Exception handler need to be added!
+        % Exception handler: S must be positive definite. chol never errors;
+        % p > 0 means singular / indefinite / non-finite -> this epoch is
+        % dropped (xi = 0) and the fault is reported.
         % ------------------------------------------------------------------------
-        sInvInnovation = innovationCov \ innovation;     % S^{-1} gamma
-        sInvProjection = innovationCov \ projection;     % S^{-1} f
-        % ------------------------------------------------------------------------
+        [cholFactor, cholFail] = chol(innovationCov);
+        pivotOk = (cholFail == 0);
+        if (pivotOk)
+            % an exactly singular S can still factorise with a rounding-level
+            % pivot: require every pivot to be above PIVOT_REL_TOL of the
+            % largest diagonal (condition number below ~1e12)
+            minPivot = min(diag(cholFactor)) ^ 2;
+            pivotOk  = (minPivot > CST_spfParam.PIVOT_REL_TOL * max(diag(innovationCov)));
+        end % ELSE is trivial
+        if (pivotOk)
+            wInnovation = cholFactor' \ innovation;      % Rc'^-1 gamma
+            wProjection = cholFactor' \ projection;      % Rc'^-1 f
 
-        gammaProjection  = 0.0;  % Eq. 17
-        sigma2Projection = 0.0;  % Eq. 20
-        for idxMeas = 1:numMeas
-            gammaProjection  = gammaProjection + projection(idxMeas) * sInvInnovation(idxMeas);   % = projection' * sInvInnovation (Eq.17); loop used for deterministic rounding
-            sigma2Projection = sigma2Projection + projection(idxMeas) * sInvProjection(idxMeas);  % = projection' * sInvProjection (Eq.20); loop used for deterministic rounding
+            gammaProjection  = 0.0;  % Eq. 17
+            sigma2Projection = 0.0;  % Eq. 20
+            for idxMeas = 1:numMeas
+                gammaProjection  = gammaProjection + wProjection(idxMeas) * wInnovation(idxMeas);   % = w_f' * w_g (Eq.17); loop used for deterministic rounding
+                sigma2Projection = sigma2Projection + wProjection(idxMeas) * wProjection(idxMeas);  % = w_f' * w_f (Eq.20); loop used for deterministic rounding
+            end
+
+            % Exception handler: axis unobservable this epoch (f = 0) -> xi = 0
+            if (sigma2Projection > 0.0) && isfinite(sigma2Projection) && isfinite(gammaProjection)
+                xiNormalised = gammaProjection / sqrt(sigma2Projection);   % Eq. 29
+            end % ELSE is trivial
+        else
+            solveFault = true;
         end
-
-        % Exception handler
-        if (sigma2Projection > 0.0)
-            xiNormalised = gammaProjection / sqrt(sigma2Projection);   % Eq. 29
-        end % ELSE: axis unobservable this epoch -> xi = 0
     end % ELSE: no GNSS this epoch -> xi = 0
 
     xiHistory(idx) = xiNormalised;

@@ -76,14 +76,14 @@ kfMeasBig = STRUCT_SPF.kfMeasFromUpdate(yBig, Hbig, Rbig, mBig, zeros(n, 1), eye
 okFrom = (kfMeasBig.numMeas == CST_spfParam.MAX_MEAS) && kfMeasBig.numMeasClamped ...
     && isequal(size(kfMeasBig.innovation), [mMax 1]) && isequal(size(kfMeasBig.obsMatrix), [mMax n]) ...
     && isequal(size(kfMeasBig.innovationCov), [mMax mMax]);
-kfMeasSet = STRUCT_SPF.setKfMeas(zeros(mMax, 1), eye(mMax), zeros(mMax, n), eye(mMax), 35, zeros(n, 1), zeros(n, 1), eye(n));
+kfMeasSet = STRUCT_SPF.setKfMeas(zeros(mMax, 1), eye(mMax), zeros(mMax, n), eye(mMax), mMax + 5, zeros(n, 1), zeros(n, 1), eye(n));
 okSet = (kfMeasSet.numMeas == CST_spfParam.MAX_MEAS) && kfMeasSet.numMeasClamped;
 propTelI = STRUCT_SPF.zeroPropTel;
 tel = SPF_gate(kfMeasBig, propTelI, true, true);           % must run, and report the clamp
 okRun = tel.info.numMeasClamped && (tel.info.mode == CST_spfMode.NOMINAL);
 ok3 = okFrom && okSet && okRun;
-fprintf('  kfMeasFromUpdate(31 rows) -> numMeas %d, clamped %d, fixed layout %d | setKfMeas(35) -> %d | gate runs, flags %d -> %s\n\n', ...
-    kfMeasBig.numMeas, kfMeasBig.numMeasClamped, okFrom, kfMeasSet.numMeas, tel.info.numMeasClamped, pf(ok3));
+fprintf('  kfMeasFromUpdate(%d rows) -> numMeas %d, clamped %d, fixed layout %d | setKfMeas(%d) -> %d | gate runs, flags %d -> %s\n\n', ...
+    mBig, kfMeasBig.numMeas, kfMeasBig.numMeasClamped, okFrom, mMax + 5, kfMeasSet.numMeas, tel.info.numMeasClamped, pf(ok3));
 
 %% 4./5. non-finite input epoch, and the startup anchor stamp
 fprintf('Non-finite input and startup anchor ...\n');

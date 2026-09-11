@@ -127,7 +127,7 @@ attack goes through the same cycle with no limit on the number of cycles.
 | division `gamma / sqrt(sigma2)` with `sigma2 = 0` (axis unobservable) | `SPF_cpiMonitor` | guarded: `xi = 0` |
 | startup anchor stamped with epoch 0 (the "no anchor" sentinel) and propagated once too often | `SPF_gate` | anchor seeded after the first epoch with that epoch's `(x+, P+)` and stamp |
 | `uint32` epoch differences, `uint8` counters and loop variables | all | checked: no wrap possible (`anchor.epoch <= epoch`), classes consistent |
-| `REVAL_THRESHOLD_TABLE(numMeas)` index | `SPF_revalidation` | `numMeas` clamped to `MAX_MEAS = 30`, table has 30 entries |
+| `REVAL_THRESHOLD_TABLE(numMeas)` index | `SPF_revalidation` | `numMeas` clamped to `MAX_MEAS` (= `CST_gnssHybrid.MAX_MEASURES`, 51), table has 51 entries |
 
 Covered by `tests/test_error_handlers.m`. On a host update flagged `failed`, pass the epoch as `numMeas = 0`, `xPost = xPrior`, `PPost = PPrior`, or set `resetRequest = true` on that call; a NaN slipping through is caught by the input check.
 

@@ -89,7 +89,8 @@
 %   propTel.accumPhi, .accumQ from spfAccumProp (published before its reset)
 %
 %   kfMeas = STRUCT_SPF.kfMeasFromUpdate(y, H, R, numMeas, xPrior, PPrior, xPost, PPost);
-%   (arrays may be exact-size or padded to CST_spfParam.MAX_MEAS = 30;
+%   (arrays may be exact-size or padded to CST_spfParam.MAX_MEAS, which is
+%    your CST_gnssHybrid.MAX_MEASURES = 51;
 %    a host that does have S can call STRUCT_SPF.setKfMeas instead)
 %
 % ----------------------------------------------------------------------

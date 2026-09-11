@@ -20,7 +20,7 @@
 % - STRUCT_SPF.kfMeasFromUpdate is compiled inside the host's 2 Hz
 %   function; if the host passes exact-size (numMeas-row) arrays, declare
 %   them there as bounded variable-size, e.g.
-%   coder.typeof(zeros(30, 1), [30 1], [1 0]).
+%   coder.typeof(zeros(51, 1), [51 1], [1 0])  (51 = CST_gnssHybrid.MAX_MEASURES).
 %
 % REQUIREMENT TRACEABILITY:
 %

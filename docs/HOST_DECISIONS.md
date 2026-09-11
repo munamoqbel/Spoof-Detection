@@ -119,7 +119,7 @@ attack goes through the same cycle with no limit on the number of cycles.
 
 | Hazard | Where | Handling |
 |---|---|---|
-| `S^-1 y`, `S^-1 f` on the zero-padded S | `SPF_cpiMonitor` | live-row variances must be positive, then the host's `matrixInv` (SVD pseudo-inverse: padding stays zero, non-finite S flagged); a flagged epoch is dropped (`xi = 0`), `solveFault` |
+| `S^-1 y`, `S^-1 f` on the padded S | `SPF_cpiMonitor` | live-row variances must be positive; padding diagonal filled with the largest live variance so the matrix is non-singular; then the host's `matrixInv` (flags non-finite / singular input); a flagged epoch is dropped (`xi = 0`), `solveFault` |
 | `r' S_r^-1 r` on an unusable residual covariance | `SPF_revalidation` | live-row variances must be positive, then the host's `matrixInv`; `q` must be finite and `>= 0` to pass; flagged: no pass, `solveFault` |
 | `numMeas > MAX_MEAS` slicing fixed buffers | `setKfMeas`, `kfMeasFromUpdate`, `SPF_cpiMonitor`, `SPF_revalidation` | clamped at ingress and defensively at use; `numMeasClamped` |
 | NaN / Inf in any input (failed host update, uninitialised `propTel`) | `SPF_gate` | `isfinite` check on every input; epoch dropped with `inputFault`, state and epoch counter reset, re-init on the next good epoch (mirrors the host's own failed-update reset) |
@@ -127,7 +127,7 @@ attack goes through the same cycle with no limit on the number of cycles.
 | division `gamma / sqrt(sigma2)` with `sigma2 = 0` (axis unobservable) | `SPF_cpiMonitor` | guarded: `xi = 0` |
 | startup anchor stamped with epoch 0 (the "no anchor" sentinel) and propagated once too often | `SPF_gate` | anchor seeded after the first epoch with that epoch's `(x+, P+)` and stamp |
 | `uint32` epoch differences, `uint8` counters and loop variables | all | checked: no wrap possible (`anchor.epoch <= epoch`), classes consistent |
-| `REVAL_THRESHOLD_TABLE(numMeas)` index | `SPF_revalidation` | `numMeas` clamped to `MAX_MEAS` (= `CST_gnssHybrid.MAX_MEASURES`, 51), table has 51 entries |
+| `REVAL_THRESHOLD_TABLE(numMeas)` index | `SPF_revalidation` | `numMeas` clamped to `MAX_MEAS` (= `CST_gnssHybrid.MAX_MEASURES`), table has 60 entries and the index is clamped to its length |
 
 Covered by `tests/test_error_handlers.m`. On a host update flagged `failed`, pass the epoch as `numMeas = 0`, `xPost = xPrior`, `PPost = PPrior`, or set `resetRequest = true` on that call; a NaN slipping through is caught by the input check.
 

@@ -16,10 +16,11 @@
 % a GNSS outage; without this floor ten baro-only epochs in COAST would
 % open a probation with no GNSS evidence. qReval is still computed and
 % logged whenever numMeas > 0.
-% - REVAL_THRESHOLD_TABLE(m) = chi2inv(1 - 1e-3, m), m = 1..MAX_MEAS (51)
-% (Implementation Guide Sec. 5: one gate per possible row count).
-% Recompute offline if MAX_MEAS or the 1e-3 allocation changes; the table
-% length must equal CST_gnssHybrid.MAX_MEASURES.
+% - REVAL_THRESHOLD_TABLE(m) = chi2inv(1 - 1e-3, m), m = 1..60
+% (Implementation Guide Sec. 5: one gate per possible row count). The
+% table must cover CST_gnssHybrid.MAX_MEASURES; SPF_revalidation clamps the
+% index to the table length as a safeguard. Recompute offline if the 1e-3
+% allocation changes or MAX_MEASURES exceeds 60.
 % - MAX_MEAS is CST_gnssHybrid.MAX_MEASURES (the host's own bound): all
 % monitor buffers are sized to it.
 %
@@ -39,7 +40,7 @@ classdef CST_spfParam
         K_MISSED_DETECTION = 4.753424308817088;           % PL term
         MONITORED_AXES = [1 2 3];                         % NED position state indices
         REVAL_THRESHOLD = 39.252354790768472;     % chi-square gate, m = 16 (kept for reference)
-        REVAL_THRESHOLD_TABLE = [ ...                 % chi2inv(1 - 1e-3, m), m = 1..MAX_MEAS (51)
+        REVAL_THRESHOLD_TABLE = [ ...                 % chi2inv(1 - 1e-3, m), m = 1..60 (>= MAX_MEAS)
             10.82756617066, 13.81551055796, 16.26623619624, 18.46682695290, ...
             20.51500565243, 22.45774448483, 24.32188634786, 26.12448155838, ...
             27.87716487126, 29.58829844507, 31.26413362024, 32.90949040736, ...
@@ -52,7 +53,9 @@ classdef CST_spfParam
             69.34645249624, 70.70288741151, 72.05466295199, 73.40195751899, ...
             74.74493839842, 76.08376270770, 77.41857824131, 78.74952422804, ...
             80.07673201082, 81.40032565871, 82.72042251912, 84.03713371722, ...
-            85.35056460859, 86.66081519040, 87.96798047563];
+            85.35056460859, 86.66081519040, 87.96798047563, 89.27215083430, ...
+            90.57341230530, 91.87184688166, 93.16753277223, 94.46054464188, ...
+            95.75095383249, 97.03882856651, 98.32423413474, 99.60723306985];
         REVAL_DWELL_REQUIRED = uint8(10);         % passes -> probation
         REVAL_MIN_MEAS = uint8(4);                % rows needed for a re-validation PASS (3-D fix + clock;
                                                   % a pressure-only or single-satellite epoch cannot certify)

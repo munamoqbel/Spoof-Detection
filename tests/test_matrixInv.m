@@ -3,24 +3,32 @@
 % by SPF_cpiMonitor and SPF_revalidation. Run it with the SIMULATION's own
 % matrixInv on the path (the repo file is only a stand-in).
 %
+% The gate always calls matrixInv with a full MAX_MEAS x MAX_MEAS matrix
+% whose rows/cols beyond numMeas are zero EXCEPT the diagonal, which is
+% filled with the largest live variance: A = blkdiag(S, p*I). That matrix
+% is non-singular, so a function that flags singular inputs is fine.
+%
 % Required (PASS/FAIL):
-%   1. zero-padded input: the live block is inverted, the padding stays
-%      zero, and products with zero-padded vectors equal the live results
+%   1. padded input: not flagged, the live block is inverted, the off-block
+%      coupling is zero, and products with zero-padded vectors equal the
+%      live-block results
 %   2. full-size input (numMeas = MAX_MEAS) and a single live row
 %   3. accuracy on a realistic S (code + carrier rows, 5 orders of
 %      magnitude between variances): A*inv(A) = I on the live block
-%   4. non-finite input is flagged (invInvalid) and the result is finite
-%   5. a rank-deficient live block (duplicated row, zero noise) returns a
-%      finite result and, if not flagged, a valid pseudo-inverse
+%   4. non-finite input is flagged (the gate then ignores the result)
+%   5. a rank-deficient live block (duplicated row, zero noise) is either
+%      flagged (gate drops the epoch) or returns a valid finite pseudo-inverse
 % Informational (printed, no verdict):
-%   6. an indefinite matrix is NOT detectable by an SVD inverse (the gate
-%      guards it with the live-row variance check and q >= 0)
+%   6. whether an indefinite matrix is flagged (the gate also guards it
+%      with the live-row variance check and q >= 0 in re-validation)
 %   7. time per call (the CPI calls it up to 3 x WINDOW_LENGTH times per epoch)
 % Run from the repo root (MATLAB, or Octave with tools/octave_shim).
 
 mMax = double(CST_spfParam.MAX_MEAS);
 n    = CST_gnssHybrid.NO_STATES;
 rng(11);
+% exactly what the gate passes: zero padding, padding diagonal = largest live variance
+padAsGate = @(S, mMax) blkdiag(S, max(max(diag(S)), 1.0) * eye(mMax - size(S, 1)));
 fprintf('matrixInv contract (MAX_MEAS = %d) ...\n', mMax);
 
 % realistic S: 6 satellites x (code, carrier) rows, sigma 0.36 m / 0.003 m
@@ -34,67 +42,63 @@ R = diag(repmat([0.36^2 0.003^2], 1, nSv));
 P = 1e-2 * eye(n);
 S = H * P * H' + R; S = (S + S') / 2;                             % live block, PD
 
-padded = zeros(mMax); padded(1:m, 1:m) = S;                        % zero-padded as the gate builds it
+padded = padAsGate(S, mMax);                                       % exactly what the gate passes
 
 %% 1. padding
 [Ainv, bad1] = matrixInv(padded);
-padZero  = all(all(Ainv(m+1:end, :) == 0)) && all(all(Ainv(:, m+1:end) == 0));
+offBlockZero = all(all(abs(Ainv(m+1:end, 1:m)) < 1e-12)) && all(all(abs(Ainv(1:m, m+1:end)) < 1e-12));
 liveErr  = norm(Ainv(1:m, 1:m) * S - eye(m)) / norm(eye(m));
 g = zeros(mMax, 1); g(1:m) = randn(m, 1);
 f = zeros(mMax, 1); f(1:m) = H(:, 3);
 qFull = f' * (Ainv * g);  qLive = H(:, 3)' * (S \ g(1:m));
-ok1 = ~bad1 && padZero && liveErr < 1e-8 && abs(qFull - qLive) < 1e-9 * max(1, abs(qLive));
-fprintf('  1. zero padding: invalid = %d, padding zero = %d, |inv*S - I| = %.1e, f''S^-1g full vs live diff = %.1e -> %s\n', ...
-    bad1, padZero, liveErr, abs(qFull - qLive), pf(ok1));
+ok1 = ~bad1 && offBlockZero && liveErr < 1e-8 && abs(qFull - qLive) < 1e-9 * max(1, abs(qLive));
+fprintf('  1. padded input: invalid = %d, off-block zero = %d, |inv*S - I| = %.1e, f''S^-1g full vs live diff = %.1e -> %s\n', ...
+    bad1, offBlockZero, liveErr, abs(qFull - qLive), pf(ok1));
 
 %% 2. full-size and single row
 Afull = randn(mMax); Afull = Afull * Afull' + mMax * eye(mMax);
 [AinvF, bad2a] = matrixInv(Afull);
 errF = norm(AinvF * Afull - eye(mMax)) / norm(eye(mMax));
-one = zeros(mMax); one(1, 1) = 4.0;
+one = padAsGate(4.0, mMax);
 [Ainv1, bad2b] = matrixInv(one);
-ok2 = ~bad2a && errF < 1e-8 && ~bad2b && abs(Ainv1(1, 1) - 0.25) < 1e-12 && all(all(Ainv1(2:end, :) == 0));
-fprintf('  2. full size (%d rows): invalid = %d, |inv*A - I| = %.1e | single row: inv(4) = %.4f -> %s\n', ...
-    mMax, bad2a, errF, Ainv1(1, 1), pf(ok2));
+ok2 = ~bad2a && errF < 1e-8 && ~bad2b && abs(Ainv1(1, 1) - 0.25) < 1e-12 && all(abs(Ainv1(2:end, 1)) < 1e-12);
+fprintf('  2. full size (%d rows): invalid = %d, |inv*A - I| = %.1e | single row: invalid = %d, inv(4) = %.4f -> %s\n', ...
+    mMax, bad2a, errF, bad2b, Ainv1(1, 1), pf(ok2));
 
 %% 3. accuracy on the realistic S (carrier vs code: 5 orders of magnitude)
 condS = cond(S);
-ok3 = liveErr < 1e-8;
+ok3 = ~bad1 && liveErr < 1e-8;
 fprintf('  3. realistic S: cond = %.1e, |inv*S - I| = %.1e (need < 1e-8) -> %s\n', condS, liveErr, pf(ok3));
 
-%% 4. non-finite input
+%% 4. non-finite input (flag required; the gate ignores the result when flagged)
 bad = padded; bad(2, 3) = NaN; bad(3, 2) = NaN;
-[AinvN, badN] = matrixInv(bad);
+[~, badN] = matrixInv(bad);
 bad = padded; bad(1, 1) = Inf;
-[AinvI, badI] = matrixInv(bad);
-ok4 = badN && badI && all(isfinite(AinvN(:))) && all(isfinite(AinvI(:)));
-fprintf('  4. NaN input: invalid = %d, result finite = %d | Inf input: invalid = %d, result finite = %d -> %s\n', ...
-    badN, all(isfinite(AinvN(:))), badI, all(isfinite(AinvI(:))), pf(ok4));
+[~, badI] = matrixInv(bad);
+ok4 = badN && badI;
+fprintf('  4. NaN input: invalid = %d | Inf input: invalid = %d -> %s\n', badN, badI, pf(ok4));
 
 %% 5. rank-deficient live block (duplicated row with zero noise)
 Hd = H; Hd(4, :) = Hd(3, :);
 Rd = R; Rd(3, 3) = 0; Rd(4, 4) = 0;
 Sd = Hd * P * Hd' + Rd; Sd = (Sd + Sd') / 2;
-paddedD = zeros(mMax); paddedD(1:m, 1:m) = Sd;
-[AinvD, badD] = matrixInv(paddedD);
-finiteD = all(isfinite(AinvD(:)));
+[AinvD, badD] = matrixInv(padAsGate(Sd, mMax));
 if badD
-    ok5 = finiteD;                                                  % flagged: fine, gate drops the epoch
+    ok5 = true;                                                     % flagged: gate drops the epoch
     note = 'flagged (gate drops the epoch)';
 else
+    finiteD = all(isfinite(AinvD(:)));
     pinvErr = norm(Sd * AinvD(1:m, 1:m) * Sd - Sd) / norm(Sd);      % pseudo-inverse property A*A+*A = A
     ok5 = finiteD && pinvErr < 1e-8;
-    note = sprintf('pseudo-inverse, |A A+ A - A|/|A| = %.1e', pinvErr);
+    note = sprintf('not flagged: finite = %d, |A A+ A - A|/|A| = %.1e', finiteD, pinvErr);
 end
-fprintf('  5. rank-deficient S (rank %d of %d): invalid = %d, finite = %d, %s -> %s\n', ...
-    rank(Sd), m, badD, finiteD, note, pf(ok5));
+fprintf('  5. rank-deficient S (rank %d of %d): invalid = %d, %s -> %s\n', rank(Sd), m, badD, note, pf(ok5));
 
 %% 6. informational: indefinite matrix
 Sind = S; Sind(1, 1) = -Sind(1, 1);
-paddedI = zeros(mMax); paddedI(1:m, 1:m) = Sind;
-[~, badInd] = matrixInv(paddedI);
-fprintf('  6. (info) indefinite S: invalid = %d. An SVD inverse cannot detect this; the gate rejects it\n', badInd);
-fprintf('     through the live-row variance check and q >= 0 in re-validation.\n');
+[~, badInd] = matrixInv(padAsGate(Sind, mMax));
+fprintf('  6. (info) indefinite S: invalid = %d (the gate also rejects it through the live-row\n', badInd);
+fprintf('     variance check and q >= 0 in re-validation)\n');
 
 %% 7. informational: timing
 nCall = 200; tic;

@@ -7,13 +7,15 @@
 % running inside the simulation.
 %
 % CONTRACT THE GATE RELIES ON (SPF_cpiMonitor, SPF_revalidation):
-%   - the input is the full fixed MAX_MEAS x MAX_MEAS matrix whose rows and
-%     columns beyond the valid count are zero (padding);
-%   - the result is the pseudo-inverse: the live block is inverted and the
-%     padding stays zero, so products with zero-padded vectors equal the
-%     live-block results;
-%   - invInvalid is true when no usable inverse exists (non-finite input or
-%     result).
+%   - the input is the full fixed MAX_MEAS x MAX_MEAS matrix: the live
+%     block in the leading rows/cols, zero elsewhere EXCEPT the padding
+%     diagonal, which the gate fills with the largest live variance so the
+%     matrix is non-singular (blkdiag(S, p*I));
+%   - the result inverts the live block and has no coupling between the
+%     live block and the padding, so products with zero-padded vectors
+%     equal the live-block results;
+%   - invInvalid is true when no usable inverse exists (non-finite,
+%     singular / rank-deficient input); the gate then ignores the result.
 %
 % INPUTS:
 %   - matrix         [n x n]

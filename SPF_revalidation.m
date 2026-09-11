@@ -56,21 +56,32 @@ function [passed, qValue, solveFault] = SPF_revalidation(innovation, obsMatrix, 
 passed     = false;
 qValue     = 0.0;
 solveFault = false;
-numMeas    = min(uint8(numMeas), CST_spfParam.MAX_MEAS);   % defensive: table bound
+maxMeas    = double(size(measNoiseCov, 1));                % array size (MAX_MEAS in the gate)
+numMeas    = min(double(numMeas), maxMeas);                % defensive: never past the arrays
 
 if (numMeas > 0)
-    threshold = CST_spfParam.REVAL_THRESHOLD_TABLE(numMeas);
+    tableIdx  = min(numMeas, numel(CST_spfParam.REVAL_THRESHOLD_TABLE));
+    threshold = CST_spfParam.REVAL_THRESHOLD_TABLE(tableIdx);
 
     % full fixed-size layout; rows/cols beyond numMeas are zero padding
     residual    = innovation - obsMatrix * coastMinusPrior;
     residualCov = obsMatrix * coastCovariance * obsMatrix' + measNoiseCov;
     residualCov = (residualCov + residualCov') / 2;
 
+    % the host's matrixInv flags a singular input, and zero padding is
+    % singular: fill the padding diagonal with the largest live variance
+    % (blkdiag(S_r, p*I) inverts to blkdiag(S_r^-1, I/p); the padded rows
+    % of the residual are zero, so q is unchanged)
+    padValue = max(max(diag(residualCov)), 1.0);
+    for rowIdx = (numMeas + 1):maxMeas
+        residualCov(rowIdx, rowIdx) = padValue;
+    end
+
     % Exception handler: a residual covariance with a non-positive
     % variance on a live row is unusable; the host's SVD inverse then
     % handles the padding (pseudo-inverse) and flags a non-finite matrix.
     varianceOk = true;
-    for rowIdx = 1:double(numMeas)
+    for rowIdx = 1:numMeas
         if ~(residualCov(rowIdx, rowIdx) > 0.0)
             varianceOk = false;
         end % ELSE is trivial
@@ -79,7 +90,7 @@ if (numMeas > 0)
     if (varianceOk) && (~invInvalid)
         qValue = residual' * (sInverse * residual);      % r' S_r^-1 r
         if isfinite(qValue) && (qValue >= 0.0) && (qValue < threshold) ...
-                && (numMeas >= CST_spfParam.REVAL_MIN_MEAS)
+                && (numMeas >= double(CST_spfParam.REVAL_MIN_MEAS))
             passed = true;
         end % ELSE: inconsistent, too few rows to certify, or an indefinite S_r (q < 0)
     else

@@ -61,6 +61,15 @@ for idx = 1:windowLength
         innovationCov = innovationCovBuffer(:, :, idx);          % S. Defined under Eq. 4
         projection    = obsMatrixBuffer(:, axisIdx, idx);        % f = H(:,axis). From Eq. 17
 
+        % the host's matrixInv flags a singular input, and zero padding is
+        % singular: fill the padding diagonal with the largest live variance
+        % (blkdiag(S, p*I) inverts to blkdiag(S^-1, I/p); the padded rows of
+        % gamma and f are zero, so the projections are unchanged)
+        padValue = max(max(diag(innovationCov)), 1.0);
+        for rowIdx = (double(numMeas) + 1):double(maxMeas)
+            innovationCov(rowIdx, rowIdx) = padValue;
+        end
+
         % Exception handler: a covariance with a non-positive variance on a
         % live row is unusable; the host's SVD inverse then handles the
         % padding (pseudo-inverse) and flags a non-finite S. Either case

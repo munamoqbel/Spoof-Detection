@@ -55,6 +55,7 @@ solveFault   = false;
 
 for idx = 1:windowLength
     numMeas = min(numMeasBuffer(idx), maxMeas);       % defensive: never past the buffer
+    assert(numMeas <= CST_spfParam.MAX_MEAS);          % Coder: upper bound of the slices below
     xiNormalised = 0.0;
 
     if (numMeas > 0)

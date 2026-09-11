@@ -58,6 +58,7 @@ passed     = false;
 qValue     = 0.0;
 solveFault = false;
 numMeas    = min(uint8(numMeas), CST_spfParam.MAX_MEAS);   % defensive: table / buffer bound
+assert(numMeas <= CST_spfParam.MAX_MEAS);                   % Coder: upper bound of the slices below
 
 if (numMeas > 0)
     threshold = CST_spfParam.REVAL_THRESHOLD_TABLE(numMeas);

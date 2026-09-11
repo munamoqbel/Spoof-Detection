@@ -55,17 +55,28 @@ classdef STRUCT_SPF
             n    = CST_gnssHybrid.NO_STATES;
             m    = min(double(numMeas), mMax);    % exception handler: rows beyond MAX_MEAS are dropped
 
-            innovationCov = zeros(mMax, mMax);
-            if (m > 0)
-                H = obsMatrix(1:m, :);
-                S = H * priorCov * H' + measNoiseCov(1:m, 1:m);
-                innovationCov(1:m, 1:m) = (S + S') / 2;
-            end % ELSE: no GNSS this epoch
+            % pad the host arrays to the fixed layout. Element loops, not
+            % 1:m slices: MATLAB Coder cannot bound a variable-length slice
+            % of a host array whose size it does not know ("Could not
+            % determine the size of this expression"); loops with a
+            % run-time bound are fine and need no dynamic allocation.
+            innovationP = zeros(mMax, 1);
+            obsMatrixP  = zeros(mMax, n);
+            measNoiseP  = zeros(mMax, mMax);
+            for rowIdx = 1:m
+                innovationP(rowIdx) = innovation(rowIdx);
+                for colIdx = 1:n
+                    obsMatrixP(rowIdx, colIdx) = obsMatrix(rowIdx, colIdx);
+                end
+                for colIdx = 1:m
+                    measNoiseP(rowIdx, colIdx) = measNoiseCov(rowIdx, colIdx);
+                end
+            end
 
-            % pad the host arrays to the fixed layout
-            innovationP = zeros(mMax, 1);  innovationP(1:m)     = innovation(1:m);
-            obsMatrixP  = zeros(mMax, n);  obsMatrixP(1:m, :)   = obsMatrix(1:m, :);
-            measNoiseP  = zeros(mMax);     measNoiseP(1:m, 1:m) = measNoiseCov(1:m, 1:m);
+            % S on the padded (fixed-size) matrices: rows/cols beyond m are
+            % zero because the padded H rows and R entries are zero
+            S = obsMatrixP * priorCov * obsMatrixP' + measNoiseP;
+            innovationCov = (S + S') / 2;
 
             kfMeas = STRUCT_SPF.setKfMeas(innovationP, innovationCov, obsMatrixP, ...
                 measNoiseP, numMeas, priorState, postState, postCov);
@@ -207,11 +218,12 @@ classdef STRUCT_SPF
                 poolOut.separation(:, freeSlot)         = zeros(CST_gnssHybrid.NO_STATES, 1);
                 poolOut.coastCovariance(:, :, freeSlot) = kfMeas.postCov;
 
-                m = kfMeas.numMeas;
-                poolOut.innovationBuffer(1:m, 1, freeSlot)          = kfMeas.innovation(1:m);
-                poolOut.innovationCovBuffer(1:m, 1:m, 1, freeSlot)  = kfMeas.innovationCov(1:m, 1:m);
-                poolOut.obsMatrixBuffer(1:m, :, 1, freeSlot)        = kfMeas.obsMatrix(1:m, :);
-                poolOut.numMeasBuffer(1, freeSlot)                  = uint8(m);
+                % kfMeas arrays are fixed MAX_MEAS layouts (rows beyond numMeas
+                % are padding, never read): copy whole, no variable slices
+                poolOut.innovationBuffer(:, 1, freeSlot)          = kfMeas.innovation;
+                poolOut.innovationCovBuffer(:, :, 1, freeSlot)    = kfMeas.innovationCov;
+                poolOut.obsMatrixBuffer(:, :, 1, freeSlot)        = kfMeas.obsMatrix;
+                poolOut.numMeasBuffer(1, freeSlot)                = kfMeas.numMeas;
             end
 
         end

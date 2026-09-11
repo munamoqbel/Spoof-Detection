@@ -34,7 +34,6 @@ monitoredAxes = CST_spfParam.MONITORED_AXES;
 numAxes = cast(numel(monitoredAxes), 'uint8');
 poolOut = poolIn;
 kfIncrement = kfMeas.postState - kfMeas.priorState;     % K*y of the watched filter
-m = kfMeas.numMeas;
 
 report = STRUCT_SPF.zeroMonitorReport;
 
@@ -47,10 +46,11 @@ for wIdx = 1:windowLength
         age = poolIn.windowAge(wIdx) + 1;
         poolOut.windowAge(wIdx) = age;
 
-        poolOut.innovationBuffer(1:m, age, wIdx)          = kfMeas.innovation(1:m);
-        poolOut.innovationCovBuffer(1:m, 1:m, age, wIdx)  = kfMeas.innovationCov(1:m, 1:m);
-        poolOut.obsMatrixBuffer(1:m, :, age, wIdx)        = kfMeas.obsMatrix(1:m, :);
-        poolOut.numMeasBuffer(age, wIdx)                  = uint8(m);
+        % fixed MAX_MEAS layouts: copy whole (rows beyond numMeas are padding)
+        poolOut.innovationBuffer(:, age, wIdx)          = kfMeas.innovation;
+        poolOut.innovationCovBuffer(:, :, age, wIdx)    = kfMeas.innovationCov;
+        poolOut.obsMatrixBuffer(:, :, age, wIdx)        = kfMeas.obsMatrix;
+        poolOut.numMeasBuffer(age, wIdx)                = kfMeas.numMeas;
 
         % ------------------------------------------------------------------
         %  2. Solution-Separation test (all monitored axes)

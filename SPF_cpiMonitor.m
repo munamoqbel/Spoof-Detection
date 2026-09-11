@@ -9,8 +9,8 @@
 %   - numMeasBuffer             [N x 1] valid measurement count per epoch
 %                               (rows/cols beyond it are padding)
 %   - axisIdx                   monitored position state index
-%   - windowLength, cpiThreshold (OPTIONAL, tests only) override the
-%                               CST_spfParam constants
+%   - windowLength              N (CST_spfParam.WINDOW_LENGTH in the deployed path)
+%   - cpiThreshold              T_N (CST_spfParam.CPI_THRESHOLD in the deployed path)
 %
 % OUTPUTS:
 %   - cpiAlarm                  logical
@@ -46,10 +46,6 @@ function [cpiAlarm, qStatistic, xiHistory, solveFault] = cpiMonitor...
      windowLength, cpiThreshold)
 
 % Define variables
-if (nargin < 7)
-    windowLength = CST_spfParam.WINDOW_LENGTH;
-    cpiThreshold = CST_spfParam.CPI_THRESHOLD;
-end
 maxMeas      = uint8(size(innovationBuffer, 1));
 xiHistory    = zeros(windowLength, 1);
 qStatistic   = 0.0;

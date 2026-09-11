@@ -24,7 +24,7 @@ nAlarm = 0; plMax = 0; modeOK = true;
 for k = 1:N
     [kf_x, kf_P, y, ~, ~, xp, xpP] = kalman_update_step(kf_x, kf_P, z_all(:, k), H_all(:, :, k), propTel, V);
     kfMeas = STRUCT_SPF.kfMeasFromUpdate(y, H_all(:, :, k), V, m, xp, xpP, kf_x, kf_P);
-    tel = spoofMonitor2hz(kfMeas, propTel, true, k == 1);  % outputs ignored (shadow)
+    tel = SPF_spoofMonitor(kfMeas, propTel, true, k == 1);  % outputs ignored (shadow)
     nAlarm = nAlarm + (tel.info.ssAlarm || tel.info.cpiAlarm);
     plMax  = max(plMax, tel.info.maxProtectionLevel);
     modeOK = modeOK && (tel.info.mode == CST_spfMode.NOMINAL);
@@ -37,11 +37,11 @@ fprintf('  alarms = %d (expect 0) | stayed NOMINAL = %d | max PL = %.3f m -> %s\
 % first active call afterwards re-initialises (no alarm, coastEpochs 0)
 alignOK = true;
 for k = 1:5
-    tel = spoofMonitor2hz(kfMeas, propTel, false, false);
+    tel = SPF_spoofMonitor(kfMeas, propTel, false, false);
     alignOK = alignOK && (tel.info.mode == CST_spfMode.NOMINAL) && ~tel.nav.applyCorrection ...
         && ~tel.kfCommand.startTrial && ~tel.info.ssAlarm && ~tel.info.cpiAlarm;
 end
-tel = spoofMonitor2hz(kfMeas, propTel, true, false);       % re-entry, no resetRequest
+tel = SPF_spoofMonitor(kfMeas, propTel, true, false);       % re-entry, no resetRequest
 alignOK = alignOK && (tel.info.mode == CST_spfMode.NOMINAL) && ~tel.info.ssAlarm ...
     && ~tel.info.cpiAlarm && (tel.info.coastEpochs == 0);
 fprintf('  alignment (navActive = false): zeroTel, then clean re-init on re-entry -> %s\n\n', pf(alignOK));

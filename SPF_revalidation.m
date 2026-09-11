@@ -50,7 +50,7 @@
 %
 %******************************************************************************************
 %#codegen
-function [passed, qValue, solveFault] = revalidation(innovation, obsMatrix, ...
+function [passed, qValue, solveFault] = SPF_revalidation(innovation, obsMatrix, ...
     measNoiseCov, numMeas, coastMinusPrior, coastCovariance)
 
 % Define variables

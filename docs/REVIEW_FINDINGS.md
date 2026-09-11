@@ -1,21 +1,21 @@
 # Runtime-path review (2026-09-07/08)
 
 Four independent reviewers (paper fidelity, FSM logic, integration hazards,
-Coder/types) audited the deployed path `spoof_monitor_2hz -> protectedNav ->
-monitorPool -> {cpiMonitor, ssMonitor}, insCoast, revalidation, STRUCT_SPF,
+Coder/types) audited the deployed path `spoof_monitor_2hz -> SPF_protectedNav ->
+SPF_monitorPool -> {SPF_cpiMonitor, SPF_ssMonitor}, SPF_insCoast, SPF_revalidation, STRUCT_SPF,
 CST_spfParam`. Every finding was then challenged by two independent
 skeptics; 47 verdicts came back (43 confirmed, 4 refuted, all refuted ones
 were "info"), 33 verdicts were lost to a session usage limit and are marked
 *unverified* below.
 
 ## Confirmed correct (paper lens)
-- cpiMonitor implements Eq. 17/20/29/33/35; per-epoch normalisation makes
+- SPF_cpiMonitor implements Eq. 17/20/29/33/35; per-epoch normalisation makes
   the H0 statistic exactly Gamma(N/2, 2).
 - Omega = sigma2_gamma_u * sigma_t^2 is the paper's Eq. 37; Eq. 38 via
   gammainc(T_N/(2(1+Omega)), N/2) reproduces the reference P_MD values.
 - Baked constants match the offline design to 1e-12; the per-epoch
   false-alert budget totals <= P_FA+ + P_FA- = 1e-5.
-- ssMonitor implements Eq. 49-52 with correct time alignment (post-update
+- SPF_ssMonitor implements Eq. 49-52 with correct time alignment (post-update
   KF at k vs coast propagated k-1 -> k); window semantics match Fig. 9.
 - revalidation's r'(H P_C H' + R)^-1 r is a valid chi-square(m) test.
 
@@ -28,7 +28,7 @@ were "info"), 33 verdicts were lost to a session usage limit and are marked
 | 3 | Re-validation assumes linear z = H x; host h(x) is nonlinear | major | **fixed** (residual = innovation - H (coast - prior)) |
 | 4 | Anchor bring-forward replays every past interval with the current Phi_acc/Q_acc | major | **fixed** (anchor kept live, propagated every epoch) |
 | 5 | sigma_SS = 0 turns the SS gate into "alarm on any nonzero separation" | minor | **fixed** (undefined test -> no alarm) |
-| 6 | alarmPerAxis indexed by state index in monitorPool but by bank position in ssMonitor | major | **fixed** (bank position everywhere) |
+| 6 | alarmPerAxis indexed by state index in SPF_monitorPool but by bank position in SPF_ssMonitor | major | **fixed** (bank position everywhere) |
 | 7 | Struct fields change class at runtime (info.mode, anchor.epoch, eventAnchorEpoch, freeSlot) — Coder rejects | major | **fixed** |
 | 8 | anchorMissing branch (alarm before the first clean close) freezes on the spoofed posterior | major | **mitigated**: the initial state is now the startup anchor; flag still only reported on the latch epoch |
 | 9 | MAX_ANCHOR_AGE can never trigger at a latch (anchor is 1 epoch old); the drift budget it was meant to enforce is a coast-time budget | major | **documented**; coast-time budget deferred by the user; `info.coastEpochs` telemetry added |
@@ -50,5 +50,5 @@ were "info"), 33 verdicts were lost to a session usage limit and are marked
 - CPI assumes a joint innovation vector with the full S against the prior (sequential-scalar hosts would need a change).
 - NaN/Inf from an ill-posed host S or P are swallowed silently.
 - Pool struct (~1.3 MB) copied by value several times per epoch; obsMatrixBuffer stores all 60 columns although only the position columns are used.
-- "Deterministic rounding" scalar loops in cpiMonitor follow two mldivide calls, so they do not buy bit-exactness.
-- Coast covariance symmetrised in insCoast but not in ssMonitor (no observable effect).
+- "Deterministic rounding" scalar loops in SPF_cpiMonitor follow two mldivide calls, so they do not buy bit-exactness.
+- Coast covariance symmetrised in SPF_insCoast but not in SPF_ssMonitor (no observable effect).

@@ -1,10 +1,10 @@
 %% test_error_handlers.m
 % Numerical exception handlers of the gate (audit of every division,
 % solve, sqrt, index and NaN path on the runtime path):
-%   1. cpiMonitor: a non-PD S (duplicated row, zero noise) is dropped with
+%   1. SPF_cpiMonitor: a non-PD S (duplicated row, zero noise) is dropped with
 %      solveFault and a finite q; a PD S still alarms on a bias, and the
 %      Cholesky form equals the explicit f'(S\g) form.
-%   2. revalidation: an indefinite residual covariance cannot pass and is
+%   2. SPF_revalidation: an indefinite residual covariance cannot pass and is
 %      flagged; a PD one reproduces r'(S\r) and the REVAL_MIN_MEAS floor.
 %   3. numMeas > MAX_MEAS is clamped in both kfMeas builders and flagged.
 %   4. a non-finite input epoch resets the gate (inputFault), nothing
@@ -18,8 +18,8 @@ mMax = double(CST_spfParam.MAX_MEAS);
 N    = double(CST_spfParam.WINDOW_LENGTH);
 rng(7);
 
-%% 1. cpiMonitor with a singular / PD innovation covariance
-fprintf('cpiMonitor exception handler (non-PD S) ...\n');
+%% 1. SPF_cpiMonitor with a singular / PD innovation covariance
+fprintf('SPF_cpiMonitor exception handler (non-PD S) ...\n');
 m = 4;  P = eye(n);
 H = zeros(m, n); H(:, 1:3) = randn(m, 3); H(4, :) = H(3, :);      % rows 3 and 4 identical
 innBuf = zeros(mMax, N); sBuf = zeros(mMax, mMax, N); hBuf = zeros(mMax, n, N);
@@ -31,7 +31,7 @@ for k = 1:N
     innBuf(1:m, k) = H * bias + 0.1 * randn(m, 1);
     sBuf(1:m, 1:m, k) = S;  hBuf(1:m, :, k) = H;
 end
-[alarmSing, qSing, ~, faultSing] = cpiMonitor(innBuf, sBuf, hBuf, numBuf, 1);
+[alarmSing, qSing, ~, faultSing] = SPF_cpiMonitor(innBuf, sBuf, hBuf, numBuf, 1, CST_spfParam.WINDOW_LENGTH, CST_spfParam.CPI_THRESHOLD);
 okSing = faultSing && isfinite(qSing) && (qSing == 0) && ~alarmSing;
 fprintf('  singular S: solveFault = %d, q = %g (finite, epochs dropped), alarm = %d -> %s\n', ...
     faultSing, qSing, alarmSing, pf(okSing));
@@ -42,27 +42,27 @@ for k = 1:N
     g = innBuf(1:m, k); f = H(:, 1);
     qRef = qRef + (f' * (S \ g))^2 / (f' * (S \ f));               % explicit Eq. 17/20/29 form
 end
-[alarmPD, qPD, ~, faultPD] = cpiMonitor(innBuf, sBuf, hBuf, numBuf, 1);
+[alarmPD, qPD, ~, faultPD] = SPF_cpiMonitor(innBuf, sBuf, hBuf, numBuf, 1, CST_spfParam.WINDOW_LENGTH, CST_spfParam.CPI_THRESHOLD);
 okPD = alarmPD && ~faultPD && abs(qPD - qRef) < 1e-9 * max(1, qRef);
 fprintf('  PD S, 5 m bias: alarm = %d, |q_chol - q_explicit| = %.1e -> %s\n\n', alarmPD, abs(qPD - qRef), pf(okPD));
 ok1 = okSing && okPD;
 
-%% 2. revalidation with an indefinite / PD residual covariance
-fprintf('revalidation exception handler (non-PD residual covariance) ...\n');
+%% 2. SPF_revalidation with an indefinite / PD residual covariance
+fprintf('SPF_revalidation exception handler (non-PD residual covariance) ...\n');
 m = 5;
 Hr = zeros(mMax, n); Hr(1:m, 1:3) = randn(m, 3);
 Rr = zeros(mMax); Rr(1:m, 1:m) = eye(m);
 inn = zeros(mMax, 1); inn(1:m) = 0.5 * randn(m, 1);
 Pc = eye(n); Pc(1, 1) = -50;                                       % indefinite along an observed direction
-[passBad, qBad, faultBad] = revalidation(inn, Hr, Rr, m, zeros(n, 1), Pc);
+[passBad, qBad, faultBad] = SPF_revalidation(inn, Hr, Rr, m, zeros(n, 1), Pc);
 okBad = ~passBad && faultBad && (qBad == 0);
 fprintf('  indefinite P_C: passed = %d, solveFault = %d, q = %g -> %s\n', passBad, faultBad, qBad, pf(okBad));
 Pc = 4 * eye(n);
 Sr = Hr(1:m, :) * Pc * Hr(1:m, :)' + eye(m);
 qRefR = inn(1:m)' * (Sr \ inn(1:m));
-[passGood, qGood, faultGood] = revalidation(inn, Hr, Rr, m, zeros(n, 1), Pc);
+[passGood, qGood, faultGood] = SPF_revalidation(inn, Hr, Rr, m, zeros(n, 1), Pc);
 okGood = passGood && ~faultGood && abs(qGood - qRefR) < 1e-9 * max(1, qRefR);
-[passFew, ~, ~] = revalidation(inn, Hr, Rr, 1, zeros(n, 1), Pc);    % pressure-only style epoch
+[passFew, ~, ~] = SPF_revalidation(inn, Hr, Rr, 1, zeros(n, 1), Pc);    % pressure-only style epoch
 okFew = ~passFew;
 fprintf('  PD P_C: passed = %d, |q_chol - q_explicit| = %.1e -> %s | numMeas = 1 cannot pass -> %s\n\n', ...
     passGood, abs(qGood - qRefR), pf(okGood), pf(okFew));
@@ -79,7 +79,7 @@ okFrom = (kfMeasBig.numMeas == CST_spfParam.MAX_MEAS) && kfMeasBig.numMeasClampe
 kfMeasSet = STRUCT_SPF.setKfMeas(zeros(mMax, 1), eye(mMax), zeros(mMax, n), eye(mMax), 35, zeros(n, 1), zeros(n, 1), eye(n));
 okSet = (kfMeasSet.numMeas == CST_spfParam.MAX_MEAS) && kfMeasSet.numMeasClamped;
 propTelI = STRUCT_SPF.zeroPropTel;
-tel = spoofMonitor2hz(kfMeasBig, propTelI, true, true);           % must run, and report the clamp
+tel = SPF_spoofMonitor(kfMeasBig, propTelI, true, true);           % must run, and report the clamp
 okRun = tel.info.numMeasClamped && (tel.info.mode == CST_spfMode.NOMINAL);
 ok3 = okFrom && okSet && okRun;
 fprintf('  kfMeasFromUpdate(31 rows) -> numMeas %d, clamped %d, fixed layout %d | setKfMeas(35) -> %d | gate runs, flags %d -> %s\n\n', ...
@@ -97,7 +97,7 @@ for k = 1:60
     [kf_x, kf_P, y, ~, ~, xp, xpP] = kalman_update_step(kf_x, kf_P, z_all(:, k), H_all(:, :, k), propTel, V);
     if k == 21, y(3) = NaN; end                                    % one corrupted epoch
     kfMeas = STRUCT_SPF.kfMeasFromUpdate(y, H_all(:, :, k), V, mm, xp, xpP, kf_x, kf_P);
-    tel = spoofMonitor2hz(kfMeas, propTel, true, k == 1);
+    tel = SPF_spoofMonitor(kfMeas, propTel, true, k == 1);
     if k == 21
         faultSeen = tel.info.inputFault && (tel.info.mode == CST_spfMode.NOMINAL) && ~tel.nav.applyCorrection;
     elseif k > 21
@@ -115,7 +115,7 @@ for k = 1:6
     z = z_all(:, k); if k == 4, z = z + 50.0; end                  % gross spoof on all rows at epoch 4
     [kf_x, kf_P, y, ~, ~, xp, xpP] = kalman_update_step(kf_x, kf_P, z, H_all(:, :, k), propTel, V);
     kfMeas = STRUCT_SPF.kfMeasFromUpdate(y, H_all(:, :, k), V, mm, xp, xpP, kf_x, kf_P);
-    tel = spoofMonitor2hz(kfMeas, propTel, true, k == 1);
+    tel = SPF_spoofMonitor(kfMeas, propTel, true, k == 1);
     if tel.info.eventLatched && ~latched
         latched = true; anchorEpoch = double(tel.info.eventAnchorEpoch);
     end

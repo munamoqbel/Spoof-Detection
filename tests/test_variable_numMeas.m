@@ -47,9 +47,9 @@ for variant = 1:2
         else           % (b) host supplies y, H, R, P_bar at exact size; gate forms S
             kfMeas = STRUCT_SPF.kfMeasFromUpdate(y, H, R, m, xp, xpP, post, postP);
         end
-        [sys, tel] = protectedNav(sys, kfMeas, propTel, k);
+        [sys, tel] = SPF_protectedNav(sys, kfMeas, propTel, k);
         mode = tel.info.mode;
-        if kfUpd, kf_x = post; kf_P = postP; else, [kf_x, kf_P] = insCoast(kf_x, kf_P, propTel); end
+        if kfUpd, kf_x = post; kf_P = postP; else, [kf_x, kf_P] = SPF_insCoast(kf_x, kf_P, propTel); end
         if tel.nav.applyCorrection, kf_x = tel.nav.state; kf_P = tel.nav.covar; end
         if tel.kfCommand.startTrial, tr_x = kf_x; tr_P = kf_P; end
         st(k) = tel.info.mode; xn(:, k) = kf_x;

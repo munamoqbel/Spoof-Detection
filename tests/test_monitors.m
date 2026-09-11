@@ -1,6 +1,6 @@
 %% test_monitors.m
 % Unit + Monte-Carlo checks of the deployed monitor engine (supersedes the
-% dual_monitor-era test_all.m, whose Test 5 cannot drive cpiMonitor since
+% dual_monitor-era test_all.m, whose Test 5 cannot drive SPF_cpiMonitor since
 % the window length and thresholds moved into CST_spfParam).
 % Run from the repo root (MATLAB, or Octave with tools/octave_shim).
 
@@ -85,7 +85,7 @@ Hw = repmat(H_t, [1 1 N_min_t]); mw = uint8(m_meas) * ones(N_min_t, 1, 'uint8');
 n_alarm = 0; q_sum = 0;
 for k = 1:n_mc
     for j = 1:N_min_t, gw(:,j) = L_s * randn(m_meas,1); end
-    [a, q, ~] = cpiMonitor(gw, Sw, Hw, mw, idx_z, N_min_t, T_fa);
+    [a, q, ~] = SPF_cpiMonitor(gw, Sw, Hw, mw, idx_z, N_min_t, T_fa);
     n_alarm = n_alarm + a; q_sum = q_sum + q;
 end
 q_mean = q_sum / n_mc;                       % Gamma(N/2,2) mean = N
@@ -100,7 +100,7 @@ end
 fprintf('Test 6: CPI detection under a bias ...\n');
 bias = 0.02;                                 % m along the monitored axis
 for j = 1:N_min_t, gw(:,j) = L_s * randn(m_meas,1) + f_t * bias; end
-[a, q, ~] = cpiMonitor(gw, Sw, Hw, mw, idx_z, N_min_t, T_N_t);
+[a, q, ~] = SPF_cpiMonitor(gw, Sw, Hw, mw, idx_z, N_min_t, T_N_t);
 if a
     fprintf('  PASS  q=%.1f > T_N=%.1f\n\n', q, T_N_t); pass=pass+1;
 else
@@ -144,7 +144,7 @@ for k = 1:N_run
     if mod(k, N) == 1                         % open a fresh window on this epoch
         dS = zeros(n_states, 1); cP = P;
     else
-        [dS, cP, r] = ssMonitor(dS, cP, inc, P, propTel, 2.0, k_MD_t);   % gate at 2 sigma
+        [dS, cP, r] = SPF_ssMonitor(dS, cP, inc, P, propTel, 2.0, k_MD_t);   % gate at 2 sigma
         rr = r.separation ./ max(r.sigmaSeparation, 1e-12);
         r_all(n_r+1 : n_r+3) = rr; n_r = n_r + 3;
         n_1e3 = n_1e3 + sum(abs(rr) > k_1e3);
@@ -169,26 +169,26 @@ fprintf('Test 8: SS detection under a separation ...\n');
 % k with that epoch's real increment plus 1 m on axis 3
 dS = zeros(n_states, 1); cP = P_prev;
 inc(3) = inc(3) + 1.0;
-[~, ~, r] = ssMonitor(dS, cP, inc, P, propTel);
+[~, ~, r] = SPF_ssMonitor(dS, cP, inc, P, propTel, CST_spfParam.K_FALSE_ALERT, CST_spfParam.K_MISSED_DETECTION);
 if r.anyAlarm && r.alarmPerAxis(3) && ~r.alarmPerAxis(1)
     fprintf('  PASS  axis-3 alarm, PL=%.3f m\n\n', r.maxProtectionLevel); pass=pass+1;
 else
     fprintf('  FAIL  alarmPerAxis=%s\n\n', mat2str(r.alarmPerAxis)); fail=fail+1;
 end
 
-%% Test 9: revalidation passes on consistent GNSS, fails on a 2 m offset
-fprintf('Test 9: revalidation ...\n');
+%% Test 9: SPF_revalidation passes on consistent GNSS, fails on a 2 m offset
+fprintf('Test 9: SPF_revalidation ...\n');
 cP = P; cmp = zeros(n_states, 1);      % coast - prior = 0 (host not updating)
 S_r = H_t * cP * H_t' + V; S_r = (S_r + S_r')/2;
 [U_r, D_r] = eig(S_r); L_r = U_r * diag(sqrt(max(diag(D_r), 0)));
 n_ok = 0; n_tr = 500;
 for k = 1:n_tr
     y = L_r * randn(m_meas, 1);              % innovation vs the coast (prior = coast)
-    ok = revalidation(y, H_t, V, m_meas, cmp, cP);
+    ok = SPF_revalidation(y, H_t, V, m_meas, cmp, cP);
     n_ok = n_ok + ok;
 end
 y_off = L_r * randn(m_meas, 1) + H_t(:, 3) * 2.0;
-[ok_off, q_off] = revalidation(y_off, H_t, V, m_meas, cmp, cP);
+[ok_off, q_off] = SPF_revalidation(y_off, H_t, V, m_meas, cmp, cP);
 if n_ok >= 0.99 * n_tr && ~ok_off
     fprintf('  PASS  pass rate %.3f, offset q=%.1f rejected\n\n', n_ok/n_tr, q_off); pass=pass+1;
 else

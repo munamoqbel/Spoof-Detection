@@ -4,10 +4,10 @@
 %
 % For every OPEN window:
 %   1. buffer this epoch's (y, S, H, numMeas)
-%   2. SS test via ssMonitor (accumulates this window's separation and
+%   2. SS test via SPF_ssMonitor (accumulates this window's separation and
 %      propagates its coast covariance once, tests every monitored axis,
 %      Eq. 49-52)
-%   3. at full length: CPI via cpiMonitor once per monitored axis
+%   3. at full length: CPI via SPF_cpiMonitor once per monitored axis
 %      (Eq. 33/35), then free the slot. A window that lived its whole
 %      life with NO alarm is reported as the anchor candidate.
 %
@@ -26,7 +26,7 @@
 %
 %******************************************************************************************
 %#codegen
-function [poolOut, report] = monitorPool(poolIn, kfMeas, propTel)
+function [poolOut, report] = SPF_monitorPool(poolIn, kfMeas, propTel)
 
 % Define variables
 windowLength = CST_spfParam.WINDOW_LENGTH;
@@ -55,9 +55,10 @@ for wIdx = 1:windowLength
         % ------------------------------------------------------------------
         %  2. Solution-Separation test (all monitored axes)
         % ------------------------------------------------------------------
-        [newSeparation, newCoastCov, ssResult] = ssMonitor( ...
+        [newSeparation, newCoastCov, ssResult] = SPF_ssMonitor( ...
             poolIn.separation(:, wIdx), poolIn.coastCovariance(:, :, wIdx), ...
-            kfIncrement, kfMeas.postCov, propTel);
+            kfIncrement, kfMeas.postCov, propTel, ...
+            CST_spfParam.K_FALSE_ALERT, CST_spfParam.K_MISSED_DETECTION);
 
         poolOut.separation(:, wIdx)         = newSeparation;
         poolOut.coastCovariance(:, :, wIdx) = newCoastCov;
@@ -79,12 +80,12 @@ for wIdx = 1:windowLength
         if (age >= windowLength)
             for idx = 1:numAxes
                 axisIdx = monitoredAxes(idx);  % actual state index
-                [cpiAlarm, ~, ~, cpiFault] = cpiMonitor( ...
+                [cpiAlarm, ~, ~, cpiFault] = SPF_cpiMonitor( ...
                     poolOut.innovationBuffer(:, 1:windowLength, wIdx), ...
                     poolOut.innovationCovBuffer(:, :, 1:windowLength, wIdx), ...
                     poolOut.obsMatrixBuffer(:, :, 1:windowLength, wIdx), ...
                     poolOut.numMeasBuffer(1:windowLength, wIdx), ...
-                    axisIdx);
+                    axisIdx, windowLength, CST_spfParam.CPI_THRESHOLD);
 
                 if (cpiFault)
                     report.solveFault = true;          % telemetry: a buffered S was not PD
@@ -94,7 +95,7 @@ for wIdx = 1:windowLength
                     report.cpiAlarm                = true;
                     report.anyAlarm                = true;
                     poolOut.hadAlarm(wIdx)         = true;
-                    report.alarmPerAxis(idx)       = true;   % monitored-axis index (as ssMonitor)
+                    report.alarmPerAxis(idx)       = true;   % monitored-axis index (as SPF_ssMonitor)
                 end % ELSE is trivial
             end
 

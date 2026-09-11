@@ -62,7 +62,7 @@ classdef CST_spfParam
         MAX_ANCHOR_AGE = uint32(234);             % epochs, 0.5 s each
         MAX_MEAS = uint8(30);                     % max measurements per epoch (host arrays are sized to 30)
         PIVOT_REL_TOL = 1.0e-12;                  % Cholesky pivot floor (relative to max diag): below it a
-                                                  % covariance is treated as singular (cpiMonitor, revalidation)
+                                                  % covariance is treated as singular (SPF_cpiMonitor, SPF_revalidation)
 
 
     end

@@ -48,7 +48,7 @@
 %
 %******************************************************************************************
 %#codegen
-function [spoofTel] = spoofMonitor2hz(kfMeas, propTel, navActive, resetRequest)
+function [spoofTel] = SPF_spoofMonitor(kfMeas, propTel, navActive, resetRequest)
 
 persistent sys epoch needInit
 
@@ -63,45 +63,44 @@ if ~navActive
     needInit = true;
     epoch    = uint32(0);
     spoofTel = STRUCT_SPF.zeroTel;
-    return;
-end
 
-% Exception handler: a non-finite input (host update failed, uninitialised
-% propTel) must never enter the persistent state. Treat it like the host
-% treats its own failed update: report, drop this epoch, re-initialise on
-% the next good one.
-if ~spoofMonitor2hz_inputsFinite(kfMeas, propTel)
+elseif ~SPF_inputsFinite(kfMeas, propTel)
+    % Exception handler: a non-finite input (host update failed,
+    % uninitialised propTel) must never enter the persistent state. Treat
+    % it like the host treats its own failed update: report, drop this
+    % epoch, re-initialise on the next good one.
     needInit = true;
     epoch    = uint32(0);
     spoofTel = STRUCT_SPF.zeroTel;
     spoofTel.info.inputFault = true;
-    return;
+
+else
+    justInit = false;
+    if resetRequest || needInit
+        sys = STRUCT_SPF.zeroSys;
+        sys.coastCov = kfMeas.postCov;
+        epoch    = uint32(0);
+        needInit = false;
+        justInit = true;          % anchor seeded AFTER this epoch runs (see below)
+    end
+
+    epoch = epoch + uint32(1);
+
+    [sys, spoofTel] = SPF_protectedNav(sys, kfMeas, propTel, epoch);
+
+    if justInit
+        % the first navigation solution is the fallback until the first
+        % window closes clean: seed it as "solution now" (separation 0,
+        % covariance P+), stamped with this epoch so it is neither
+        % propagated nor aged twice
+        sys.anchor = STRUCT_SPF.setAnchor(true, zeros(CST_gnssHybrid.NO_STATES, 1), ...
+            kfMeas.postCov, epoch);
+    end
 end
 
-justInit = false;
-if resetRequest || needInit
-    sys = STRUCT_SPF.zeroSys;
-    sys.coastCov = kfMeas.postCov;
-    epoch    = uint32(0);
-    needInit = false;
-    justInit = true;          % anchor seeded AFTER this epoch runs (see below)
 end
 
-epoch = epoch + uint32(1);
-
-[sys, spoofTel] = protectedNav(sys, kfMeas, propTel, epoch);
-
-if justInit
-    % the first navigation solution is the fallback until the first window
-    % closes clean: seed it as "solution now" (separation 0, covariance P+),
-    % stamped with this epoch so it is neither propagated nor aged twice
-    sys.anchor = STRUCT_SPF.setAnchor(true, zeros(CST_gnssHybrid.NO_STATES, 1), ...
-        kfMeas.postCov, epoch);
-end
-
-end
-
-function [ok] = spoofMonitor2hz_inputsFinite(kfMeas, propTel)
+function [ok] = SPF_inputsFinite(kfMeas, propTel)
 %#codegen
 ok = all(isfinite(kfMeas.innovation(:))) && all(isfinite(kfMeas.innovationCov(:))) && ...
      all(isfinite(kfMeas.obsMatrix(:)))  && all(isfinite(kfMeas.measNoiseCov(:)))  && ...

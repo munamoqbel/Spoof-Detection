@@ -1,7 +1,7 @@
 %******************************************************************************************
 % DESCRIPTION:
 % Struct constructors for the spoofing-detection gate (definitions only).
-% Every struct used by spoofMonitor2hz / protectedNav / monitorPool is built
+% Every struct used by SPF_spoofMonitor / SPF_protectedNav / SPF_monitorPool is built
 % here so Coder sees one fixed layout per type. All vector/matrix fields are
 % sized from CST_gnssHybrid.NO_STATES, CST_spfParam.MAX_MEAS and
 % CST_spfParam.WINDOW_LENGTH.
@@ -217,12 +217,12 @@ classdef STRUCT_SPF
         end
 
         %% ---------------- SS result ----------------
-        function [ssMonitor] = setSSmonitor(alarmPerAxis, anyAlarm, ...
+        function [SPF_ssMonitor] = setSSmonitor(alarmPerAxis, anyAlarm, ...
                 separation, sigmaSeparation, protectionLevel, ...
                 maxProtectionLevel)
 
             % Define structure
-            ssMonitor = struct( ...
+            SPF_ssMonitor = struct( ...
                 'alarmPerAxis',       logical(alarmPerAxis), ...
                 'anyAlarm',           logical(anyAlarm), ...
                 'separation',         separation, ...
@@ -231,7 +231,7 @@ classdef STRUCT_SPF
                 'maxProtectionLevel', maxProtectionLevel);
         end
 
-        function [ssMonitor] = zeroSSmonitor
+        function [SPF_ssMonitor] = zeroSSmonitor
 
             % Init values
             axisAlarm = zeros(1, 3, 'logical');
@@ -239,7 +239,7 @@ classdef STRUCT_SPF
             zeroVector = zeros(1, 3);
             scalar = 0.0;
 
-            ssMonitor = STRUCT_SPF.setSSmonitor(axisAlarm, alarm, ...
+            SPF_ssMonitor = STRUCT_SPF.setSSmonitor(axisAlarm, alarm, ...
                 zeroVector, zeroVector, zeroVector, scalar);
         end
 

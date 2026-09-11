@@ -14,11 +14,11 @@ bookkeeping of `KF.states`.
 
 | file | role |
 |---|---|
-| `spoofMonitor2hz.m` | persistent-state 2 Hz gate; wraps `protectedNav` |
-| `protectedNav.m` | FSM in increment form; host owns its filters, gate returns corrections |
-| `monitorPool.m` | overlapping-window bank (N slots) |
-| `cpiMonitor.m`, `ssMonitor.m` | per-window CPI (Eq. 33/35) and SS (Eq. 49-52) tests |
-| `insCoast.m`, `revalidation.m` | INS-only propagation (E28/E31), chi-square re-validation |
+| `SPF_spoofMonitor.m` | persistent-state 2 Hz gate; wraps `SPF_protectedNav` |
+| `SPF_protectedNav.m` | FSM in increment form; host owns its filters, gate returns corrections |
+| `SPF_monitorPool.m` | overlapping-window bank (N slots) |
+| `SPF_cpiMonitor.m`, `SPF_ssMonitor.m` | per-window CPI (Eq. 33/35) and SS (Eq. 49-52) tests |
+| `SPF_insCoast.m`, `SPF_revalidation.m` | INS-only propagation (E28/E31), chi-square re-validation |
 | `STRUCT_SPF.m` | all struct constructors + window open/close |
 | `CST_spfParam.m` | solved monitor constants (single source of truth at runtime) |
 | `CST_spfMode.m` | mode enumeration |
@@ -41,7 +41,7 @@ order and prints one PASS/FAIL line each.
 
 - `run_scheduler_test.m` — 100 Hz + 2 Hz architecture (T1-T6)
 - `tests/test_monitors.m` — engine unit + Monte-Carlo checks (replaces the
-  dual_monitor-era `test_all.m`, which cannot drive `cpiMonitor` since the
+  dual_monitor-era `test_all.m`, which cannot drive `SPF_cpiMonitor` since the
   window length / thresholds moved into `CST_spfParam`)
 - `tests/test_variable_numMeas.m` — varying satellite count, padded vs exact
 - `tests/test_feedback_split.m` — host setKF feedback split (GAIN), drain in COAST
@@ -59,7 +59,7 @@ is the code-level contract.
 
 ## Code generation
 
-The runtime path (`spoofMonitor2hz` and everything it calls) is written for
+The runtime path (`SPF_spoofMonitor` and everything it calls) is written for
 MATLAB Coder: fixed-size padded buffers, one struct layout per type from
 `STRUCT_SPF`, `uint8` enumeration modes, no cells, varargin, dynamic
 fields, function handles or try/catch. `tools/codegenSpoofMonitor.m`

@@ -19,7 +19,7 @@
 %
 %******************************************************************************************
 %#codegen
-function [state, covariance] = insCoast(state, covariance, propTel)
+function [state, covariance] = SPF_insCoast(state, covariance, propTel)
 
 % Define variables
 Phi = propTel.accumPhi;

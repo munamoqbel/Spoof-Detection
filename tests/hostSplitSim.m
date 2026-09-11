@@ -57,7 +57,7 @@ for k = 1:N
     PPlus = (I - K * H) * PB;  PPlus = (PPlus + PPlus') / 2;
 
     kfMeas = STRUCT_SPF.kfMeasFromUpdate(y, H, V, m, xBar, PB, xPlus, PPlus);
-    [sys, tel] = protectedNav(sys, kfMeas, propTel, k);
+    [sys, tel] = SPF_protectedNav(sys, kfMeas, propTel, k);
     mode = tel.info.mode;
 
     % ---- host: ONE setKF per epoch on the operational KF ----

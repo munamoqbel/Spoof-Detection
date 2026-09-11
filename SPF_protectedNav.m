@@ -1,7 +1,7 @@
 %******************************************************************************************
 % DESCRIPTION:
 % One epoch of the spoofing-protected navigator (the FSM behind
-% spoofMonitor2hz). HOST-OWNED FILTERS, INCREMENT FORM.
+% SPF_spoofMonitor). HOST-OWNED FILTERS, INCREMENT FORM.
 %
 % MODES (constants in CST_spfMode)
 %   NOMINAL    host KF updated normally; monitors watch its increments;
@@ -41,7 +41,7 @@
 %
 %******************************************************************************************
 %#codegen
-function [sys, spoofTel] = protectedNav(sys, kfMeas, propTel, epoch)
+function [sys, spoofTel] = SPF_protectedNav(sys, kfMeas, propTel, epoch)
 
 info      = STRUCT_SPF.zeroInfo;
 kfCommand = STRUCT_SPF.zeroCommand;
@@ -64,7 +64,7 @@ switch sys.mode
         sys.probSep  = zeros(numStates, 1);
 
         % ---- 2. monitor bank on the host increments ----
-        [sys.pool, report] = monitorPool(sys.pool, kfMeas, propTel);
+        [sys.pool, report] = SPF_monitorPool(sys.pool, kfMeas, propTel);
 
         % ---- 2b. keep the anchor LIVE: (host solution now) - (anchor coast
         %          now) accumulates this epoch's increment; P_C propagates ----
@@ -134,7 +134,7 @@ switch sys.mode
         %         the coast: x_coast - x_prior = 0 and the residual is y.
         sys.probSep = zeros(numStates, 1);
         coastMinusPrior = zeros(numStates, 1);
-        [passed, q_value, revalFault] = revalidation(kfMeas.innovation, kfMeas.obsMatrix, ...
+        [passed, q_value, revalFault] = SPF_revalidation(kfMeas.innovation, kfMeas.obsMatrix, ...
             kfMeas.measNoiseCov, kfMeas.numMeas, coastMinusPrior, sys.coastCov);
         info.qReval = q_value;
         info.revalComputed = true;
@@ -169,7 +169,7 @@ switch sys.mode
 
         % ---- 2. diagnostic: GNSS-vs-coast on the trial's innovation ----
         coastMinusPrior = -(Phi * sys.probSep);
-        [~, q_value, revalFault] = revalidation(kfMeas.innovation, kfMeas.obsMatrix, ...
+        [~, q_value, revalFault] = SPF_revalidation(kfMeas.innovation, kfMeas.obsMatrix, ...
             kfMeas.measNoiseCov, kfMeas.numMeas, coastMinusPrior, sys.coastCov);
         info.qReval = q_value;
         info.revalComputed = true;
@@ -179,7 +179,7 @@ switch sys.mode
         sys.probSep = Phi * sys.probSep + kfIncrement;
 
         % ---- 4. monitor bank on THE TRIAL filter ----
-        [sys.pool, report] = monitorPool(sys.pool, kfMeas, propTel);
+        [sys.pool, report] = SPF_monitorPool(sys.pool, kfMeas, propTel);
 
         info.ssAlarm            = report.ssAlarm;
         info.cpiAlarm           = report.cpiAlarm;

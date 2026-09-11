@@ -98,7 +98,7 @@ fprintf('Re-validation: T_reval = %.2f (chi2_%d), dwell = %d ep, probation = %d 
     rec.T_reval, prm_boot.m_meas, rec.M_dwell, rec.M_prob);
 
 % ---- consistency guard: the runtime reads CST_spfParam, not prm/rec ----
-% The monitors (monitorPool/cpiMonitor/ssMonitor/protectedNav) take their
+% The monitors (SPF_monitorPool/SPF_cpiMonitor/SPF_ssMonitor/SPF_protectedNav) take their
 % constants from CST_spfParam.m (Coder-friendly). The offline design above
 % is informational; warn if the two have drifted apart.
 chk = {'WINDOW_LENGTH',        double(CST_spfParam.WINDOW_LENGTH),        N_c;

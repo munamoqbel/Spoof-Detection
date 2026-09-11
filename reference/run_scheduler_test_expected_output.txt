@@ -1,6 +1,6 @@
 Reference console output of run_scheduler_test.m as run by the user
 (MATLAB), captured from a screenshot. Regression target for the
-100 Hz + 2 Hz split-rate architecture (scheduler_sim + spoofMonitor2hz).
+100 Hz + 2 Hz split-rate architecture (scheduler_sim + SPF_spoofMonitor).
 
 ==============================================
   Scheduler test: 100 Hz + 2 Hz architecture

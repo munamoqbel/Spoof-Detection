@@ -8,9 +8,9 @@ function out = recovery_nav_sim(z_all, H_all, V, propTel, P0, prm)
 %   - trial KF        tr_x / tr_P : copy of the coasting KF when probation
 %                     opens; updated in PROBATION
 % and applies the gate's corrections at LATCH and COMMIT. The gate (the
-% FSM in protectedNav) is called with the ACTIVE filter's update result.
+% FSM in SPF_protectedNav) is called with the ACTIVE filter's update result.
 % State is kept explicitly (no persistent) so batch runs are repeatable;
-% the deployment wrapper with persistent state is spoofMonitor2hz.m.
+% the deployment wrapper with persistent state is SPF_spoofMonitor.m.
 %
 % INPUTS
 %   z_all [m x N], H_all [m x n x N], V [m x m]
@@ -77,14 +77,14 @@ for epoch = 1:num_epochs
         prior, priorP, post, postP);
 
     % ---- gate ----
-    [sys, spoofTel] = protectedNav(sys, kfMeas, propTel, epoch);
+    [sys, spoofTel] = SPF_protectedNav(sys, kfMeas, propTel, epoch);
     mode = spoofTel.info.mode;
 
     % ---- host: apply the gate's decisions to the OPERATIONAL KF ----
     if kfUpdated
         kf_x = post; kf_P = postP;                       % normal closed-loop update
     else
-        [kf_x, kf_P] = insCoast(kf_x, kf_P, propTel);    % extrapolated only (coast)
+        [kf_x, kf_P] = SPF_insCoast(kf_x, kf_P, propTel);    % extrapolated only (coast)
     end
     if spoofTel.nav.applyCorrection                      % LATCH or COMMIT: setKF(nav.state, nav.covar)
         kf_x = spoofTel.nav.state;

@@ -1,6 +1,6 @@
 %******************************************************************************************
 % DESCRIPTION:
-% MATLAB-ONLY helper: screen and build spoofMonitor2hz with MATLAB Coder.
+% MATLAB-ONLY helper: screen and build SPF_spoofMonitor with MATLAB Coder.
 % Run from the repo root (or with the repo and the simulation's
 % CST_gnssHybrid on the path). Produces a C static library plus the HTML
 % code-generation report in <outDir>.
@@ -35,7 +35,7 @@ if exist('OCTAVE_VERSION', 'builtin') ~= 0
 end
 
 % 1. static readiness screen of the whole runtime call tree
-coder.screener('spoofMonitor2hz');
+coder.screener('SPF_spoofMonitor');
 
 % 2. entry-point argument types (fixed layouts)
 kfMeasType  = coder.typeof(STRUCT_SPF.zeroKfMeas);
@@ -49,10 +49,10 @@ cfg.TargetLang     = 'C';
 cfg.GenerateReport = true;
 cfg.LaunchReport   = false;
 
-codegen('-config', cfg, 'spoofMonitor2hz', ...
+codegen('-config', cfg, 'SPF_spoofMonitor', ...
     '-args', {kfMeasType, propTelType, navType, resetType}, '-d', outDir);
 
-fprintf('spoofMonitor2hz built with MATLAB Coder into %s\n', outDir);
+fprintf('SPF_spoofMonitor built with MATLAB Coder into %s\n', outDir);
 
 end
 %------------------------------------------------------------------------

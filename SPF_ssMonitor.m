@@ -17,8 +17,8 @@
 %   - kfIncrement          [n x 1]  x+ - x_bar of the watched filter this epoch
 %   - kfCovariance         [n x n]  P+ of the watched filter this epoch
 %   - propTel              .accumPhi / .accumQ  interval Phi / Q
-%   - kFalseAlert, kMissedDetection (OPTIONAL, tests only) override
-%                          the CST_spfParam constants
+%   - kFalseAlert          k_FA (CST_spfParam.K_FALSE_ALERT in the deployed path)
+%   - kMissedDetection     k_MD (CST_spfParam.K_MISSED_DETECTION in the deployed path)
 %
 % OUTPUTS:
 %   - separation           d_k
@@ -45,10 +45,6 @@ function [separation, coastCovariance, ssResult] = ssMonitor...
 
 % Define variables
 monitoredAxes      = CST_spfParam.MONITORED_AXES;
-if (nargin < 7)
-    kFalseAlert      = CST_spfParam.K_FALSE_ALERT;
-    kMissedDetection = CST_spfParam.K_MISSED_DETECTION;
-end
 numAxes            = cast(numel(monitoredAxes), 'uint8');
 sepAxis            = zeros(1, numAxes);
 sigmaSeparation    = zeros(1, numAxes);

@@ -23,12 +23,15 @@
 %
 % ASSUMPTIONS AND LIMITATIONS:
 % An epoch with numMeas = 0 (no GNSS) contributes xi = 0 to the window.
-% S is inverted through its Cholesky factor: S = Rc'*Rc, so with
-% w_g = Rc'\gamma and w_f = Rc'\f,  f'S^-1 gamma = w_f'w_g  and
+% S is inverted through its Cholesky factor: S = L*L', so with
+% w_g = L\gamma and w_f = L\f,  f'S^-1 gamma = w_f'w_g  and
 % f'S^-1 f = w_f'w_f  (no explicit inverse, no division by a pivot that can
-% be zero). chol with two outputs never errors: p > 0 flags a non-PD S, and
-% a relative pivot floor (CST_spfParam.PIVOT_REL_TOL) rejects an S that is
-% singular up to rounding.
+% be zero). SPF_cholesky / SPF_forwardSubst are fixed-size loops: a non-PD
+% S is flagged, not thrown, and a relative pivot floor
+% (CST_spfParam.PIVOT_REL_TOL) rejects an S that is singular up to
+% rounding. Everything runs on the full MAX_MEAS layout (padding handled
+% as an identity block): no variable-size expression, no library call, so
+% it compiles with MATLAB Coder variable sizing off.
 %
 % REQUIREMENT TRACEABILITY:
 % - PAPER MAPPING
@@ -80,23 +83,22 @@ for idx = 1:windowLength
         end
 
         % ------------------------------------------------------------------------
-        % Exception handler: S must be positive definite. chol never errors;
-        % p > 0 means singular / indefinite / non-finite -> this epoch is
-        % dropped (xi = 0) and the fault is reported.
+        % Exception handler: S must be positive definite. SPF_cholesky never
+        % errors; ok = false means singular / indefinite / non-finite ->
+        % this epoch is dropped (xi = 0) and the fault is reported.
         % ------------------------------------------------------------------------
-        [cholFactor, cholFail] = chol(innovationCov);
-        pivotOk = (cholFail == 0);
+        [cholLower, pivotOk] = SPF_cholesky(innovationCov, numMeas);   % S = L * L' (live block)
         if (pivotOk)
             % an exactly singular S can still factorise with a rounding-level
             % pivot: require every pivot to be above PIVOT_REL_TOL of the
             % largest diagonal (condition number below ~1e12). The padding
             % pivots equal padValue >= max(diag S) and never trip it.
-            minPivot = min(diag(cholFactor)) ^ 2;
+            minPivot = min(diag(cholLower)) ^ 2;
             pivotOk  = (minPivot > CST_spfParam.PIVOT_REL_TOL * max(diag(innovationCov)));
         end % ELSE is trivial
         if (pivotOk)
-            wInnovation = cholFactor' \ innovation;      % Rc'^-1 gamma  (zero in the padding)
-            wProjection = cholFactor' \ projection;      % Rc'^-1 f      (zero in the padding)
+            wInnovation = SPF_forwardSubst(cholLower, innovation, numMeas);   % L^-1 gamma  (zero in the padding)
+            wProjection = SPF_forwardSubst(cholLower, projection, numMeas);   % L^-1 f      (zero in the padding)
 
             gammaProjection  = 0.0;  % Eq. 17
             sigma2Projection = 0.0;  % Eq. 20

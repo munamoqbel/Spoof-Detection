@@ -41,10 +41,11 @@
 % include non-GNSS measurements (pressure altitude); REVAL_MIN_MEAS keeps
 % an epoch with too few rows from counting as a pass. The quadratic form
 % is evaluated through the Cholesky factor of the residual covariance
-% (S_r = Rc'*Rc, q = |Rc'\residual|^2 >= 0): no explicit inverse, no
-% division by a pivot that can be zero, and a non-PD S_r is detected by
-% chol's second output (plus a relative pivot floor, PIVOT_REL_TOL, for an
-% S_r singular up to rounding) instead of producing a negative or NaN q.
+% (S_r = L*L', q = |L\residual|^2 >= 0) with the fixed-size loops
+% SPF_cholesky / SPF_forwardSubst: no explicit inverse, no library call,
+% no division by a pivot that can be zero, and a non-PD S_r is flagged
+% (plus a relative pivot floor, PIVOT_REL_TOL, for an S_r singular up to
+% rounding) instead of producing a negative or NaN q.
 %
 % REQUIREMENT TRACEABILITY:
 %
@@ -84,14 +85,13 @@ if (numMeas > 0)
     end
 
     % Exception handler: residual covariance must be positive definite
-    [cholFactor, cholFail] = chol(residualCov);
-    pivotOk = (cholFail == 0);
+    [cholLower, pivotOk] = SPF_cholesky(residualCov, numMeas);   % S_r = L * L' (live block)
     if (pivotOk)
-        minPivot = min(diag(cholFactor)) ^ 2;          % rounding-level pivot = singular
+        minPivot = min(diag(cholLower)) ^ 2;           % rounding-level pivot = singular
         pivotOk  = (minPivot > CST_spfParam.PIVOT_REL_TOL * max(diag(residualCov)));
     end % ELSE is trivial
     if (pivotOk)
-        whitened = cholFactor' \ residual;               % Rc'^-1 r  (zero in the padding)
+        whitened = SPF_forwardSubst(cholLower, residual, numMeas);   % L^-1 r  (zero in the padding)
         qValue   = whitened' * whitened;                 % r' S_r^-1 r  (>= 0)
         if (qValue < threshold) && (numMeas >= CST_spfParam.REVAL_MIN_MEAS)
             passed = true;

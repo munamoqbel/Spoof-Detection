@@ -19,6 +19,7 @@ bookkeeping of `KF.states`.
 | `SPF_monitorPool.m` | overlapping-window bank (N slots) |
 | `SPF_cpiMonitor.m`, `SPF_ssMonitor.m` | per-window CPI (Eq. 33/35) and SS (Eq. 49-52) tests |
 | `SPF_insCoast.m`, `SPF_revalidation.m` | INS-only propagation (E28/E31), chi-square re-validation |
+| `SPF_cholesky.m`, `SPF_forwardSubst.m` | fixed-size Cholesky factor with fail flag and forward substitution (no library solve; Coder with variable sizing off) |
 | `STRUCT_SPF.m` | all struct constructors + window open/close |
 | `CST_spfParam.m` | solved monitor constants (single source of truth at runtime) |
 | `CST_spfMode.m` | mode enumeration |

@@ -6,8 +6,9 @@ function runAllTests()
 %   2. tests/test_variable_numMeas  varying satellite count, both kfMeas builders
 %   3. tests/test_shadow_mode       guide Step 5: shadow mode, then attack
 %   4. tests/test_feedback_split    host setKF split (GAIN) + drain in COAST
-%   5. tests/test_error_handlers    non-PD solves, numMeas clamp, NaN input, anchor stamp
-%   6. run_scheduler_test           100 Hz + 2 Hz architecture (T1-T6)
+%   5. tests/test_error_handlers    unusable covariances, numMeas clamp, NaN input, anchor stamp
+%   6. tests/test_matrixInv         contract of the host's SVD inverse (padding, accuracy, flags)
+%   7. run_scheduler_test           100 Hz + 2 Hz architecture (T1-T6)
 %
 % Each test is run in its own workspace (they may 'clear'); its console
 % output is captured and searched for its own PASS marker.
@@ -21,6 +22,7 @@ tests = { ...
     'test_shadow_mode',      '=== test_shadow_mode PASS ===';
     'test_feedback_split',   '=== test_feedback_split PASS ===';
     'test_error_handlers',   '=== test_error_handlers PASS ===';
+    'test_matrixInv',        '=== test_matrixInv PASS ===';
     'run_scheduler_test',    '=== ALL SCHEDULER TESTS PASS ==='};
 
 fprintf('==============================================\n');

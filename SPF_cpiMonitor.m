@@ -55,13 +55,29 @@ solveFault   = false;
 
 for idx = 1:windowLength
     numMeas = min(numMeasBuffer(idx), maxMeas);       % defensive: never past the buffer
-    assert(numMeas <= CST_spfParam.MAX_MEAS);          % Coder: upper bound of the slices below
     xiNormalised = 0.0;
 
     if (numMeas > 0)
-        innovation    = innovationBuffer(1:numMeas, idx);               % gamma. Eq.3
-        innovationCov = innovationCovBuffer(1:numMeas, 1:numMeas, idx); % S. Defined under Eq. 4
-        projection    = obsMatrixBuffer(1:numMeas, axisIdx, idx);       % f = H(:,axis). From Eq. 17
+        % ------------------------------------------------------------------
+        % Fixed-size formulation (MATLAB Coder without variable sizing):
+        % work on the full MAX_MEAS layout. Rows/cols beyond numMeas are
+        % zeroed and the padding diagonal of S is set to a positive value,
+        % so S_full = blkdiag(S, padValue*I). Its Cholesky factor is
+        % blkdiag(Rc, sqrt(padValue)*I), the whitened vectors are zero in
+        % the padding, and every sum below equals the numMeas-row result.
+        % ------------------------------------------------------------------
+        innovation    = innovationBuffer(:, idx);                % gamma (padded). Eq.3
+        innovationCov = innovationCovBuffer(:, :, idx);          % S (padded). Defined under Eq. 4
+        projection    = obsMatrixBuffer(:, axisIdx, idx);        % f = H(:,axis) (padded). From Eq. 17
+
+        padValue = max(max(diag(innovationCov)), 1.0);
+        for rowIdx = (double(numMeas) + 1):double(maxMeas)
+            innovation(rowIdx)    = 0.0;
+            projection(rowIdx)    = 0.0;
+            innovationCov(rowIdx, :) = 0.0;
+            innovationCov(:, rowIdx) = 0.0;
+            innovationCov(rowIdx, rowIdx) = padValue;
+        end
 
         % ------------------------------------------------------------------------
         % Exception handler: S must be positive definite. chol never errors;
@@ -73,17 +89,18 @@ for idx = 1:windowLength
         if (pivotOk)
             % an exactly singular S can still factorise with a rounding-level
             % pivot: require every pivot to be above PIVOT_REL_TOL of the
-            % largest diagonal (condition number below ~1e12)
+            % largest diagonal (condition number below ~1e12). The padding
+            % pivots equal padValue >= max(diag S) and never trip it.
             minPivot = min(diag(cholFactor)) ^ 2;
             pivotOk  = (minPivot > CST_spfParam.PIVOT_REL_TOL * max(diag(innovationCov)));
         end % ELSE is trivial
         if (pivotOk)
-            wInnovation = cholFactor' \ innovation;      % Rc'^-1 gamma
-            wProjection = cholFactor' \ projection;      % Rc'^-1 f
+            wInnovation = cholFactor' \ innovation;      % Rc'^-1 gamma  (zero in the padding)
+            wProjection = cholFactor' \ projection;      % Rc'^-1 f      (zero in the padding)
 
             gammaProjection  = 0.0;  % Eq. 17
             sigma2Projection = 0.0;  % Eq. 20
-            for idxMeas = 1:numMeas
+            for idxMeas = 1:double(maxMeas)
                 gammaProjection  = gammaProjection + wProjection(idxMeas) * wInnovation(idxMeas);   % = w_f' * w_g (Eq.17); loop used for deterministic rounding
                 sigma2Projection = sigma2Projection + wProjection(idxMeas) * wProjection(idxMeas);  % = w_f' * w_f (Eq.20); loop used for deterministic rounding
             end

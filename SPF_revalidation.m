@@ -57,16 +57,31 @@ function [passed, qValue, solveFault] = SPF_revalidation(innovation, obsMatrix, 
 passed     = false;
 qValue     = 0.0;
 solveFault = false;
-numMeas    = min(uint8(numMeas), CST_spfParam.MAX_MEAS);   % defensive: table / buffer bound
-assert(numMeas <= CST_spfParam.MAX_MEAS);                   % Coder: upper bound of the slices below
+maxMeas    = CST_spfParam.MAX_MEAS;
+numMeas    = min(uint8(numMeas), maxMeas);   % defensive: table / buffer bound
 
 if (numMeas > 0)
     threshold = CST_spfParam.REVAL_THRESHOLD_TABLE(numMeas);
-    H = obsMatrix(1:numMeas, :);
 
-    residual    = innovation(1:numMeas) - H * coastMinusPrior;
-    residualCov = H * coastCovariance * H' + measNoiseCov(1:numMeas, 1:numMeas);
+    % Fixed-size formulation (no variable-size expressions, see
+    % SPF_cpiMonitor): rows beyond numMeas of H, R and the innovation are
+    % zeroed, so residualCov = H P_C H' + R is zero there, and its padding
+    % diagonal is set to a positive value -> blkdiag(S_r, padValue*I).
+    H        = obsMatrix;                                  % [MAX_MEAS x n]
+    residual = innovation - H * coastMinusPrior;           % [MAX_MEAS x 1]
+    R        = measNoiseCov;                               % [MAX_MEAS x MAX_MEAS]
+    for rowIdx = (double(numMeas) + 1):double(maxMeas)
+        H(rowIdx, :)  = 0.0;
+        residual(rowIdx) = 0.0;
+        R(rowIdx, :)  = 0.0;
+        R(:, rowIdx)  = 0.0;
+    end
+    residualCov = H * coastCovariance * H' + R;
     residualCov = (residualCov + residualCov') / 2;
+    padValue = max(max(diag(residualCov)), 1.0);
+    for rowIdx = (double(numMeas) + 1):double(maxMeas)
+        residualCov(rowIdx, rowIdx) = padValue;
+    end
 
     % Exception handler: residual covariance must be positive definite
     [cholFactor, cholFail] = chol(residualCov);
@@ -76,7 +91,7 @@ if (numMeas > 0)
         pivotOk  = (minPivot > CST_spfParam.PIVOT_REL_TOL * max(diag(residualCov)));
     end % ELSE is trivial
     if (pivotOk)
-        whitened = cholFactor' \ residual;               % Rc'^-1 r
+        whitened = cholFactor' \ residual;               % Rc'^-1 r  (zero in the padding)
         qValue   = whitened' * whitened;                 % r' S_r^-1 r  (>= 0)
         if (qValue < threshold) && (numMeas >= CST_spfParam.REVAL_MIN_MEAS)
             passed = true;

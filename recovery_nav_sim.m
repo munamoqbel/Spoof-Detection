@@ -10,7 +10,7 @@ function out = recovery_nav_sim(z_all, H_all, V, propTel, P0, prm)
 % and applies the gate's corrections at LATCH and COMMIT. The gate (the
 % FSM in SPF_protectedNav) is called with the ACTIVE filter's update result.
 % State is kept explicitly (no persistent) so batch runs are repeatable;
-% the deployment wrapper with persistent state is SPF_spoofMonitor.m.
+% the deployment wrapper with persistent state is SPF_gate.m.
 %
 % INPUTS
 %   z_all [m x N], H_all [m x n x N], V [m x m]

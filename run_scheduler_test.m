@@ -4,7 +4,7 @@
 % WHAT IS TESTED (and what each test would catch):
 % T1 Accumulator correctness: Phi_step^50 vs the interval Phi.
 % T2 EQUIVALENCE: the scheduler path (100 Hz loop + persistent
-%    SPF_spoofMonitor) must reproduce the flat reference
+%    SPF_gate) must reproduce the flat reference
 %    (recovery_nav_sim) EXACTLY when both use the same interval
 %    matrices. Catches: broken handoff, wrong persistent state,
 %    double/missed epochs, accumulator reset errors.

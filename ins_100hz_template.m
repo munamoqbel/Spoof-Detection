@@ -56,7 +56,7 @@ end
 %  4. at each GNSS epoch (every ~50th call): hand off and reset
 % ======================================================================
 % TODO: pass propTel = STRUCT_SPF.setPropTel(Phi_acc, Q_acc) to the
-%       2 Hz function (SPF_spoofMonitor via the host wiring in
+%       2 Hz function (SPF_gate via the host wiring in
 %       docs/HOST_2HZ_WIRING.m), receive spoofTel, then:
 %
 %   feedback_enabled = (spoofTel.info.mode == CST_spfMode.NOMINAL);

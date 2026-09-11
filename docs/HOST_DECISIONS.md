@@ -4,7 +4,7 @@ Companion to `HOST_2HZ_WIRING.m`. Records what the host's 2 Hz function does
 with the operational `KF`, the `trialKF` and the gate outputs in every case,
 and what each gate mode compares against. `GAIN` is the host's constant
 feedback gain (0.4). "Mode" is the gate mode **after** this epoch's call to
-`SPF_spoofMonitor`; "in probation" is the mode **before** it.
+`SPF_gate`; "in probation" is the mode **before** it.
 
 ## 1. Definitions
 
@@ -122,10 +122,10 @@ attack goes through the same cycle with no limit on the number of cycles.
 | `S \ y`, `S \ f` on a singular or indefinite S | `SPF_cpiMonitor` | Cholesky factor with flag and relative pivot floor (`PIVOT_REL_TOL`); epoch dropped (`xi = 0`), `solveFault` |
 | `r' S_r^-1 r` negative / NaN on a non-PD residual covariance | `SPF_revalidation` | same factorisation; `q = |Rc'\r|^2 >= 0` by construction; non-PD: no pass, `solveFault` |
 | `numMeas > MAX_MEAS` slicing fixed buffers | `setKfMeas`, `kfMeasFromUpdate`, `SPF_cpiMonitor`, `SPF_revalidation` | clamped at ingress and defensively at use; `numMeasClamped` |
-| NaN / Inf in any input (failed host update, uninitialised `propTel`) | `SPF_spoofMonitor` | `isfinite` check on every input; epoch dropped with `inputFault`, state and epoch counter reset, re-init on the next good epoch (mirrors the host's own failed-update reset) |
+| NaN / Inf in any input (failed host update, uninitialised `propTel`) | `SPF_gate` | `isfinite` check on every input; epoch dropped with `inputFault`, state and epoch counter reset, re-init on the next good epoch (mirrors the host's own failed-update reset) |
 | `sqrt` of a negative variance (`P_C - P_KF`, `P_C`, `coastCov` diagonal) | `SPF_ssMonitor`, `SPF_protectedNav` | guarded: test reported undefined (no alarm), sigma 0 |
 | division `gamma / sqrt(sigma2)` with `sigma2 = 0` (axis unobservable) | `SPF_cpiMonitor` | guarded: `xi = 0` |
-| startup anchor stamped with epoch 0 (the "no anchor" sentinel) and propagated once too often | `SPF_spoofMonitor` | anchor seeded after the first epoch with that epoch's `(x+, P+)` and stamp |
+| startup anchor stamped with epoch 0 (the "no anchor" sentinel) and propagated once too often | `SPF_gate` | anchor seeded after the first epoch with that epoch's `(x+, P+)` and stamp |
 | `uint32` epoch differences, `uint8` counters and loop variables | all | checked: no wrap possible (`anchor.epoch <= epoch`), classes consistent |
 | `REVAL_THRESHOLD_TABLE(numMeas)` index | `SPF_revalidation` | `numMeas` clamped to `MAX_MEAS = 30`, table has 30 entries |
 

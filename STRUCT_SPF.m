@@ -1,7 +1,7 @@
 %******************************************************************************************
 % DESCRIPTION:
 % Struct constructors for the spoofing-detection gate (definitions only).
-% Every struct used by SPF_spoofMonitor / SPF_protectedNav / SPF_monitorPool is built
+% Every struct used by SPF_gate / SPF_protectedNav / SPF_monitorPool is built
 % here so Coder sees one fixed layout per type. All vector/matrix fields are
 % sized from CST_gnssHybrid.NO_STATES, CST_spfParam.MAX_MEAS and
 % CST_spfParam.WINDOW_LENGTH.

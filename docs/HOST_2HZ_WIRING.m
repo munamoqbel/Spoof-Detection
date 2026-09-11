@@ -1,7 +1,7 @@
 %% HOST_2HZ_WIRING.m   (read-me file - do not run)
 % Decision tables (setKF per case, trial handling, what each mode compares
 % against, gate outputs per event): docs/HOST_DECISIONS.md
-% How the host's 2 Hz function drives SPF_spoofMonitor. Written against the
+% How the host's 2 Hz function drives SPF_gate. Written against the
 % host's own design: operational KF struct 'KF' (.states, .covariance,
 % .stateFB); the 100 Hz function extrapolates states and covariance every
 % tick (state = phi*state), applies KF.stateFB to the mechanization and
@@ -140,7 +140,7 @@
 % %   (kfPost, not 'kfUpdate': a variable named like the function shadows it.)
 %
 % % ---- 3. gate: EVERY 2 Hz epoch, also with numMeas = 0 ----
-% spfTel    = SPF_spoofMonitor(spfMeas, propTel, navMode.navigation, firstCall);
+% spfTel    = SPF_gate(spfMeas, propTel, navMode.navigation, firstCall);
 % %   navActive = false (alignment): the gate returns zeroTel (NOMINAL, no
 % %   commands), drops its state and epoch counter and re-initialises on the
 % %   first active call. firstCall is your persistent-init flag only.

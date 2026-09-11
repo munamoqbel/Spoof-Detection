@@ -14,7 +14,7 @@ bookkeeping of `KF.states`.
 
 | file | role |
 |---|---|
-| `SPF_spoofMonitor.m` | persistent-state 2 Hz gate; wraps `SPF_protectedNav` |
+| `SPF_gate.m` | persistent-state 2 Hz gate; wraps `SPF_protectedNav` |
 | `SPF_protectedNav.m` | FSM in increment form; host owns its filters, gate returns corrections |
 | `SPF_monitorPool.m` | overlapping-window bank (N slots) |
 | `SPF_cpiMonitor.m`, `SPF_ssMonitor.m` | per-window CPI (Eq. 33/35) and SS (Eq. 49-52) tests |
@@ -59,7 +59,7 @@ is the code-level contract.
 
 ## Code generation
 
-The runtime path (`SPF_spoofMonitor` and everything it calls) is written for
+The runtime path (`SPF_gate` and everything it calls) is written for
 MATLAB Coder: fixed-size padded buffers, one struct layout per type from
 `STRUCT_SPF`, `uint8` enumeration modes, no cells, varargin, dynamic
 fields, function handles or try/catch. `tools/codegenSpoofMonitor.m`

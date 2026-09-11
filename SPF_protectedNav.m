@@ -1,7 +1,7 @@
 %******************************************************************************************
 % DESCRIPTION:
 % One epoch of the spoofing-protected navigator (the FSM behind
-% SPF_spoofMonitor). HOST-OWNED FILTERS, INCREMENT FORM.
+% SPF_gate). HOST-OWNED FILTERS, INCREMENT FORM.
 %
 % MODES (constants in CST_spfMode)
 %   NOMINAL    host KF updated normally; monitors watch its increments;

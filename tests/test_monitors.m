@@ -77,21 +77,25 @@ catch e
 end
 
 %% Test 5: CPI false-alarm rate under H0 (gamma ~ N(0,S) exactly)
+% The engine reads N and T_N from CST_spfParam, so the test runs on the
+% deployed window (N = WINDOW_LENGTH) and applies its own Monte-Carlo
+% threshold (P_FA = 1e-3 of the same Gamma(N/2, 2) law) to the returned q.
 fprintf('Test 5: CPI P_FA under H0 ...\n');
 n_mc = 3000; P_FA_t = 1e-3;
-T_fa  = gaminv(1-P_FA_t, N_min_t/2, 2);
-gw = zeros(m_meas, N_min_t); Sw = repmat(S_t, [1 1 N_min_t]);
-Hw = repmat(H_t, [1 1 N_min_t]); mw = uint8(m_meas) * ones(N_min_t, 1, 'uint8');
+N_w   = double(CST_spfParam.WINDOW_LENGTH);
+T_fa  = gaminv(1-P_FA_t, N_w/2, 2);
+gw = zeros(m_meas, N_w); Sw = repmat(S_t, [1 1 N_w]);
+Hw = repmat(H_t, [1 1 N_w]); mw = uint8(m_meas) * ones(N_w, 1, 'uint8');
 n_alarm = 0; q_sum = 0;
 for k = 1:n_mc
-    for j = 1:N_min_t, gw(:,j) = L_s * randn(m_meas,1); end
-    [a, q, ~] = SPF_cpiMonitor(gw, Sw, Hw, mw, idx_z, N_min_t, T_fa);
-    n_alarm = n_alarm + a; q_sum = q_sum + q;
+    for j = 1:N_w, gw(:,j) = L_s * randn(m_meas,1); end
+    [~, q, ~] = SPF_cpiMonitor(gw, Sw, Hw, mw, idx_z);
+    n_alarm = n_alarm + (q > T_fa); q_sum = q_sum + q;
 end
 q_mean = q_sum / n_mc;                       % Gamma(N/2,2) mean = N
-if n_alarm <= 10 && abs(q_mean - N_min_t) < 0.15*N_min_t
+if n_alarm <= 10 && abs(q_mean - N_w) < 0.15*N_w
     fprintf('  PASS  alarms=%d/%d (expect ~%d), mean q=%.2f (expect %d)\n\n', ...
-        n_alarm, n_mc, round(n_mc*P_FA_t), q_mean, N_min_t); pass=pass+1;
+        n_alarm, n_mc, round(n_mc*P_FA_t), q_mean, N_w); pass=pass+1;
 else
     fprintf('  FAIL  alarms=%d/%d, mean q=%.2f\n\n', n_alarm, n_mc, q_mean); fail=fail+1;
 end
@@ -99,12 +103,12 @@ end
 %% Test 6: CPI detects a 2 cm position-domain bias with the design threshold
 fprintf('Test 6: CPI detection under a bias ...\n');
 bias = 0.02;                                 % m along the monitored axis
-for j = 1:N_min_t, gw(:,j) = L_s * randn(m_meas,1) + f_t * bias; end
-[a, q, ~] = SPF_cpiMonitor(gw, Sw, Hw, mw, idx_z, N_min_t, T_N_t);
+for j = 1:N_w, gw(:,j) = L_s * randn(m_meas,1) + f_t * bias; end
+[a, q, ~] = SPF_cpiMonitor(gw, Sw, Hw, mw, idx_z);
 if a
-    fprintf('  PASS  q=%.1f > T_N=%.1f\n\n', q, T_N_t); pass=pass+1;
+    fprintf('  PASS  q=%.1f > T_N=%.1f\n\n', q, CST_spfParam.CPI_THRESHOLD); pass=pass+1;
 else
-    fprintf('  FAIL  q=%.1f <= T_N=%.1f\n\n', q, T_N_t); fail=fail+1;
+    fprintf('  FAIL  q=%.1f <= T_N=%.1f\n\n', q, CST_spfParam.CPI_THRESHOLD); fail=fail+1;
 end
 
 %% Test 7: SS calibration under H0 (truth driven by the KF's own Q)
@@ -144,7 +148,7 @@ for k = 1:N_run
     if mod(k, N) == 1                         % open a fresh window on this epoch
         dS = zeros(n_states, 1); cP = P;
     else
-        [dS, cP, r] = SPF_ssMonitor(dS, cP, inc, P, propTel, 2.0, k_MD_t);   % gate at 2 sigma
+        [dS, cP, r] = SPF_ssMonitor(dS, cP, inc, P, propTel);
         rr = r.separation ./ max(r.sigmaSeparation, 1e-12);
         r_all(n_r+1 : n_r+3) = rr; n_r = n_r + 3;
         n_1e3 = n_1e3 + sum(abs(rr) > k_1e3);
@@ -169,7 +173,7 @@ fprintf('Test 8: SS detection under a separation ...\n');
 % k with that epoch's real increment plus 1 m on axis 3
 dS = zeros(n_states, 1); cP = P_prev;
 inc(3) = inc(3) + 1.0;
-[~, ~, r] = SPF_ssMonitor(dS, cP, inc, P, propTel, CST_spfParam.K_FALSE_ALERT, CST_spfParam.K_MISSED_DETECTION);
+[~, ~, r] = SPF_ssMonitor(dS, cP, inc, P, propTel);
 if r.anyAlarm && r.alarmPerAxis(3) && ~r.alarmPerAxis(1)
     fprintf('  PASS  axis-3 alarm, PL=%.3f m\n\n', r.maxProtectionLevel); pass=pass+1;
 else

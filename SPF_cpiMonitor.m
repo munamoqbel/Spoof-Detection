@@ -9,8 +9,8 @@
 %   - numMeasBuffer             [N x 1] valid measurement count per epoch
 %                               (rows/cols beyond it are padding)
 %   - axisIdx                   monitored position state index
-%   - windowLength              N (CST_spfParam.WINDOW_LENGTH in the deployed path)
-%   - cpiThreshold              T_N (CST_spfParam.CPI_THRESHOLD in the deployed path)
+%   Window length N and threshold T_N are CST_spfParam.WINDOW_LENGTH and
+%   CST_spfParam.CPI_THRESHOLD; the buffers are N deep.
 %
 % OUTPUTS:
 %   - cpiAlarm                  logical
@@ -41,11 +41,12 @@
 %
 %******************************************************************************************
 %#codegen
-function [cpiAlarm, qStatistic, xiHistory, solveFault] = cpiMonitor...
-    (innovationBuffer, innovationCovBuffer, obsMatrixBuffer, numMeasBuffer, axisIdx, ...
-     windowLength, cpiThreshold)
+function [cpiAlarm, qStatistic, xiHistory, solveFault] = SPF_cpiMonitor...
+    (innovationBuffer, innovationCovBuffer, obsMatrixBuffer, numMeasBuffer, axisIdx)
 
 % Define variables
+windowLength = CST_spfParam.WINDOW_LENGTH;
+cpiThreshold = CST_spfParam.CPI_THRESHOLD;
 maxMeas      = uint8(size(innovationBuffer, 1));
 xiHistory    = zeros(windowLength, 1);
 qStatistic   = 0.0;

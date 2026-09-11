@@ -17,8 +17,7 @@
 %   - kfIncrement          [n x 1]  x+ - x_bar of the watched filter this epoch
 %   - kfCovariance         [n x n]  P+ of the watched filter this epoch
 %   - propTel              .accumPhi / .accumQ  interval Phi / Q
-%   - kFalseAlert          k_FA (CST_spfParam.K_FALSE_ALERT in the deployed path)
-%   - kMissedDetection     k_MD (CST_spfParam.K_MISSED_DETECTION in the deployed path)
+%   k_FA and k_MD are CST_spfParam.K_FALSE_ALERT / K_MISSED_DETECTION.
 %
 % OUTPUTS:
 %   - separation           d_k
@@ -39,12 +38,13 @@
 %
 %******************************************************************************************
 %#codegen
-function [separation, coastCovariance, ssResult] = ssMonitor...
-    (separation, coastCovariance, kfIncrement, kfCovariance, propTel, ...
-     kFalseAlert, kMissedDetection)
+function [separation, coastCovariance, ssResult] = SPF_ssMonitor...
+    (separation, coastCovariance, kfIncrement, kfCovariance, propTel)
 
 % Define variables
 monitoredAxes      = CST_spfParam.MONITORED_AXES;
+kFalseAlert        = CST_spfParam.K_FALSE_ALERT;
+kMissedDetection   = CST_spfParam.K_MISSED_DETECTION;
 numAxes            = cast(numel(monitoredAxes), 'uint8');
 sepAxis            = zeros(1, numAxes);
 sigmaSeparation    = zeros(1, numAxes);

@@ -31,7 +31,7 @@ for k = 1:N
     innBuf(1:m, k) = H * bias + 0.1 * randn(m, 1);
     sBuf(1:m, 1:m, k) = S;  hBuf(1:m, :, k) = H;
 end
-[alarmSing, qSing, ~, faultSing] = SPF_cpiMonitor(innBuf, sBuf, hBuf, numBuf, 1, CST_spfParam.WINDOW_LENGTH, CST_spfParam.CPI_THRESHOLD);
+[alarmSing, qSing, ~, faultSing] = SPF_cpiMonitor(innBuf, sBuf, hBuf, numBuf, 1);
 okSing = faultSing && isfinite(qSing) && (qSing == 0) && ~alarmSing;
 fprintf('  singular S: solveFault = %d, q = %g (finite, epochs dropped), alarm = %d -> %s\n', ...
     faultSing, qSing, alarmSing, pf(okSing));
@@ -42,7 +42,7 @@ for k = 1:N
     g = innBuf(1:m, k); f = H(:, 1);
     qRef = qRef + (f' * (S \ g))^2 / (f' * (S \ f));               % explicit Eq. 17/20/29 form
 end
-[alarmPD, qPD, ~, faultPD] = SPF_cpiMonitor(innBuf, sBuf, hBuf, numBuf, 1, CST_spfParam.WINDOW_LENGTH, CST_spfParam.CPI_THRESHOLD);
+[alarmPD, qPD, ~, faultPD] = SPF_cpiMonitor(innBuf, sBuf, hBuf, numBuf, 1);
 okPD = alarmPD && ~faultPD && abs(qPD - qRef) < 1e-9 * max(1, qRef);
 fprintf('  PD S, 5 m bias: alarm = %d, |q_chol - q_explicit| = %.1e -> %s\n\n', alarmPD, abs(qPD - qRef), pf(okPD));
 ok1 = okSing && okPD;
@@ -79,7 +79,7 @@ okFrom = (kfMeasBig.numMeas == CST_spfParam.MAX_MEAS) && kfMeasBig.numMeasClampe
 kfMeasSet = STRUCT_SPF.setKfMeas(zeros(mMax, 1), eye(mMax), zeros(mMax, n), eye(mMax), 35, zeros(n, 1), zeros(n, 1), eye(n));
 okSet = (kfMeasSet.numMeas == CST_spfParam.MAX_MEAS) && kfMeasSet.numMeasClamped;
 propTelI = STRUCT_SPF.zeroPropTel;
-tel = SPF_spoofMonitor(kfMeasBig, propTelI, true, true);           % must run, and report the clamp
+tel = SPF_gate(kfMeasBig, propTelI, true, true);           % must run, and report the clamp
 okRun = tel.info.numMeasClamped && (tel.info.mode == CST_spfMode.NOMINAL);
 ok3 = okFrom && okSet && okRun;
 fprintf('  kfMeasFromUpdate(31 rows) -> numMeas %d, clamped %d, fixed layout %d | setKfMeas(35) -> %d | gate runs, flags %d -> %s\n\n', ...
@@ -97,7 +97,7 @@ for k = 1:60
     [kf_x, kf_P, y, ~, ~, xp, xpP] = kalman_update_step(kf_x, kf_P, z_all(:, k), H_all(:, :, k), propTel, V);
     if k == 21, y(3) = NaN; end                                    % one corrupted epoch
     kfMeas = STRUCT_SPF.kfMeasFromUpdate(y, H_all(:, :, k), V, mm, xp, xpP, kf_x, kf_P);
-    tel = SPF_spoofMonitor(kfMeas, propTel, true, k == 1);
+    tel = SPF_gate(kfMeas, propTel, true, k == 1);
     if k == 21
         faultSeen = tel.info.inputFault && (tel.info.mode == CST_spfMode.NOMINAL) && ~tel.nav.applyCorrection;
     elseif k > 21
@@ -115,7 +115,7 @@ for k = 1:6
     z = z_all(:, k); if k == 4, z = z + 50.0; end                  % gross spoof on all rows at epoch 4
     [kf_x, kf_P, y, ~, ~, xp, xpP] = kalman_update_step(kf_x, kf_P, z, H_all(:, :, k), propTel, V);
     kfMeas = STRUCT_SPF.kfMeasFromUpdate(y, H_all(:, :, k), V, mm, xp, xpP, kf_x, kf_P);
-    tel = SPF_spoofMonitor(kfMeas, propTel, true, k == 1);
+    tel = SPF_gate(kfMeas, propTel, true, k == 1);
     if tel.info.eventLatched && ~latched
         latched = true; anchorEpoch = double(tel.info.eventAnchorEpoch);
     end

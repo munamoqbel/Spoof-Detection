@@ -48,7 +48,7 @@
 %
 %******************************************************************************************
 %#codegen
-function [spoofTel] = SPF_spoofMonitor(kfMeas, propTel, navActive, resetRequest)
+function [spoofTel] = SPF_gate(kfMeas, propTel, navActive, resetRequest)
 
 persistent sys epoch needInit
 

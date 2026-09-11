@@ -4,11 +4,11 @@ function out = scheduler_sim(z_all, H_all, V, Phi_step, Q_step, ...
 %
 % Emulates the real scheduler: a 100 Hz loop (the ins_100hz_template
 % steps, implemented concretely for the linear harness) that calls the
-% persistent 2 Hz gate SPF_spoofMonitor once every ticks_per_epoch ticks,
+% persistent 2 Hz gate SPF_gate once every ticks_per_epoch ticks,
 % with a HOST 2 Hz side that follows docs/HOST_2HZ_WIRING.m. This
 % exercises everything the flat harness (recovery_nav_sim) cannot:
 %
-%   - SPF_spoofMonitor itself: persistent sys/epoch, resetRequest
+%   - SPF_gate itself: persistent sys/epoch, resetRequest
 %   - accumPhi / accumQ accumulation and per-interval reset (spfAccumProp)
 %   - the feedback gate (ON only in NOMINAL)
 %   - corrections at latch / commit consumed by the mechanization at the
@@ -106,7 +106,7 @@ for epoch = 1:num_epochs
     kfMeas = STRUCT_SPF.kfMeasFromUpdate(y, H_all(:, :, epoch), V, num_meas, ...
         prior, priorP, post, postP);
 
-    spoofTel = SPF_spoofMonitor(kfMeas, propTel, true, epoch == 1);
+    spoofTel = SPF_gate(kfMeas, propTel, true, epoch == 1);
     mode = spoofTel.info.mode;
 
     if kfUpdated

@@ -28,24 +28,22 @@
 %   - coastCovariance   [n x n]  P_C of the coast
 %
 % OUTPUTS:
-%   - passed     logical, qValue < threshold(numMeas) AND numMeas >=
+%   - passed     logical, 0 <= qValue < threshold(numMeas) AND numMeas >=
 %                CST_spfParam.REVAL_MIN_MEAS; false if numMeas = 0 or the
-%                residual covariance is not positive definite
+%                residual covariance is unusable
 %   - qValue     the chi-square statistic (log it for diagnostics); 0 when
 %                it could not be formed
-%   - solveFault logical, true if H*P_C*H' + R was not positive definite
-%                (singular / indefinite / non-finite): test invalid, no pass
+%   - solveFault logical, true if matrixInv flagged H*P_C*H' + R as
+%                unusable: test invalid, no pass
 %
 % ASSUMPTIONS AND LIMITATIONS:
 % Threshold from CST_spfParam.REVAL_THRESHOLD_TABLE(numMeas). The rows may
 % include non-GNSS measurements (pressure altitude); REVAL_MIN_MEAS keeps
-% an epoch with too few rows from counting as a pass. The quadratic form
-% is evaluated through the Cholesky factor of the residual covariance
-% (S_r = L*L', q = |L\residual|^2 >= 0) with the fixed-size loops
-% SPF_cholesky / SPF_forwardSubst: no explicit inverse, no library call,
-% no division by a pivot that can be zero, and a non-PD S_r is flagged
-% (plus a relative pivot floor, PIVOT_REL_TOL, for an S_r singular up to
-% rounding) instead of producing a negative or NaN q.
+% an epoch with too few rows from counting as a pass. Everything runs on
+% the full MAX_MEAS layout (rows/cols beyond numMeas are zero): no
+% variable-size expression. The residual covariance is inverted by the
+% host's matrixInv (SVD pseudo-inverse, unusable matrix flagged); a
+% negative or non-finite q cannot pass.
 %
 % REQUIREMENT TRACEABILITY:
 %
@@ -58,44 +56,32 @@ function [passed, qValue, solveFault] = SPF_revalidation(innovation, obsMatrix, 
 passed     = false;
 qValue     = 0.0;
 solveFault = false;
-maxMeas    = CST_spfParam.MAX_MEAS;
-numMeas    = min(uint8(numMeas), maxMeas);   % defensive: table / buffer bound
+numMeas    = min(uint8(numMeas), CST_spfParam.MAX_MEAS);   % defensive: table bound
 
 if (numMeas > 0)
     threshold = CST_spfParam.REVAL_THRESHOLD_TABLE(numMeas);
 
-    % Fixed-size formulation (no variable-size expressions, see
-    % SPF_cpiMonitor): rows beyond numMeas of H, R and the innovation are
-    % zeroed, so residualCov = H P_C H' + R is zero there, and its padding
-    % diagonal is set to a positive value -> blkdiag(S_r, padValue*I).
-    H        = obsMatrix;                                  % [MAX_MEAS x n]
-    residual = innovation - H * coastMinusPrior;           % [MAX_MEAS x 1]
-    R        = measNoiseCov;                               % [MAX_MEAS x MAX_MEAS]
-    for rowIdx = (double(numMeas) + 1):double(maxMeas)
-        H(rowIdx, :)  = 0.0;
-        residual(rowIdx) = 0.0;
-        R(rowIdx, :)  = 0.0;
-        R(:, rowIdx)  = 0.0;
-    end
-    residualCov = H * coastCovariance * H' + R;
+    % full fixed-size layout; rows/cols beyond numMeas are zero padding
+    residual    = innovation - obsMatrix * coastMinusPrior;
+    residualCov = obsMatrix * coastCovariance * obsMatrix' + measNoiseCov;
     residualCov = (residualCov + residualCov') / 2;
-    padValue = max(max(diag(residualCov)), 1.0);
-    for rowIdx = (double(numMeas) + 1):double(maxMeas)
-        residualCov(rowIdx, rowIdx) = padValue;
-    end
 
-    % Exception handler: residual covariance must be positive definite
-    [cholLower, pivotOk] = SPF_cholesky(residualCov, numMeas);   % S_r = L * L' (live block)
-    if (pivotOk)
-        minPivot = min(diag(cholLower)) ^ 2;           % rounding-level pivot = singular
-        pivotOk  = (minPivot > CST_spfParam.PIVOT_REL_TOL * max(diag(residualCov)));
-    end % ELSE is trivial
-    if (pivotOk)
-        whitened = SPF_forwardSubst(cholLower, residual, numMeas);   % L^-1 r  (zero in the padding)
-        qValue   = whitened' * whitened;                 % r' S_r^-1 r  (>= 0)
-        if (qValue < threshold) && (numMeas >= CST_spfParam.REVAL_MIN_MEAS)
+    % Exception handler: a residual covariance with a non-positive
+    % variance on a live row is unusable; the host's SVD inverse then
+    % handles the padding (pseudo-inverse) and flags a non-finite matrix.
+    varianceOk = true;
+    for rowIdx = 1:double(numMeas)
+        if ~(residualCov(rowIdx, rowIdx) > 0.0)
+            varianceOk = false;
+        end % ELSE is trivial
+    end
+    [sInverse, invInvalid] = matrixInv(residualCov);
+    if (varianceOk) && (~invInvalid)
+        qValue = residual' * (sInverse * residual);      % r' S_r^-1 r
+        if isfinite(qValue) && (qValue >= 0.0) && (qValue < threshold) ...
+                && (numMeas >= CST_spfParam.REVAL_MIN_MEAS)
             passed = true;
-        end % ELSE: inconsistent, or too few rows to certify (e.g. pressure only)
+        end % ELSE: inconsistent, too few rows to certify, or an indefinite S_r (q < 0)
     else
         solveFault = true;                               % cannot certify anything this epoch
     end

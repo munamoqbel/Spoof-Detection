@@ -119,8 +119,8 @@ attack goes through the same cycle with no limit on the number of cycles.
 
 | Hazard | Where | Handling |
 |---|---|---|
-| `S \ y`, `S \ f` on a singular or indefinite S | `SPF_cpiMonitor` | fixed-size Cholesky (`SPF_cholesky`, fail flag, no library) with relative pivot floor (`PIVOT_REL_TOL`); epoch dropped (`xi = 0`), `solveFault` |
-| `r' S_r^-1 r` negative / NaN on a non-PD residual covariance | `SPF_revalidation` | same factorisation; `q = |Rc'\r|^2 >= 0` by construction; non-PD: no pass, `solveFault` |
+| `S^-1 y`, `S^-1 f` on the zero-padded S | `SPF_cpiMonitor` | live-row variances must be positive, then the host's `matrixInv` (SVD pseudo-inverse: padding stays zero, non-finite S flagged); a flagged epoch is dropped (`xi = 0`), `solveFault` |
+| `r' S_r^-1 r` on an unusable residual covariance | `SPF_revalidation` | live-row variances must be positive, then the host's `matrixInv`; `q` must be finite and `>= 0` to pass; flagged: no pass, `solveFault` |
 | `numMeas > MAX_MEAS` slicing fixed buffers | `setKfMeas`, `kfMeasFromUpdate`, `SPF_cpiMonitor`, `SPF_revalidation` | clamped at ingress and defensively at use; `numMeasClamped` |
 | NaN / Inf in any input (failed host update, uninitialised `propTel`) | `SPF_gate` | `isfinite` check on every input; epoch dropped with `inputFault`, state and epoch counter reset, re-init on the next good epoch (mirrors the host's own failed-update reset) |
 | `sqrt` of a negative variance (`P_C - P_KF`, `P_C`, `coastCov` diagonal) | `SPF_ssMonitor`, `SPF_protectedNav` | guarded: test reported undefined (no alarm), sigma 0 |

@@ -16,13 +16,6 @@
 % a GNSS outage; without this floor ten baro-only epochs in COAST would
 % open a probation with no GNSS evidence. qReval is still computed and
 % logged whenever numMeas > 0.
-% - PIVOT_REL_TOL:
-% Every S / residual covariance is inverted through its Cholesky factor.
-% chol's flag catches indefinite and non-finite matrices; an EXACTLY
-% singular one (duplicated row with zero noise) can still factorise with a
-% rounding-level pivot, so pivots below PIVOT_REL_TOL * max(diag) are
-% rejected too (condition number above ~1e12). The epoch is then dropped
-% (CPI: xi = 0; re-validation: no pass) and info.solveFault is raised.
 % - REVAL_THRESHOLD_TABLE(m) = chi2inv(1 - 1e-3, m), m = 1..MAX_MEAS (51)
 % (Implementation Guide Sec. 5: one gate per possible row count).
 % Recompute offline if MAX_MEAS or the 1e-3 allocation changes; the table
@@ -66,8 +59,6 @@ classdef CST_spfParam
         PROBATION_LENGTH = uint8(18);             % quiet epochs -> commit
         MAX_ANCHOR_AGE = uint32(234);             % epochs, 0.5 s each
         MAX_MEAS = CST_gnssHybrid.MAX_MEASURES;   % max measurement rows per epoch (host class, uint8(51))
-        PIVOT_REL_TOL = 1.0e-12;                  % Cholesky pivot floor (relative to max diag): below it a
-                                                  % covariance is treated as singular (SPF_cpiMonitor, SPF_revalidation)
 
 
     end

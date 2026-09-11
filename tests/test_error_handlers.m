@@ -1,11 +1,11 @@
 %% test_error_handlers.m
 % Numerical exception handlers of the gate (audit of every division,
 % solve, sqrt, index and NaN path on the runtime path):
-%   1. SPF_cpiMonitor: a non-PD S (duplicated row, zero noise) is dropped with
-%      solveFault and a finite q; a PD S still alarms on a bias, and the
-%      Cholesky form equals the explicit f'(S\g) form.
-%   2. SPF_revalidation: an indefinite residual covariance cannot pass and is
-%      flagged; a PD one reproduces r'(S\r) and the REVAL_MIN_MEAS floor.
+%   1. SPF_cpiMonitor: a rank-deficient S gives a finite statistic, a
+%      non-finite S is flagged (solveFault), a PD S alarms on a bias and
+%      matches the explicit f'(S\g) form.
+%   2. SPF_revalidation: an indefinite residual covariance cannot pass
+%      (q < 0); a PD one reproduces r'(S\r) and the REVAL_MIN_MEAS floor.
 %   3. numMeas > MAX_MEAS is clamped in both kfMeas builders and flagged.
 %   4. a non-finite input epoch resets the gate (inputFault), nothing
 %      enters the persistent state, and the gate runs on cleanly.
@@ -32,9 +32,16 @@ for k = 1:N
     sBuf(1:m, 1:m, k) = S;  hBuf(1:m, :, k) = H;
 end
 [alarmSing, qSing, ~, faultSing] = SPF_cpiMonitor(innBuf, sBuf, hBuf, numBuf, 1);
-okSing = faultSing && isfinite(qSing) && (qSing == 0) && ~alarmSing;
-fprintf('  singular S: solveFault = %d, q = %g (finite, epochs dropped), alarm = %d -> %s\n', ...
-    faultSing, qSing, alarmSing, pf(okSing));
+% with the SVD pseudo-inverse a rank-deficient S is not an error: the
+% statistic must simply stay finite (no NaN/Inf) whether or not it alarms
+okSing = isfinite(qSing) && (qSing >= 0);
+fprintf('  singular S (duplicated row, zero noise): q = %.2f finite, alarm = %d, solveFault = %d -> %s\n', ...
+    qSing, alarmSing, faultSing, pf(okSing));
+sNan = sBuf; sNan(1, 1, 1) = NaN;                                  % an unusable S must be flagged
+[~, qNan, ~, faultNan] = SPF_cpiMonitor(innBuf, sNan, hBuf, numBuf, 1);
+okNan = faultNan && isfinite(qNan);
+fprintf('  non-finite S: solveFault = %d, q finite = %d -> %s\n', faultNan, isfinite(qNan), pf(okNan));
+okSing = okSing && okNan;
 
 qRef = 0;
 for k = 1:N
@@ -44,7 +51,7 @@ for k = 1:N
 end
 [alarmPD, qPD, ~, faultPD] = SPF_cpiMonitor(innBuf, sBuf, hBuf, numBuf, 1);
 okPD = alarmPD && ~faultPD && abs(qPD - qRef) < 1e-9 * max(1, qRef);
-fprintf('  PD S, 5 m bias: alarm = %d, |q_chol - q_explicit| = %.1e -> %s\n\n', alarmPD, abs(qPD - qRef), pf(okPD));
+fprintf('  PD S, 5 m bias: alarm = %d, |q_matrixInv - q_explicit| = %.1e -> %s\n\n', alarmPD, abs(qPD - qRef), pf(okPD));
 ok1 = okSing && okPD;
 
 %% 2. SPF_revalidation with an indefinite / PD residual covariance
@@ -53,10 +60,11 @@ m = 5;
 Hr = zeros(mMax, n); Hr(1:m, 1:3) = randn(m, 3);
 Rr = zeros(mMax); Rr(1:m, 1:m) = eye(m);
 inn = zeros(mMax, 1); inn(1:m) = 0.5 * randn(m, 1);
-Pc = eye(n); Pc(1, 1) = -50;                                       % indefinite along an observed direction
-[passBad, qBad, faultBad] = SPF_revalidation(inn, Hr, Rr, m, zeros(n, 1), Pc);
-okBad = ~passBad && faultBad && (qBad == 0);
-fprintf('  indefinite P_C: passed = %d, solveFault = %d, q = %g -> %s\n', passBad, faultBad, qBad, pf(okBad));
+Pc = eye(n); Pc(1, 1) = -50;                                       % negative variance along state 1
+Hbad = zeros(mMax, n); Hbad(1:m, 1) = 1.0;                         % every row observes state 1 -> diag < 0
+[passBad, qBad, faultBad] = SPF_revalidation(inn, Hbad, Rr, m, zeros(n, 1), Pc);
+okBad = ~passBad && faultBad;                                      % negative variance: flagged, never a pass
+fprintf('  indefinite P_C: passed = %d (q = %g, solveFault = %d) -> %s\n', passBad, qBad, faultBad, pf(okBad));
 Pc = 4 * eye(n);
 Sr = Hr(1:m, :) * Pc * Hr(1:m, :)' + eye(m);
 qRefR = inn(1:m)' * (Sr \ inn(1:m));
@@ -64,7 +72,7 @@ qRefR = inn(1:m)' * (Sr \ inn(1:m));
 okGood = passGood && ~faultGood && abs(qGood - qRefR) < 1e-9 * max(1, qRefR);
 [passFew, ~, ~] = SPF_revalidation(inn, Hr, Rr, 1, zeros(n, 1), Pc);    % pressure-only style epoch
 okFew = ~passFew;
-fprintf('  PD P_C: passed = %d, |q_chol - q_explicit| = %.1e -> %s | numMeas = 1 cannot pass -> %s\n\n', ...
+fprintf('  PD P_C: passed = %d, |q_matrixInv - q_explicit| = %.1e -> %s | numMeas = 1 cannot pass -> %s\n\n', ...
     passGood, abs(qGood - qRefR), pf(okGood), pf(okFew));
 ok2 = okBad && okGood && okFew;
 

@@ -108,7 +108,7 @@ the estimate having no information, not a sign that the attack ended.
 | Veto | `eventProbationVetoed` | none | none | none |
 | Commit | `applyCorrection`, `eventHandback` | trial `xPost` | trial `PPost` | none |
 | Alarm without usable anchor | `eventLatched`, `anchorMissing` | none | none | none; mode still COAST |
-| Every epoch | `mode`, `ssAlarm`, `cpiAlarm`, `alarmPerAxis`, `maxProtectionLevel`, `qReval`, `dwellCount`, `coastEpochs` | | `coastCov` (diagnostic) | |
+| Every epoch | `mode`, `ssAlarm`, `cpiAlarm`, `alarmPerAxis`, `maxProtectionLevel`, `qReval`, `dwellCount`, `coastEpochs`, `ssRatio` (SS margin per axis, alarm > 1), `cpiRatio` (CPI margin per axis, alarm > 1) | | `coastCov` (diagnostic) | |
 | Fault telemetry | `inputFault` (non-finite input: epoch dropped, gate re-initialises on the next good epoch), `numMeasClamped` (host passed more than `MAX_MEAS` rows), `solveFault` (an S or residual covariance was not positive definite: that CPI epoch counts `xi = 0`, re-validation cannot pass) | | | |
 
 After a commit the anchor is the committed solution (separation zero,

@@ -73,13 +73,23 @@ for wIdx = 1:windowLength
             report.maxProtectionLevel = ssResult.maxProtectionLevel;
         end % ELSE is trivial
 
+        % telemetry: SS margin per monitored axis, max over the open windows
+        for idx = 1:numAxes
+            if (ssResult.sigmaSeparation(idx) > 0.0)
+                ratio = abs(ssResult.separation(idx)) / (CST_spfParam.K_FALSE_ALERT * ssResult.sigmaSeparation(idx));
+                if (ratio > report.ssRatio(idx))
+                    report.ssRatio(idx) = ratio;
+                end % ELSE is trivial
+            end % ELSE: test undefined this epoch
+        end
+
         % ------------------------------------------------------------------
         %  3. window complete: CPI verdict per axis, then close
         % ------------------------------------------------------------------
         if (age >= windowLength)
             for idx = 1:numAxes
                 axisIdx = monitoredAxes(idx);  % actual state index
-                [cpiAlarm, ~, ~, cpiFault] = SPF_cpiMonitor( ...
+                [cpiAlarm, qStatistic, ~, cpiFault] = SPF_cpiMonitor( ...
                     poolOut.innovationBuffer(:, 1:windowLength, wIdx), ...
                     poolOut.innovationCovBuffer(:, :, 1:windowLength, wIdx), ...
                     poolOut.obsMatrixBuffer(:, :, 1:windowLength, wIdx), ...
@@ -87,7 +97,11 @@ for wIdx = 1:windowLength
                     axisIdx);
 
                 if (cpiFault)
-                    report.solveFault = true;          % telemetry: a buffered S was not PD
+                    report.solveFault = true;          % telemetry: a buffered S was unusable
+                end % ELSE is trivial
+                ratio = qStatistic / CST_spfParam.CPI_THRESHOLD;   % telemetry: CPI margin
+                if (ratio > report.cpiRatio(idx))
+                    report.cpiRatio(idx) = ratio;
                 end % ELSE is trivial
 
                 if (cpiAlarm)

@@ -151,7 +151,7 @@ classdef STRUCT_SPF
 
         function [report] = setMonitorReport(alarmPerAxis, anyAlarm, ...
                 maxProtectionLevel, ssAlarm, cpiAlarm, cleanCloseFound, ...
-                cleanCloseSeparation, cleanCloseCovar, solveFault)
+                cleanCloseSeparation, cleanCloseCovar, solveFault, ssRatio, cpiRatio)
 
             % Define structure
             report = struct( ...
@@ -163,7 +163,9 @@ classdef STRUCT_SPF
                 'cleanCloseFound',      logical(cleanCloseFound), ...
                 'cleanCloseSeparation', cleanCloseSeparation, ...
                 'cleanCloseCovar',      cleanCloseCovar, ...
-                'solveFault',           logical(solveFault));   % a CPI epoch had a non-PD S
+                'solveFault',           logical(solveFault), ... % a CPI epoch had an unusable S
+                'ssRatio',              ssRatio, ...     % [1x3] max over windows of |d|/(k_FA sigma_SS); alarm at > 1
+                'cpiRatio',             cpiRatio);       % [1x3] q/T_N of the window(s) closed this epoch; alarm at > 1
         end
 
         function [report] = zeroMonitorReport
@@ -176,7 +178,7 @@ classdef STRUCT_SPF
             zeroCovar = zeros(CST_gnssHybrid.NO_STATES, CST_gnssHybrid.NO_STATES);
 
             report = STRUCT_SPF.setMonitorReport(axisAlarm, alarm, ...
-                scalar, alarm, alarm, alarm, zeroState, zeroCovar, alarm);
+                scalar, alarm, alarm, alarm, zeroState, zeroCovar, alarm, zeros(1, 3), zeros(1, 3));
         end
 
         function [poolOut] = closeAllWindows(poolIn)
@@ -356,7 +358,7 @@ classdef STRUCT_SPF
                 alarmPerAxis, maxProtectionLevel, qReval, revalComputed,...
                 dwellCount, eventLatched, eventAnchorEpoch, eventProbationStarted,...
                 eventProbationVetoed, eventHandback, anchorMissing, coastEpochs, ...
-                inputFault, numMeasClamped, solveFault)
+                inputFault, numMeasClamped, solveFault, ssRatio, cpiRatio)
 
             % Define structure
             info = struct( ...
@@ -377,7 +379,9 @@ classdef STRUCT_SPF
                 'coastEpochs',           coastEpochs, ...
                 'inputFault',            logical(inputFault), ...     % non-finite input: gate reset this epoch
                 'numMeasClamped',        logical(numMeasClamped), ... % host passed > MAX_MEAS rows (clamped)
-                'solveFault',            logical(solveFault));        % S or residual covariance not PD this epoch
+                'solveFault',            logical(solveFault), ...     % S or residual covariance unusable this epoch
+                'ssRatio',               ssRatio, ...    % [1x3] SS margin: |d|/(k_FA sigma_SS), max over open windows (alarm > 1)
+                'cpiRatio',              cpiRatio);      % [1x3] CPI margin: q/T_N of windows closed this epoch (alarm > 1)
         end
 
         function [info] = zeroInfo
@@ -401,13 +405,15 @@ classdef STRUCT_SPF
             inputFault            = false;
             numMeasClamped        = false;
             solveFault            = false;
+            ssRatio               = zeros(1, 3);
+            cpiRatio              = zeros(1, 3);
 
             % Define structure
             info = STRUCT_SPF.setInfo(mode, ssAlarm, cpiAlarm, ...
                 alarmPerAxis, maxProtectionLevel, qReval, revalComputed,...
                 dwellCount, eventLatched, eventAnchorEpoch, eventProbationStarted,...
                 eventProbationVetoed, eventHandback, anchorMissing, coastEpochs, ...
-                inputFault, numMeasClamped, solveFault);
+                inputFault, numMeasClamped, solveFault, ssRatio, cpiRatio);
         end
 
         function [command] = setCommand(startTrial)

@@ -59,6 +59,16 @@ order and prints one PASS/FAIL line each.
 each mode compares against, and the gate outputs. `docs/HOST_2HZ_WIRING.m`
 is the code-level contract.
 
+## Logging and diagnostics
+
+`tools/SPF_logInit.m`, `tools/SPF_logAppend.m` and `tools/SPF_plotLog.m`
+(MATLAB desktop, not code generation) record the gate telemetry once per
+2 Hz epoch and draw the standard figures: mode timeline with events,
+SS/CPI margins per axis (alarm at 1), protection level, host NIS,
+re-validation statistic against its threshold, dwell, coast time, faults.
+The header of `SPF_plotLog.m` says how to read them for a jamming or
+false-latch investigation.
+
 ## Code generation
 
 The runtime path (`SPF_gate` and everything it calls) is written for

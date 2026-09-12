@@ -79,6 +79,8 @@ switch sys.mode
         info.alarmPerAxis       = report.alarmPerAxis;
         info.maxProtectionLevel = report.maxProtectionLevel;
         info.solveFault         = report.solveFault;
+        info.ssRatio            = report.ssRatio;
+        info.cpiRatio           = report.cpiRatio;
 
         % ---- 3. refresh anchor (only on alarm-free epochs, so the
         %         anchor always ends strictly before detection) ----
@@ -186,6 +188,8 @@ switch sys.mode
         info.alarmPerAxis       = report.alarmPerAxis;
         info.maxProtectionLevel = report.maxProtectionLevel;
         info.solveFault         = info.solveFault || report.solveFault;
+        info.ssRatio            = report.ssRatio;
+        info.cpiRatio           = report.cpiRatio;
         % probation windows never refresh the anchor: the trial is not
         % yet trusted, so report.cleanClose* is deliberately ignored.
 

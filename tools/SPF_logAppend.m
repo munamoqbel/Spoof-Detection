@@ -25,6 +25,10 @@ spfLog.alarmAxis(k,:) = info.alarmPerAxis;
 spfLog.ssRatio(k,:)   = info.ssRatio;
 spfLog.cpiRatio(k,:)  = info.cpiRatio;
 spfLog.pl(k)          = info.maxProtectionLevel;
+axes = CST_spfParam.MONITORED_AXES;
+for a = 1:min(3, numel(axes))
+    spfLog.sigmaPos(k, a) = sqrt(max(spfMeas.postCov(axes(a), axes(a)), 0));
+end
 spfLog.qReval(k)      = info.qReval;
 spfLog.revalDone(k)   = info.revalComputed;
 if m > 0

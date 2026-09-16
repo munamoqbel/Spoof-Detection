@@ -16,6 +16,7 @@ spfLog.alarmAxis   = false(numEpochs, 3);
 spfLog.ssRatio     = zeros(numEpochs, 3);        % |d| / (k_FA sigma_SS), alarm at > 1
 spfLog.cpiRatio    = zeros(numEpochs, 3);        % q / T_N of windows closed this epoch, alarm at > 1
 spfLog.pl          = zeros(numEpochs, 1);        % max protection level [m]
+spfLog.sigmaPos    = zeros(numEpochs, 3);        % sqrt(P+) on MONITORED_AXES [m] (host covariance honesty check)
 spfLog.qReval      = zeros(numEpochs, 1);
 spfLog.revalThr    = zeros(numEpochs, 1);        % chi-square threshold for this epoch's numMeas
 spfLog.revalDone   = false(numEpochs, 1);

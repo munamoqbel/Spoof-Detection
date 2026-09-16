@@ -22,6 +22,12 @@ function SPF_plotLog(spfLog, fs)
 %     drift). Needs the coast-time budget / Q, not the thresholds.
 %   - probation opens and is vetoed repeatedly: look at which ratio vetoes
 %     (SS = the trial drifts from the coast, CPI = biased innovations).
+%   - covariance honesty (host Q / initial P): at the end of a pure-INS
+%     coast compare the true position error (e.g. the jump at
+%     re-acquisition or at a host reset) with sigma_N/E/D in the PL panel.
+%     A consistent filter gives a ratio of about 1 to 3; 20 or more means
+%     Q (or the post-reset P of the bias states) is too small and the SS
+%     and re-validation tests will fire on legitimate corrections.
 
 if nargin < 2, fs = 2; end
 n = spfLog.count;
@@ -33,9 +39,11 @@ ev = @(idx) t(idx(idx <= n));
 figure('Name', 'SPF gate: mode');
 subplot(2,1,1);
 unarmed = ~spfLog.armed(1:n);
-if any(unarmed)                                   % warm-up shading
-    tu = t(unarmed);
-    area([tu(1) tu(end) + 1/fs], [3.5 3.5], -0.5, 'FaceColor', [0.85 0.85 0.85], 'EdgeColor', 'none'); hold on;
+d = diff([false; unarmed; false]);               % one grey band per contiguous unarmed run
+bandStart = find(d == 1); bandEnd = find(d == -1) - 1;
+for b = 1:numel(bandStart)
+    area([t(bandStart(b)) t(bandEnd(b)) + 1/fs], [3.5 3.5], -0.5, ...
+        'FaceColor', [0.85 0.85 0.85], 'EdgeColor', 'none'); hold on;
 end
 stairs(t, spfLog.mode(1:n), 'k', 'LineWidth', 1.2); hold on;
 plot(ev(spfLog.evLatch), 2*ones(size(ev(spfLog.evLatch))), 'rv', 'MarkerFaceColor', 'r');
@@ -57,7 +65,10 @@ subplot(4,1,2);
 plot(t, spfLog.cpiRatio(1:n, :)); hold on; yline(1, 'r--'); grid on;
 ylabel('CPI q/T_N'); title('CPI margin of windows closed this epoch (alarm > 1)');
 subplot(4,1,3);
-plot(t, spfLog.pl(1:n), 'k'); grid on; ylabel('PL [m]'); title('max protection level');
+semilogy(t, max(spfLog.pl(1:n), 1e-2), 'k', 'LineWidth', 1.2); hold on;
+semilogy(t, max(spfLog.sigmaPos(1:n, :), 1e-2)); grid on;
+ylabel('[m]'); legend('PL', '\sigma_N', '\sigma_E', '\sigma_D', 'Location', 'northwest');
+title('max protection level and host position sigma sqrt(P+) (compare sigma with the true drift after a coast)');
 subplot(4,1,4);
 semilogy(t, max(spfLog.nis(1:n), 1e-3), 'k'); hold on; yline(1, 'r--'); grid on;
 ylabel('NIS'); xlabel('t [s]'); title('host KF normalised innovation squared (~1 when R, P honest)');

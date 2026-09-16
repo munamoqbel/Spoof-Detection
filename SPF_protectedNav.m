@@ -64,21 +64,24 @@ switch sys.mode
         sys.probSep  = zeros(numStates, 1);
 
         % ---- 1b. warm-up: arm the monitors only on a converged filter ----
-        %          (enough rows and a protection level below ARM_PL_MAX for
-        %          ARM_EPOCHS consecutive epochs; sticky once armed)
+        %          ARM_EPOCHS qualifying epochs (enough rows and a protection
+        %          level below ARM_PL_MAX). A protection level above the limit
+        %          restarts the count (filter diverging or coasting); a short
+        %          row dropout with the PL still inside only pauses it.
+        %          Sticky once armed.
         if (~sys.armed)
             sigmaPosMax = 0.0;
             for idx = 1:numel(CST_spfParam.MONITORED_AXES)
                 axisIdx = CST_spfParam.MONITORED_AXES(idx);
                 sigmaPosMax = max(sigmaPosMax, sqrt(max(kfMeas.postCov(axisIdx, axisIdx), 0.0)));
             end
-            qualifies = (kfMeas.numMeas >= CST_spfParam.REVAL_MIN_MEAS) && ...
-                (CST_spfParam.K_MISSED_DETECTION * sigmaPosMax < CST_spfParam.ARM_PL_MAX);
-            if (qualifies)
-                sys.armCount = sys.armCount + 1;
-            else
-                sys.armCount = 0;
-            end
+            plInside   = (CST_spfParam.K_MISSED_DETECTION * sigmaPosMax < CST_spfParam.ARM_PL_MAX);
+            enoughRows = (kfMeas.numMeas >= CST_spfParam.REVAL_MIN_MEAS);
+            if (~plInside)
+                sys.armCount = 0;                     % restart
+            elseif (enoughRows)
+                sys.armCount = sys.armCount + 1;      % qualifying epoch
+            end % ELSE: dropout with the PL inside: pause, keep the count
             if (sys.armCount >= double(CST_spfParam.ARM_EPOCHS))
                 sys.armed = true;
             end % ELSE is trivial

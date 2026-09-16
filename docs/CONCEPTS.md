@@ -120,10 +120,12 @@ action), constants `CST_spfParam.m` lines 71 to 73, telemetry `info.armed`.
   inactive (`navActive = false`), so the first active epoch sees a settled
   filter. A segment started mid-flight with a manual reset, or an emergency
   reset, starts filter and gate together on a cold filter.
-- The monitors therefore arm only after `ARM_EPOCHS` (10) consecutive epochs
-  with `numMeas >= REVAL_MIN_MEAS` and `K_MISSED_DETECTION * sigma_pos(P+) <
-  ARM_PL_MAX` (100 m). A non-qualifying epoch restarts the count; arming is
-  sticky until the next re-initialisation.
+- The monitors therefore arm only after `ARM_EPOCHS` qualifying epochs, with
+  `numMeas >= REVAL_MIN_MEAS` and `K_MISSED_DETECTION * sigma_pos(P+) <
+  ARM_PL_MAX` (100 m). A PL above the limit restarts the count (the filter is
+  diverging or coasting); a row dropout with the PL still inside only pauses
+  it. Arming is sticky until the next re-initialisation. The simulation
+  references use 10 epochs; the host uses 120 (60 s), see section 6.
 - Ten epochs is a count, not a proof of convergence; the PL condition is the
   real guard. In the mode figure the warm-up is the grey band, which must
   cover the whole transient; if the SS margins are still near 1 when the band
@@ -151,11 +153,10 @@ action), constants `CST_spfParam.m` lines 71 to 73, telemetry `info.armed`.
   (60 s) in the host configuration instead of the simulation default of
   10. With both, the non-shadow run matches the shadow run: one host reset,
   no latch, errors at zero after re-acquisition.
-- Side effect of the arming rule: an epoch with fewer than `REVAL_MIN_MEAS`
-  rows restarts the count, so on data with early dropouts the first
-  warm-up lasted 150 s instead of 60 s. Pausing the count on a row dropout
-  (restarting it only when the PL condition fails) is the candidate change
-  if that matters.
+- Side effect of the first arming rule: an epoch with fewer than
+  `REVAL_MIN_MEAS` rows restarted the count, so on data with early dropouts
+  the first warm-up lasted 150 s instead of 60 s. The rule now pauses the
+  count on a row dropout and restarts it only when the PL leaves the limit.
 - After the reset the filter is still settling 110 s later: a short GNSS
   gap at 970 s gave SS margins of 0.85. Not an alarm, but the margin to
   watch on runs that start from a reset.

@@ -14,11 +14,16 @@
 % After a (re)initialisation the host filter is not converged (initial P,
 % few rows, interval matrices just reset) and its increments do not match
 % any coast model: the first windows would alarm at once. The monitors
-% therefore arm only after ARM_EPOCHS consecutive NOMINAL epochs with at
-% least REVAL_MIN_MEAS rows and a protection level below ARM_PL_MAX.
-% Until then no window opens, no latch is possible and the anchor follows
-% the current solution. Arming is sticky (an outage does not disarm; a
-% re-initialisation does). info.armed reports the state.
+% therefore arm only after ARM_EPOCHS NOMINAL epochs with at least
+% REVAL_MIN_MEAS rows and a protection level below ARM_PL_MAX. A protection
+% level above the limit restarts the count; a row dropout with the level
+% still inside only pauses it (so an outage, whose PL grows past the limit,
+% restarts the count, a few-epoch dropout does not). Until armed no window
+% opens, no latch is possible and the anchor follows the current solution.
+% Arming is sticky (an outage does not disarm; a re-initialisation does).
+% info.armed reports the state. The host runs ARM_EPOCHS = 120 (60 s): its
+% bias convergence after a protective reset takes that long; 10 is the
+% value the simulation references were built with.
 % - REVAL_MIN_MEAS:
 % Minimum valid rows for a re-validation pass. The host's measurement
 % vector always carries the pressure-altitude row, so numMeas >= 1 even in

@@ -157,7 +157,30 @@ end
 ok5b = armedLate && ~cleanLatch && latched && (anchorEpoch >= 1) && (latchEpoch >= kSpoof);
 fprintf('  clean start: armed exactly from epoch %d: %d, no clean latch: %d | 50 m spoof from epoch %d: latched = %d at epoch %d, eventAnchorEpoch = %d (expect >= 1) -> %s\n\n', ...
     nArm, armedLate, ~cleanLatch, kSpoof, latched, latchEpoch, anchorEpoch, pf(ok5b));
-ok5 = ok5a && ok5b;
+% 5c. a row dropout with the PL inside pauses the count (arm one epoch
+%     later); a PL above ARM_PL_MAX restarts it (arm ARM_EPOCHS after it)
+armAtPause = -1; armAtRestart = -1;
+for variant = 1:2
+    kf_x = zeros(n, 1); kf_P = P0; armAt = -1;
+    for k = 1:(2 * nArm + 5)
+        [kf_x, kf_P, y, ~, ~, xp, xpP] = kalman_update_step(kf_x, kf_P, z_all(:, k), H_all(:, :, k), propTel, V);
+        kfMeas = STRUCT_SPF.kfMeasFromUpdate(y, H_all(:, :, k), V, mm, xp, xpP, kf_x, kf_P);
+        if k == 5
+            if variant == 1
+                kfMeas.numMeas = uint8(1);                         % dropout, PL still inside
+            else
+                kfMeas.postCov = kfMeas.postCov + 1e6 * eye(n);    % PL far outside the limit
+            end
+        end
+        tel = SPF_gate(kfMeas, propTel, true, k == 1);
+        if tel.info.armed && (armAt < 0), armAt = k; end
+    end
+    if variant == 1, armAtPause = armAt; else, armAtRestart = armAt; end
+end
+ok5c = (armAtPause == nArm + 1) && (armAtRestart == nArm + 5);
+fprintf('  dropout at epoch 5 -> armed at %d (expect %d) | PL outside at epoch 5 -> armed at %d (expect %d) -> %s\n\n', ...
+    armAtPause, nArm + 1, armAtRestart, nArm + 5, pf(ok5c));
+ok5 = ok5a && ok5b && ok5c;
 
 if ok1 && ok2 && ok3 && ok4 && ok5
     fprintf('=== test_error_handlers PASS ===\n');

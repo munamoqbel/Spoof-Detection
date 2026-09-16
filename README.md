@@ -75,8 +75,10 @@ with enough rows and a protection level below `ARM_PL_MAX`
 
 ## Printable copies
 
-`docs/pdf/` holds PDF renderings of this README, `docs/HOST_DECISIONS.md`
-and `docs/REVIEW_FINDINGS.md` (plus `ALL_DOCS.pdf`, the three in one).
+`docs/pdf/` holds PDF renderings of this README, `docs/HOST_DECISIONS.md`,
+`docs/REVIEW_FINDINGS.md` and `docs/CONCEPTS.md` (separation, coast, P_C /
+P_KF, anchor and warm-up explained in question-and-answer form), plus
+`ALL_DOCS.pdf` with all of them in one file.
 Regenerate after editing the Markdown with `python3 tools/docsToPdf.py`
 (needs `pip install markdown` and a Chromium binary).
 

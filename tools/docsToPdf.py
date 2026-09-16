@@ -26,6 +26,7 @@ DOCS = [
     ("README.md",               "README",          False),
     ("docs/HOST_DECISIONS.md",  "HOST_DECISIONS",  True),
     ("docs/REVIEW_FINDINGS.md", "REVIEW_FINDINGS", True),
+    ("docs/CONCEPTS.md",         "CONCEPTS",        False),
 ]
 COMBINED = "ALL_DOCS"      # the three above in one landscape file, one document per page break
 

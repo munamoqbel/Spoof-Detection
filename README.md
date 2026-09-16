@@ -79,8 +79,10 @@ with enough rows and a protection level below `ARM_PL_MAX`
 `docs/REVIEW_FINDINGS.md` and `docs/CONCEPTS.md` (separation, coast, P_C /
 P_KF, anchor and warm-up explained in question-and-answer form), plus
 `ALL_DOCS.pdf` with all of them in one file.
-Regenerate after editing the Markdown with `python3 tools/docsToPdf.py`
-(needs `pip install markdown` and a Chromium binary).
+Regenerate after editing the Markdown with `docsToPdf` (a MATLAB
+function in `tools/`): it writes the HTML files itself and calls Edge or
+Chrome headless for the PDF step; without a browser the HTML files can be
+printed from any browser.
 
 ## Code generation
 

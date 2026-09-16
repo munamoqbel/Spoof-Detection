@@ -231,5 +231,5 @@
 %   own state space (x+ minus the anchor separation at LATCH; the trial's
 %   x+ at COMMIT), so setKF sees exactly what a kfUpdate result looks like
 %   and no sign is chosen by the gate. Verify with the QUICKSTART step-0 test
-%   (add +10 m to z along H(:,idxD); the solution must move +10 m), then
+%   (zTest = z + 10*H(:,idxD); xPost(idxD) - xPrior(idxD) must be ~+10), then
 %   with a scripted latch in shadow mode.

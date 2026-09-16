@@ -9,7 +9,15 @@
 % =======================================================================
 % 1. Find where the correction feedback is applied to the INS.
 % 2. Find your position indices (N, E, D). Example: 1, 2, 3.
-% 3. Test: add +10 m to z along H(:,idxD). x_hat(idxD) must move +10.
+% 3. Test (one epoch): inject a 10 m D position error into the MEASUREMENT
+%    through the model, never by editing H:
+%        zTest = z + 10 * H(:, idxD);
+%    (range rows get 10 x their D line-of-sight component, range-rate rows
+%    are unchanged, the pressure row gets 10 m x its coefficient). Run
+%    kfUpdate on zTest and check the STATE before setKF:
+%        xPost(idxD) - xPrior(idxD)  ->  positive, close to +10
+%    Then setKF must move the mechanization by GAIN x that state in the
+%    direction your convention assigns to a positive D error state.
 %
 % =======================================================================
 %  STEP 1 - LOG (in your 2 Hz EKF, every update)

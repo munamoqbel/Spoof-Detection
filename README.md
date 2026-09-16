@@ -73,6 +73,13 @@ latch possible) until the filter has had `ARM_EPOCHS` consecutive epochs
 with enough rows and a protection level below `ARM_PL_MAX`
 (`CST_spfParam`).
 
+## Printable copies
+
+`docs/pdf/` holds PDF renderings of this README, `docs/HOST_DECISIONS.md`
+and `docs/REVIEW_FINDINGS.md` (plus `ALL_DOCS.pdf`, the three in one).
+Regenerate after editing the Markdown with `python3 tools/docsToPdf.py`
+(needs `pip install markdown` and a Chromium binary).
+
 ## Code generation
 
 The runtime path (`SPF_gate` and everything it calls) is written for

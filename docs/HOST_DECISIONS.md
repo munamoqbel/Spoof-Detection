@@ -141,3 +141,11 @@ Covered by `tests/test_error_handlers.m`. On a host update flagged `failed`, pas
 - `MAX_ANCHOR_AGE` is a startup-only guard today.
 - Warm-up arming uses a fixed protection-level limit (`ARM_PL_MAX`); a
   convergence test on the filter's own covariance rate could replace it.
+  `ARM_EPOCHS` is 10 in the repository (simulation references); the host
+  runs with 120 (60 s) because its post-reset bias convergence takes that
+  long (see `docs/CONCEPTS.md` section 6). A row dropout currently restarts
+  the count; pausing it instead is an open option.
+- Outage re-arm (disarm after a long GNSS outage so re-acquisition goes
+  through the warm-up): not needed on the jammed data set, where the host's
+  own reset already re-initialises the gate; relevant only for outages that
+  end below the host's reset limit.

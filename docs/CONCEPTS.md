@@ -133,3 +133,29 @@ action), constants `CST_spfParam.m` lines 71 to 73, telemetry `info.armed`.
   `navActive` during the reset. Otherwise the anchor, windows and trial carry
   pre-reset history against a restarted filter and a latch is almost
   guaranteed.
+
+## 6. What the jammed data set showed (470 s GNSS outage, host reset at re-acquisition)
+
+- The host's protective reset fires when GNSS returns and the position
+  differs from the INS by more than its limit; it re-seeds the filter with
+  the initial P. Everything the gate alarmed on in the first runs was the
+  convergence after that reset (clock, velocity and biases estimated from
+  scratch): SS margins of 5, CPI 20, NIS 33 on the first post-reset epoch.
+- The covariance during the outage itself was honest: sigma_N from `P+`
+  was 11.7 km against a true drift of 22 km (ratio 1.9), sigma_E 11.7 km
+  against 2.4 km. Q is not the problem on this data; the earlier reading
+  that P had not grown enough was wrong, it was the post-reset P.
+- Two things fixed it: the gate is reset together with the host
+  (`navActive` dropped in the reset and alignment modes), and the warm-up
+  is long enough for the post-reset bias convergence, `ARM_EPOCHS = 120`
+  (60 s) in the host configuration instead of the simulation default of
+  10. With both, the non-shadow run matches the shadow run: one host reset,
+  no latch, errors at zero after re-acquisition.
+- Side effect of the arming rule: an epoch with fewer than `REVAL_MIN_MEAS`
+  rows restarts the count, so on data with early dropouts the first
+  warm-up lasted 150 s instead of 60 s. Pausing the count on a row dropout
+  (restarting it only when the PL condition fails) is the candidate change
+  if that matters.
+- After the reset the filter is still settling 110 s later: a short GNSS
+  gap at 970 s gave SS margins of 0.85. Not an alarm, but the margin to
+  watch on runs that start from a reset.

@@ -75,27 +75,16 @@ elseif ~SPF_inputsFinite(kfMeas, propTel)
     spoofTel.info.inputFault = true;
 
 else
-    justInit = false;
     if resetRequest || needInit
-        sys = STRUCT_SPF.zeroSys;
-        sys.coastCov = kfMeas.postCov;
+        sys = STRUCT_SPF.zeroSys;             % unarmed: the warm-up in SPF_protectedNav
+        sys.coastCov = kfMeas.postCov;        % seeds the anchor on the first epochs
         epoch    = uint32(0);
         needInit = false;
-        justInit = true;          % anchor seeded AFTER this epoch runs (see below)
     end
 
     epoch = epoch + uint32(1);
 
     [sys, spoofTel] = SPF_protectedNav(sys, kfMeas, propTel, epoch);
-
-    if justInit
-        % the first navigation solution is the fallback until the first
-        % window closes clean: seed it as "solution now" (separation 0,
-        % covariance P+), stamped with this epoch so it is neither
-        % propagated nor aged twice
-        sys.anchor = STRUCT_SPF.setAnchor(true, zeros(CST_gnssHybrid.NO_STATES, 1), ...
-            kfMeas.postCov, epoch);
-    end
 end
 
 end

@@ -8,6 +8,7 @@ function spfLog = SPF_logInit(numEpochs)
 spfLog.numEpochs   = numEpochs;
 spfLog.count       = 0;
 spfLog.mode        = zeros(numEpochs, 1);        % CST_spfMode as double (1 NOMINAL, 2 COAST, 3 PROBATION)
+spfLog.armed       = false(numEpochs, 1);        % monitors active (false during the warm-up after init)
 spfLog.numMeas     = zeros(numEpochs, 1);
 spfLog.ssAlarm     = false(numEpochs, 1);
 spfLog.cpiAlarm    = false(numEpochs, 1);

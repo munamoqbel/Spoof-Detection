@@ -2,13 +2,17 @@ function SPF_plotLog(spfLog, fs)
 %SPF_PLOTLOG  Standard diagnostic figures for a gate log (SPF_logInit /
 %   SPF_logAppend). fs = 2 Hz epoch rate (default 2).
 %
-%   Figure 1  mode timeline with events; numMeas
+%   Figure 1  mode timeline with events (grey = warm-up, monitors not
+%             armed); numMeas
 %   Figure 2  monitor margins: SS ratio and CPI ratio per axis (alarm > 1),
 %             protection level, host NIS
 %   Figure 3  re-validation: qReval vs its threshold, dwell count, coast time
 %   Figure 4  fault flags
 %
 %   How to read it (jamming / false-latch investigation):
+%   - a latch inside or right after the grey warm-up band: the filter had
+%     not settled (few rows, large PL). Raise ARM_EPOCHS or lower
+%     ARM_PL_MAX in CST_spfParam so arming waits for convergence.
 %   - NIS >> 1 while jammed and the SS/CPI ratios cross 1 at the same time:
 %     the KF's R is optimistic under jamming; the monitors are reporting a
 %     real model inconsistency. Fix R (or exclude the rows) on the host side
@@ -28,13 +32,18 @@ ev = @(idx) t(idx(idx <= n));
 %% 1. mode and measurement count
 figure('Name', 'SPF gate: mode');
 subplot(2,1,1);
+unarmed = ~spfLog.armed(1:n);
+if any(unarmed)                                   % warm-up shading
+    tu = t(unarmed);
+    area([tu(1) tu(end) + 1/fs], [3.5 3.5], -0.5, 'FaceColor', [0.85 0.85 0.85], 'EdgeColor', 'none'); hold on;
+end
 stairs(t, spfLog.mode(1:n), 'k', 'LineWidth', 1.2); hold on;
 plot(ev(spfLog.evLatch), 2*ones(size(ev(spfLog.evLatch))), 'rv', 'MarkerFaceColor', 'r');
 plot(ev(spfLog.evProbStart), 3*ones(size(ev(spfLog.evProbStart))), 'b^', 'MarkerFaceColor', 'b');
 plot(ev(spfLog.evVeto), 2*ones(size(ev(spfLog.evVeto))), 'mx', 'MarkerSize', 8, 'LineWidth', 1.5);
 plot(ev(spfLog.evHandback), ones(size(ev(spfLog.evHandback))), 'go', 'MarkerFaceColor', 'g');
 yticks([1 2 3]); yticklabels({'NOMINAL', 'COAST', 'PROBATION'}); ylim([0.5 3.5]); grid on;
-ylabel('mode'); title('gate mode (v latch, ^ probation, x veto, o hand-back)');
+ylabel('mode'); title('gate mode (grey: warm-up, not armed; v latch, ^ probation, x veto, o hand-back)');
 subplot(2,1,2);
 stairs(t, spfLog.numMeas(1:n), 'k'); grid on; ylabel('numMeas'); xlabel('t [s]');
 

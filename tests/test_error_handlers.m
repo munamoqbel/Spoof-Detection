@@ -9,8 +9,10 @@
 %   3. numMeas > MAX_MEAS is clamped in both kfMeas builders and flagged.
 %   4. a non-finite input epoch resets the gate (inputFault), nothing
 %      enters the persistent state, and the gate runs on cleanly.
-%   5. the startup anchor is stamped with epoch 1 (a latch onto it reports
-%      eventAnchorEpoch = 1, never the 'none' sentinel 0).
+%   5. warm-up arming: the monitors stay disarmed (no latch possible) for
+%      the first ARM_EPOCHS qualifying epochs, arm afterwards, and a gross
+%      spoof once armed latches onto an anchor stamped with a real epoch
+%      (eventAnchorEpoch >= 1, never the 'none' sentinel 0).
 % Run from the repo root (MATLAB, or Octave with tools/octave_shim).
 
 n    = CST_gnssHybrid.NO_STATES;
@@ -93,8 +95,8 @@ ok3 = okFrom && okSet && okRun;
 fprintf('  kfMeasFromUpdate(%d rows) -> numMeas %d, clamped %d, fixed layout %d | setKfMeas(%d) -> %d | gate runs, flags %d -> %s\n\n', ...
     mBig, kfMeasBig.numMeas, kfMeasBig.numMeasClamped, okFrom, mMax + 5, kfMeasSet.numMeas, tel.info.numMeasClamped, pf(ok3));
 
-%% 4./5. non-finite input epoch, and the startup anchor stamp
-fprintf('Non-finite input and startup anchor ...\n');
+%% 4./5. non-finite input epoch, and the warm-up arming
+fprintf('Non-finite input and warm-up arming ...\n');
 prm_boot = kujur_params();
 [~, ~, H_all, ~, ~, Phi, Q, ~, z_all, V, P0] = generate_test_data(prm_boot, 5, 0.0, 0.0, [0 0 1]);
 propTel = STRUCT_SPF.setPropTel(Phi, Q);
@@ -118,19 +120,44 @@ ok4 = faultSeen && (alarmsAfter == 0) && finiteOK && modeOK;
 fprintf('  NaN at epoch 21: inputFault = %d | epochs 22-60: alarms %d, finite %d, NOMINAL %d -> %s\n', ...
     faultSeen, alarmsAfter, finiteOK, modeOK, pf(ok4));
 
-kf_x = zeros(n, 1); kf_P = P0; anchorEpoch = -1; latched = false;
-for k = 1:6
-    z = z_all(:, k); if k == 4, z = z + 50.0; end                  % gross spoof on all rows at epoch 4
+nArm = double(CST_spfParam.ARM_EPOCHS);
+% 5a. unarmed: a gross spoof at epoch 4 can neither alarm nor latch
+kf_x = zeros(n, 1); kf_P = P0; kSpoofEarly = 4;
+armedEarly = false; earlyAlarm = false; earlyLatch = false;
+for k = 1:(nArm - 1)
+    z = z_all(:, k); if k == kSpoofEarly, z = z + 50.0; end
     [kf_x, kf_P, y, ~, ~, xp, xpP] = kalman_update_step(kf_x, kf_P, z, H_all(:, :, k), propTel, V);
     kfMeas = STRUCT_SPF.kfMeasFromUpdate(y, H_all(:, :, k), V, mm, xp, xpP, kf_x, kf_P);
     tel = SPF_gate(kfMeas, propTel, true, k == 1);
+    armedEarly = armedEarly || tel.info.armed;
+    earlyAlarm = earlyAlarm || tel.info.ssAlarm || tel.info.cpiAlarm;
+    earlyLatch = earlyLatch || tel.info.eventLatched || (tel.info.mode ~= CST_spfMode.NOMINAL);
+end
+ok5a = ~armedEarly && ~earlyAlarm && ~earlyLatch;
+fprintf('  50 m spoof at epoch %d, epochs 1-%d (unarmed): armed %d, alarm %d, latch %d (expect 0 0 0) -> %s\n', ...
+    kSpoofEarly, nArm - 1, armedEarly, earlyAlarm, earlyLatch, pf(ok5a));
+% 5b. clean start, armed from epoch ARM_EPOCHS, gross spoof once armed latches
+kf_x = zeros(n, 1); kf_P = P0; anchorEpoch = -1; latched = false; latchEpoch = -1;
+kSpoof = nArm + 4; armedLate = true; cleanLatch = false;
+for k = 1:(nArm + 10)
+    z = z_all(:, k); if k >= kSpoof, z = z + 50.0; end
+    [kf_x, kf_P, y, ~, ~, xp, xpP] = kalman_update_step(kf_x, kf_P, z, H_all(:, :, k), propTel, V);
+    kfMeas = STRUCT_SPF.kfMeasFromUpdate(y, H_all(:, :, k), V, mm, xp, xpP, kf_x, kf_P);
+    tel = SPF_gate(kfMeas, propTel, true, k == 1);
+    if k < nArm
+        armedLate = armedLate && ~tel.info.armed;                  % disarmed before ARM_EPOCHS
+    elseif k < kSpoof
+        armedLate = armedLate && tel.info.armed;                   % armed from epoch ARM_EPOCHS on
+        cleanLatch = cleanLatch || tel.info.eventLatched;          % clean data: no latch
+    end
     if tel.info.eventLatched && ~latched
-        latched = true; anchorEpoch = double(tel.info.eventAnchorEpoch);
+        latched = true; anchorEpoch = double(tel.info.eventAnchorEpoch); latchEpoch = k;
     end
 end
-ok5 = latched && (anchorEpoch == 1);
-fprintf('  50 m spoof at epoch 4 before any clean close: latched = %d, eventAnchorEpoch = %d (expect 1) -> %s\n\n', ...
-    latched, anchorEpoch, pf(ok5));
+ok5b = armedLate && ~cleanLatch && latched && (anchorEpoch >= 1) && (latchEpoch >= kSpoof);
+fprintf('  clean start: armed exactly from epoch %d: %d, no clean latch: %d | 50 m spoof from epoch %d: latched = %d at epoch %d, eventAnchorEpoch = %d (expect >= 1) -> %s\n\n', ...
+    nArm, armedLate, ~cleanLatch, kSpoof, latched, latchEpoch, anchorEpoch, pf(ok5b));
+ok5 = ok5a && ok5b;
 
 if ok1 && ok2 && ok3 && ok4 && ok5
     fprintf('=== test_error_handlers PASS ===\n');

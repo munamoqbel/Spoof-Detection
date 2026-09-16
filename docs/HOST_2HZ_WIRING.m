@@ -205,7 +205,9 @@
 %   follow, and a latch/COAST during alignment would stop the KF updates
 %   the alignment needs. Hence the navActive input: pass
 %   navMode.navigation; the gate handles the rest (zeroTel, reset, re-init
-%   on the first navigation epoch, whose (x+, P+) become the startup anchor).
+%   on the first navigation epoch, then the warm-up: the anchor follows the
+%   solution and no latch is possible until the monitors arm, see
+%   ARM_EPOCHS / ARM_PL_MAX in CST_spfParam and info.armed).
 %
 %   GNSS outage (only the pressure row available): STILL call the gate,
 %   with the rows the filter used (numMeas = 1 in the host). The baro row
@@ -221,8 +223,10 @@
 %   - nothing new: spfAccumProp already provides propTel; KF.stateFB is
 %     only written by setKF, so COAST/PROBATION produce no feedback and
 %     the latch/commit corrections arrive through the same setKF path.
-%   - optional annunciation: spoofTel.info.mode, .alarmPerAxis,
-%     .maxProtectionLevel, .coastEpochs.
+%   - optional annunciation: spfTel.info.mode, .alarmPerAxis,
+%     .maxProtectionLevel, .coastEpochs, .armed (false during the warm-up
+%     after a gate initialisation: no latch is possible until the filter
+%     has had ARM_EPOCHS converged epochs, see CST_spfParam).
 %
 % ----------------------------------------------------------------------
 %  sign convention check (do once)

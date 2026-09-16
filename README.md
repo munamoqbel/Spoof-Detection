@@ -67,7 +67,11 @@ is the code-level contract.
 SS/CPI margins per axis (alarm at 1), protection level, host NIS,
 re-validation statistic against its threshold, dwell, coast time, faults.
 The header of `SPF_plotLog.m` says how to read them for a jamming or
-false-latch investigation.
+false-latch investigation. The mode figure shades the warm-up: after a
+gate initialisation the monitors stay disarmed (`info.armed = false`, no
+latch possible) until the filter has had `ARM_EPOCHS` consecutive epochs
+with enough rows and a protection level below `ARM_PL_MAX`
+(`CST_spfParam`).
 
 ## Code generation
 

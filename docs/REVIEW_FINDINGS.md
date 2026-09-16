@@ -30,7 +30,7 @@ were "info"), 33 verdicts were lost to a session usage limit and are marked
 | 5 | sigma_SS = 0 turns the SS gate into "alarm on any nonzero separation" | minor | **fixed** (undefined test -> no alarm) |
 | 6 | alarmPerAxis indexed by state index in SPF_monitorPool but by bank position in SPF_ssMonitor | major | **fixed** (bank position everywhere) |
 | 7 | Struct fields change class at runtime (info.mode, anchor.epoch, eventAnchorEpoch, freeSlot) — Coder rejects | major | **fixed** |
-| 8 | anchorMissing branch (alarm before the first clean close) freezes on the spoofed posterior | major | **mitigated**: the initial state is now the startup anchor; flag still only reported on the latch epoch |
+| 8 | anchorMissing branch (alarm before the first clean close) freezes on the spoofed posterior | major | **mitigated**: during the warm-up the anchor follows the solution, so the first armed epoch has a fresh anchor; flag still only reported on the latch epoch |
 | 9 | MAX_ANCHOR_AGE can never trigger at a latch (anchor is 1 epoch old); the drift budget it was meant to enforce is a coast-time budget | major | **documented**; coast-time budget deferred by the user; `info.coastEpochs` telemetry added |
 | 10 | No maximum coast time / dead-reckoning declaration (guide rule 4) | major | **deferred** by the user until the system is integrated and tested |
 | 11 | run_recovery tests `isnan(t_anchor)` but the sentinel is 0 | minor | **fixed** |

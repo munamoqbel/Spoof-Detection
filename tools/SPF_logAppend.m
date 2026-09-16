@@ -17,6 +17,7 @@ if k > spfLog.numEpochs, return; end          % log full: keep counting, stop st
 info = spfTel.info;
 m = double(spfMeas.numMeas);
 spfLog.mode(k)        = double(info.mode);
+spfLog.armed(k)       = info.armed;
 spfLog.numMeas(k)     = m;
 spfLog.ssAlarm(k)     = info.ssAlarm;
 spfLog.cpiAlarm(k)    = info.cpiAlarm;

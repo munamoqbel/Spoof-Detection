@@ -63,62 +63,91 @@ switch sys.mode
         sys.coastCov = kfMeas.postCov;
         sys.probSep  = zeros(numStates, 1);
 
-        % ---- 2. monitor bank on the host increments ----
-        [sys.pool, report] = SPF_monitorPool(sys.pool, kfMeas, propTel);
-
-        % ---- 2b. keep the anchor LIVE: (host solution now) - (anchor coast
-        %          now) accumulates this epoch's increment; P_C propagates ----
-        if (sys.anchor.valid)
-            sys.anchor.separation = Phi * sys.anchor.separation + kfIncrement;
-            sys.anchor.covariance = Phi * sys.anchor.covariance * Phi' + Q;
-            sys.anchor.covariance = (sys.anchor.covariance + sys.anchor.covariance') / 2;
-        end % ELSE is trivial
-
-        info.ssAlarm            = report.ssAlarm;
-        info.cpiAlarm           = report.cpiAlarm;
-        info.alarmPerAxis       = report.alarmPerAxis;
-        info.maxProtectionLevel = report.maxProtectionLevel;
-        info.solveFault         = report.solveFault;
-        info.ssRatio            = report.ssRatio;
-        info.cpiRatio           = report.cpiRatio;
-
-        % ---- 3. refresh anchor (only on alarm-free epochs, so the
-        %         anchor always ends strictly before detection) ----
-        if (report.cleanCloseFound) && (~report.anyAlarm)
-            sys.anchor.valid      = true;
-            sys.anchor.separation = report.cleanCloseSeparation;   % already at 'now'
-            sys.anchor.covariance = report.cleanCloseCovar;
-            sys.anchor.epoch      = uint32(epoch);
-        end
-
-        % ---- 4. latch on any alarm, else open the next window ----
-        if (report.anyAlarm)
-            info.eventLatched = true;
-            anchorAge = uint32(epoch) - sys.anchor.epoch;
-
-            if (sys.anchor.valid) && (anchorAge <= CST_spfParam.MAX_ANCHOR_AGE)
-                % fall back to the certified-clean coast: the host must
-                % move its solution by -(accumulated increments since the
-                % anchor window opened) and take the coast covariance
-                applyCorrection       = true;
-                correction            = -sys.anchor.separation;
-                navState              = kfMeas.postState + correction;   % operational x+ - separation
-                sys.coastCov          = sys.anchor.covariance;
-                info.eventAnchorEpoch = sys.anchor.epoch;
+        % ---- 1b. warm-up: arm the monitors only on a converged filter ----
+        %          (enough rows and a protection level below ARM_PL_MAX for
+        %          ARM_EPOCHS consecutive epochs; sticky once armed)
+        if (~sys.armed)
+            sigmaPosMax = 0.0;
+            for idx = 1:numel(CST_spfParam.MONITORED_AXES)
+                axisIdx = CST_spfParam.MONITORED_AXES(idx);
+                sigmaPosMax = max(sigmaPosMax, sqrt(max(kfMeas.postCov(axisIdx, axisIdx), 0.0)));
+            end
+            qualifies = (kfMeas.numMeas >= CST_spfParam.REVAL_MIN_MEAS) && ...
+                (CST_spfParam.K_MISSED_DETECTION * sigmaPosMax < CST_spfParam.ARM_PL_MAX);
+            if (qualifies)
+                sys.armCount = sys.armCount + 1;
             else
-                % no usable anchor: freeze the current solution
-                info.eventAnchorEpoch = uint32(0);
-                info.anchorMissing    = true;
+                sys.armCount = 0;
+            end
+            if (sys.armCount >= double(CST_spfParam.ARM_EPOCHS))
+                sys.armed = true;
+            end % ELSE is trivial
+        end % ELSE: already armed
+
+        if (~sys.armed)
+            % not armed: no windows, no alarms; the anchor follows the
+            % current solution so it is fresh when the monitors start
+            sys.anchor = STRUCT_SPF.setAnchor(true, zeros(numStates, 1), kfMeas.postCov, uint32(epoch));
+            sys.pool   = STRUCT_SPF.closeAllWindows(sys.pool);
+        else
+            % ---- 2. monitor bank on the host increments ----
+            [sys.pool, report] = SPF_monitorPool(sys.pool, kfMeas, propTel);
+
+            % ---- 2b. keep the anchor LIVE: (host solution now) - (anchor coast
+            %          now) accumulates this epoch's increment; P_C propagates ----
+            if (sys.anchor.valid)
+                sys.anchor.separation = Phi * sys.anchor.separation + kfIncrement;
+                sys.anchor.covariance = Phi * sys.anchor.covariance * Phi' + Q;
+                sys.anchor.covariance = (sys.anchor.covariance + sys.anchor.covariance') / 2;
+            end % ELSE is trivial
+
+            info.ssAlarm            = report.ssAlarm;
+            info.cpiAlarm           = report.cpiAlarm;
+            info.alarmPerAxis       = report.alarmPerAxis;
+            info.maxProtectionLevel = report.maxProtectionLevel;
+            info.solveFault         = report.solveFault;
+            info.ssRatio            = report.ssRatio;
+            info.cpiRatio           = report.cpiRatio;
+
+            % ---- 3. refresh anchor (only on alarm-free epochs, so the
+            %         anchor always ends strictly before detection) ----
+            if (report.cleanCloseFound) && (~report.anyAlarm)
+                sys.anchor.valid      = true;
+                sys.anchor.separation = report.cleanCloseSeparation;   % already at 'now'
+                sys.anchor.covariance = report.cleanCloseCovar;
+                sys.anchor.epoch      = uint32(epoch);
             end
 
-            sys.pool       = STRUCT_SPF.closeAllWindows(sys.pool);
-            sys.dwellCount = 0;
-            sys.coastCount = 0;
-            sys.mode       = CST_spfMode.COAST;
+            % ---- 4. latch on any alarm, else open the next window ----
+            if (report.anyAlarm)
+                info.eventLatched = true;
+                anchorAge = uint32(epoch) - sys.anchor.epoch;
 
-        else
-            sys.pool = STRUCT_SPF.openWindow(sys.pool, kfMeas);
-        end
+                if (sys.anchor.valid) && (anchorAge <= CST_spfParam.MAX_ANCHOR_AGE)
+                    % fall back to the certified-clean coast: the host must
+                    % move its solution by -(accumulated increments since the
+                    % anchor window opened) and take the coast covariance
+                    applyCorrection       = true;
+                    correction            = -sys.anchor.separation;
+                    navState              = kfMeas.postState + correction;   % operational x+ - separation
+                    sys.coastCov          = sys.anchor.covariance;
+                    info.eventAnchorEpoch = sys.anchor.epoch;
+                else
+                    % no usable anchor: freeze the current solution
+                    info.eventAnchorEpoch = uint32(0);
+                    info.anchorMissing    = true;
+                end
+
+                sys.pool       = STRUCT_SPF.closeAllWindows(sys.pool);
+                sys.dwellCount = 0;
+                sys.coastCount = 0;
+                sys.mode       = CST_spfMode.COAST;
+
+            else
+                sys.pool = STRUCT_SPF.openWindow(sys.pool, kfMeas);
+            end
+
+        end % armed
 
     % ==================================================================
     case CST_spfMode.COAST
@@ -238,6 +267,7 @@ info.mode           = sys.mode;
 info.dwellCount     = sys.dwellCount;
 info.coastEpochs    = sys.coastCount;    % time-in-coast (COAST + PROBATION), epochs
 info.numMeasClamped = kfMeas.numMeasClamped;
+info.armed          = sys.armed;
 
 spoofTel = STRUCT_SPF.setTel(info, kfCommand, nav);
 

@@ -284,7 +284,7 @@ classdef STRUCT_SPF
         end
 
         function [sys] = setSys(mode, coastCov, probSep, pool, anchor, ...
-                dwellCount, probationCount, coastCount)
+                dwellCount, probationCount, coastCount, armed, armCount)
 
             % Define structure
             sys = struct( ...
@@ -295,7 +295,9 @@ classdef STRUCT_SPF
                 'anchor',         anchor, ...
                 'dwellCount',     dwellCount, ...
                 'probationCount', probationCount, ...
-                'coastCount',     coastCount);
+                'coastCount',     coastCount, ...
+                'armed',          logical(armed), ... % monitors active (after the warm-up)
+                'armCount',       armCount);          % consecutive qualifying epochs so far
         end
 
         function [sys] = zeroSys
@@ -310,9 +312,11 @@ classdef STRUCT_SPF
             dwellCount = 0.0;
             probationCount = 0.0;
             coastCount = 0.0;
+            armed = false;
+            armCount = 0.0;
 
             sys = STRUCT_SPF.setSys(mode, coastCov, probSep, pool, ...
-                anchor, dwellCount, probationCount, coastCount);
+                anchor, dwellCount, probationCount, coastCount, armed, armCount);
         end
 
         function [altXCheck] = setAltXCheck(suspect, altDiff)
@@ -358,7 +362,7 @@ classdef STRUCT_SPF
                 alarmPerAxis, maxProtectionLevel, qReval, revalComputed,...
                 dwellCount, eventLatched, eventAnchorEpoch, eventProbationStarted,...
                 eventProbationVetoed, eventHandback, anchorMissing, coastEpochs, ...
-                inputFault, numMeasClamped, solveFault, ssRatio, cpiRatio)
+                inputFault, numMeasClamped, solveFault, ssRatio, cpiRatio, armed)
 
             % Define structure
             info = struct( ...
@@ -381,7 +385,8 @@ classdef STRUCT_SPF
                 'numMeasClamped',        logical(numMeasClamped), ... % host passed > MAX_MEAS rows (clamped)
                 'solveFault',            logical(solveFault), ...     % S or residual covariance unusable this epoch
                 'ssRatio',               ssRatio, ...    % [1x3] SS margin: |d|/(k_FA sigma_SS), max over open windows (alarm > 1)
-                'cpiRatio',              cpiRatio);      % [1x3] CPI margin: q/T_N of windows closed this epoch (alarm > 1)
+                'cpiRatio',              cpiRatio, ...   % [1x3] CPI margin: q/T_N of windows closed this epoch (alarm > 1)
+                'armed',                 logical(armed)); % monitors active (false during the warm-up after init)
         end
 
         function [info] = zeroInfo
@@ -407,13 +412,14 @@ classdef STRUCT_SPF
             solveFault            = false;
             ssRatio               = zeros(1, 3);
             cpiRatio              = zeros(1, 3);
+            armed                 = false;
 
             % Define structure
             info = STRUCT_SPF.setInfo(mode, ssAlarm, cpiAlarm, ...
                 alarmPerAxis, maxProtectionLevel, qReval, revalComputed,...
                 dwellCount, eventLatched, eventAnchorEpoch, eventProbationStarted,...
                 eventProbationVetoed, eventHandback, anchorMissing, coastEpochs, ...
-                inputFault, numMeasClamped, solveFault, ssRatio, cpiRatio);
+                inputFault, numMeasClamped, solveFault, ssRatio, cpiRatio, armed);
         end
 
         function [command] = setCommand(startTrial)

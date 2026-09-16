@@ -86,6 +86,7 @@ Rules behind the table:
 
 | Mode | Active filter | Test | Compares | Against | Statistic and threshold | Result |
 |---|---|---|---|---|---|---|
+| NOMINAL, warm-up (`info.armed = false`) | operational KF, updated normally | none: the monitors arm after `ARM_EPOCHS` (10) consecutive epochs with `numMeas >= REVAL_MIN_MEAS` and `K_MISSED_DETECTION * sigma_pos(P+) < ARM_PL_MAX` (100 m); a non-qualifying epoch restarts the count; sticky once armed (until a gate re-initialisation) | | | | no windows, no alarms, no latch; the anchor follows the current solution so it is fresh when the monitors start |
 | NOMINAL | operational KF, updated normally | SS, every open window, every monitored axis, every epoch | window separation (increments since the window opened) | that window's INS-only coast | `abs(d_axis) > K_FALSE_ALERT * sqrt(P_C - P_KF)` | any alarm: LATCH to the anchor |
 | NOMINAL | same | CPI, when a window reaches N = 10 | normalised innovation projections on the axis, `xi = f'S^-1 y / sqrt(f'S^-1 f)` | N(0,1) under no attack | `sum(xi^2) > CPI_THRESHOLD` (Gamma, 45.64) | any alarm: LATCH; a window alarm-free for its whole life refreshes the anchor |
 | COAST | operational KF **not** updated (scratch update feeds `y, H, R` only) | re-validation, every epoch | raw innovation `y` (all rows) | the INS-only coast (the operational KF's own prior) with its grown covariance | `y' (H P_C H' + R)^-1 y < chi2inv(1 - 1e-3, numMeas)` and `numMeas >= REVAL_MIN_MEAS` (4); baro-only epochs cannot pass | 10 consecutive passes: PROBATION; a fail resets the dwell. Monitors do not run |
@@ -108,7 +109,7 @@ the estimate having no information, not a sign that the attack ended.
 | Veto | `eventProbationVetoed` | none | none | none |
 | Commit | `applyCorrection`, `eventHandback` | trial `xPost` | trial `PPost` | none |
 | Alarm without usable anchor | `eventLatched`, `anchorMissing` | none | none | none; mode still COAST |
-| Every epoch | `mode`, `ssAlarm`, `cpiAlarm`, `alarmPerAxis`, `maxProtectionLevel`, `qReval`, `dwellCount`, `coastEpochs`, `ssRatio` (SS margin per axis, alarm > 1), `cpiRatio` (CPI margin per axis, alarm > 1) | | `coastCov` (diagnostic) | |
+| Every epoch | `mode`, `ssAlarm`, `cpiAlarm`, `alarmPerAxis`, `maxProtectionLevel`, `qReval`, `dwellCount`, `coastEpochs`, `ssRatio` (SS margin per axis, alarm > 1), `cpiRatio` (CPI margin per axis, alarm > 1), `armed` (monitors active; false during the warm-up after init) | | `coastCov` (diagnostic) | |
 | Fault telemetry | `inputFault` (non-finite input: epoch dropped, gate re-initialises on the next good epoch), `numMeasClamped` (host passed more than `MAX_MEAS` rows), `solveFault` (an S or residual covariance was not positive definite: that CPI epoch counts `xi = 0`, re-validation cannot pass) | | | |
 
 After a commit the anchor is the committed solution (separation zero,
@@ -125,7 +126,8 @@ attack goes through the same cycle with no limit on the number of cycles.
 | NaN / Inf in any input (failed host update, uninitialised `propTel`) | `SPF_gate` | `isfinite` check on every input; epoch dropped with `inputFault`, state and epoch counter reset, re-init on the next good epoch (mirrors the host's own failed-update reset) |
 | `sqrt` of a negative variance (`P_C - P_KF`, `P_C`, `coastCov` diagonal) | `SPF_ssMonitor`, `SPF_protectedNav` | guarded: test reported undefined (no alarm), sigma 0 |
 | division `gamma / sqrt(sigma2)` with `sigma2 = 0` (axis unobservable) | `SPF_cpiMonitor` | guarded: `xi = 0` |
-| startup anchor stamped with epoch 0 (the "no anchor" sentinel) and propagated once too often | `SPF_gate` | anchor seeded after the first epoch with that epoch's `(x+, P+)` and stamp |
+| startup anchor stamped with epoch 0 (the "no anchor" sentinel) and propagated once too often | `SPF_protectedNav` | during the warm-up the anchor is re-seeded every epoch with that epoch's `(x+, P+)` and stamp, so the first armed epoch starts from a fresh anchor |
+| false latch on an unconverged filter right after (re)initialisation (few rows, large P, interval matrices just reset) | `SPF_protectedNav` | warm-up arming: no window and no latch until `ARM_EPOCHS` consecutive epochs qualify (`numMeas >= REVAL_MIN_MEAS`, PL < `ARM_PL_MAX`); `info.armed` |
 | `uint32` epoch differences, `uint8` counters and loop variables | all | checked: no wrap possible (`anchor.epoch <= epoch`), classes consistent |
 | `REVAL_THRESHOLD_TABLE(numMeas)` index | `SPF_revalidation` | `numMeas` clamped to `MAX_MEAS` (= `CST_gnssHybrid.MAX_MEASURES`), table has 60 entries and the index is clamped to its length |
 
@@ -137,3 +139,5 @@ Covered by `tests/test_error_handlers.m`. On a host update flagged `failed`, pas
 - Coast-time budget (Implementation Guide rule 4): each cycle costs a coast and
   widens the coarse re-validation gate.
 - `MAX_ANCHOR_AGE` is a startup-only guard today.
+- Warm-up arming uses a fixed protection-level limit (`ARM_PL_MAX`); a
+  convergence test on the filter's own covariance rate could replace it.

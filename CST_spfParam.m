@@ -10,6 +10,15 @@
 % latch it is normally 1 epoch old; this guard only bites for the startup
 % anchor (initial state) before the first clean close. The real coasting
 % budget (max coast time, Implementation Guide rule 4) is not yet enforced.
+% - ARM_EPOCHS / ARM_PL_MAX (warm-up):
+% After a (re)initialisation the host filter is not converged (initial P,
+% few rows, interval matrices just reset) and its increments do not match
+% any coast model: the first windows would alarm at once. The monitors
+% therefore arm only after ARM_EPOCHS consecutive NOMINAL epochs with at
+% least REVAL_MIN_MEAS rows and a protection level below ARM_PL_MAX.
+% Until then no window opens, no latch is possible and the anchor follows
+% the current solution. Arming is sticky (an outage does not disarm; a
+% re-initialisation does). info.armed reports the state.
 % - REVAL_MIN_MEAS:
 % Minimum valid rows for a re-validation pass. The host's measurement
 % vector always carries the pressure-altitude row, so numMeas >= 1 even in
@@ -59,6 +68,9 @@ classdef CST_spfParam
         REVAL_DWELL_REQUIRED = uint8(10);         % passes -> probation
         REVAL_MIN_MEAS = uint8(4);                % rows needed for a re-validation PASS (3-D fix + clock;
                                                   % a pressure-only or single-satellite epoch cannot certify)
+        ARM_EPOCHS = uint8(10);                   % consecutive qualifying NOMINAL epochs before the monitors arm
+        ARM_PL_MAX = 100.0;                       % m; qualifying epoch: numMeas >= REVAL_MIN_MEAS and
+                                                  % K_MISSED_DETECTION * sigma_pos(P+) < ARM_PL_MAX
         PROBATION_LENGTH = uint8(18);             % quiet epochs -> commit
         MAX_ANCHOR_AGE = uint32(234);             % epochs, 0.5 s each
         MAX_MEAS = CST_gnssHybrid.MAX_MEASURES;   % max measurement rows per epoch (host class, uint8(51))

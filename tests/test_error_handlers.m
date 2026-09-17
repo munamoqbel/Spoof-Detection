@@ -138,7 +138,7 @@ fprintf('  50 m spoof at epoch %d, epochs 1-%d (unarmed): armed %d, alarm %d, la
     kSpoofEarly, nArm - 1, armedEarly, earlyAlarm, earlyLatch, pf(ok5a));
 % 5b. clean start, armed from epoch ARM_EPOCHS, gross spoof once armed latches
 kf_x = zeros(n, 1); kf_P = P0; anchorEpoch = -1; latched = false; latchEpoch = -1;
-kSpoof = nArm + 4; armedLate = true; cleanLatch = false;
+kSpoof = nArm + 4; armedLate = true; cleanLatch = false; inhibitBefore = false; inhibitAfter = true;
 for k = 1:(nArm + 10)
     z = z_all(:, k); if k >= kSpoof, z = z + 50.0; end
     [kf_x, kf_P, y, ~, ~, xp, xpP] = kalman_update_step(kf_x, kf_P, z, H_all(:, :, k), propTel, V);
@@ -153,10 +153,13 @@ for k = 1:(nArm + 10)
     if tel.info.eventLatched && ~latched
         latched = true; anchorEpoch = double(tel.info.eventAnchorEpoch); latchEpoch = k;
     end
+    if ~latched, inhibitBefore = inhibitBefore || tel.info.resetInhibit; end   % clean: host may reset
+    if latched,  inhibitAfter  = inhibitAfter  && tel.info.resetInhibit; end   % latch + coast: held off
 end
-ok5b = armedLate && ~cleanLatch && latched && (anchorEpoch >= 1) && (latchEpoch >= kSpoof);
-fprintf('  clean start: armed exactly from epoch %d: %d, no clean latch: %d | 50 m spoof from epoch %d: latched = %d at epoch %d, eventAnchorEpoch = %d (expect >= 1) -> %s\n\n', ...
-    nArm, armedLate, ~cleanLatch, kSpoof, latched, latchEpoch, anchorEpoch, pf(ok5b));
+ok5b = armedLate && ~cleanLatch && latched && (anchorEpoch >= 1) && (latchEpoch >= kSpoof) ...
+    && ~inhibitBefore && inhibitAfter;
+fprintf('  clean start: armed exactly from epoch %d: %d, no clean latch: %d | 50 m spoof from epoch %d: latched = %d at epoch %d, eventAnchorEpoch = %d (expect >= 1) | resetInhibit clean %d, from latch %d -> %s\n\n', ...
+    nArm, armedLate, ~cleanLatch, kSpoof, latched, latchEpoch, anchorEpoch, inhibitBefore, inhibitAfter, pf(ok5b));
 % 5c. a row dropout with the PL inside pauses the count (arm one epoch
 %     later); a PL above ARM_PL_MAX restarts it (arm ARM_EPOCHS after it)
 armAtPause = -1; armAtRestart = -1;

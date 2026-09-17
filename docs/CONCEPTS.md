@@ -160,3 +160,25 @@ action), constants `CST_spfParam.m` lines 71 to 73, telemetry `info.armed`.
 - After the reset the filter is still settling 110 s later: a short GNSS
   gap at 970 s gave SS margins of 0.85. Not an alarm, but the margin to
   watch on runs that start from a reset.
+
+## 7. Protective reset versus the gate
+
+- The host's protective reset (GNSS-vs-INS position difference beyond a
+  limit: reset and re-align from GNSS) and the gate react to the same event.
+  Once the reset also re-initialises the gate, a step spoof beyond the limit
+  is accepted by the reset before the gate can act, the gate warms up on the
+  spoofed GNSS, and the end of the spoof is a second reset. The spoof is
+  never seen.
+- The two are told apart by the covariance, which is what the gate tests. A
+  jump after a long outage sits inside an honest P (22 km against a sigma of
+  11.7 km in the jammed data set: no alarm) and the reset is the right
+  answer. A step spoof on a converged filter is tens of sigma: alarm, latch,
+  GNSS held off.
+- Wiring rule: the reset check runs after the gate on the same epoch and is
+  skipped while `info.resetInhibit` is true (gate in COAST or PROBATION, or
+  alarming this epoch). `COAST_BUDGET_EPOCHS` bounds the hold: beyond it
+  `info.coastBudgetExceeded` is raised and the host may reset, with
+  integrity not assured across that reset. See `docs/HOST_2HZ_WIRING.m`
+  step 6.
+- Limitation: during the warm-up the gate cannot alarm, so a step spoof in
+  that first minute after a start or reset still goes through the reset.

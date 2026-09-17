@@ -182,6 +182,25 @@
 %     trialKF = kfPost;                      % trial keeps its update (no setKF, no drain);
 % end                                        % on VETO it is simply never used again
 %
+% % ---- 6. protective reset: AFTER the gate, and only when it allows ----
+% %  The host's reset (position difference GNSS vs INS beyond a limit ->
+% %  reset + re-align from GNSS) reacts to the same event as the gate. A
+% %  step spoof beyond that limit must reach the gate first: it alarms on
+% %  it (margins far above 1 on a converged filter), latches, and holds
+% %  GNSS off. While it does, the discrepancy is expected and the reset
+% %  must not fire, or the spoofed GNSS is accepted by the reset and the
+% %  gate re-initialises on it. A genuine lost INS (long outage) shows a
+% %  jump inside an honest P: no alarm, reset allowed as today.
+% if spfTel.info.resetInhibit && ~spfTel.info.coastBudgetExceeded
+%     % gate in COAST / PROBATION or alarming this epoch: skip the reset check
+% else
+%     % your reset check as today; coastBudgetExceeded means the gate has
+%     % held GNSS off longer than COAST_BUDGET_EPOCHS: reset if the
+%     % discrepancy demands it, integrity is not assured across that reset
+% end
+% %  Limitation: during the warm-up (info.armed = false) the gate cannot
+% %  alarm, so a step spoof in that minute still triggers the reset.
+%
 % Epoch-by-epoch this gives:
 %   NOMINAL->NOMINAL   setKF(kfPost)
 %   NOMINAL->COAST     setKF(nav.state, nav.covar)    (latch)

@@ -24,6 +24,13 @@
 % info.armed reports the state. The host runs ARM_EPOCHS = 120 (60 s): its
 % bias convergence after a protective reset takes that long; 10 is the
 % value the simulation references were built with.
+% - COAST_BUDGET_EPOCHS (coast-time budget, Implementation Guide rule 4):
+% While the gate is in COAST or PROBATION, or alarms this epoch, the host
+% must NOT apply its protective reset (info.resetInhibit): a large
+% GNSS-vs-INS discrepancy is then the gate's finding, not a lost INS. The
+% budget bounds how long that can last: once coastEpochs exceeds it the
+% gate raises info.coastBudgetExceeded and the host may reset (integrity
+% not assured across that reset). The gate itself only reports.
 % - REVAL_MIN_MEAS:
 % Minimum valid rows for a re-validation pass. The host's measurement
 % vector always carries the pressure-altitude row, so numMeas >= 1 even in
@@ -53,6 +60,9 @@ classdef CST_spfParam
         K_FALSE_ALERT = 5.233126417847868;                % SS gate
         K_MISSED_DETECTION = 4.753424308817088;           % PL term
         MONITORED_AXES = [1 2 3];                         % NED position state indices
+        COAST_BUDGET_EPOCHS = uint32(240);                % 120 s of COAST + PROBATION: beyond it
+                                                          % info.coastBudgetExceeded is raised and the
+                                                          % host may apply its protective reset
         REVAL_THRESHOLD = 39.252354790768472;     % chi-square gate, m = 16 (kept for reference)
         REVAL_THRESHOLD_TABLE = [ ...                 % chi2inv(1 - 1e-3, m), m = 1..60 (>= MAX_MEAS)
             10.82756617066, 13.81551055796, 16.26623619624, 18.46682695290, ...

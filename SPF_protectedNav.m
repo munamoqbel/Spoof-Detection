@@ -261,8 +261,9 @@ end
 
 % ---- navigation output of this epoch ----
 sigmaPosition = zeros(3, 1);
-for axisIdx = 1:3
-    sigmaPosition(axisIdx) = sqrt(max(sys.coastCov(axisIdx, axisIdx), 0.0));
+for idx = 1:3
+    axisIdx = CST_spfParam.MONITORED_AXES(idx);
+    sigmaPosition(idx) = sqrt(max(sys.coastCov(axisIdx, axisIdx), 0.0));
 end
 nav = STRUCT_SPF.setNav(applyCorrection, navState, correction, sys.coastCov, sigmaPosition);
 
@@ -271,6 +272,11 @@ info.dwellCount     = sys.dwellCount;
 info.coastEpochs    = sys.coastCount;    % time-in-coast (COAST + PROBATION), epochs
 info.numMeasClamped = kfMeas.numMeasClamped;
 info.armed          = sys.armed;
+% protective-reset arbitration: while the gate holds GNSS off (COAST,
+% PROBATION) or alarms this epoch, a GNSS-vs-INS discrepancy is its finding
+% and the host must not reset on it; the coast budget bounds the hold
+info.resetInhibit        = (sys.mode ~= CST_spfMode.NOMINAL) || info.ssAlarm || info.cpiAlarm;
+info.coastBudgetExceeded = (sys.coastCount > double(CST_spfParam.COAST_BUDGET_EPOCHS));
 
 spoofTel = STRUCT_SPF.setTel(info, kfCommand, nav);
 

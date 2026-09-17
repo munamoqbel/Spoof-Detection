@@ -36,6 +36,8 @@ if m > 0
 end
 spfLog.dwell(k)       = info.dwellCount;
 spfLog.coastEpochs(k) = info.coastEpochs;
+spfLog.resetInhibit(k) = info.resetInhibit;
+spfLog.budgetOut(k)   = info.coastBudgetExceeded;
 spfLog.inputFault(k)  = info.inputFault;
 spfLog.solveFault(k)  = info.solveFault;
 spfLog.clamped(k)     = info.numMeasClamped;

@@ -362,7 +362,8 @@ classdef STRUCT_SPF
                 alarmPerAxis, maxProtectionLevel, qReval, revalComputed,...
                 dwellCount, eventLatched, eventAnchorEpoch, eventProbationStarted,...
                 eventProbationVetoed, eventHandback, anchorMissing, coastEpochs, ...
-                inputFault, numMeasClamped, solveFault, ssRatio, cpiRatio, armed)
+                inputFault, numMeasClamped, solveFault, ssRatio, cpiRatio, armed, ...
+                resetInhibit, coastBudgetExceeded)
 
             % Define structure
             info = struct( ...
@@ -386,7 +387,9 @@ classdef STRUCT_SPF
                 'solveFault',            logical(solveFault), ...     % S or residual covariance unusable this epoch
                 'ssRatio',               ssRatio, ...    % [1x3] SS margin: |d|/(k_FA sigma_SS), max over open windows (alarm > 1)
                 'cpiRatio',              cpiRatio, ...   % [1x3] CPI margin: q/T_N of windows closed this epoch (alarm > 1)
-                'armed',                 logical(armed)); % monitors active (false during the warm-up after init)
+                'armed',                 logical(armed), ...       % monitors active (false during the warm-up after init)
+                'resetInhibit',          logical(resetInhibit), ... % host must not apply its protective reset this epoch
+                'coastBudgetExceeded',   logical(coastBudgetExceeded)); % COAST + PROBATION longer than COAST_BUDGET_EPOCHS
         end
 
         function [info] = zeroInfo
@@ -413,13 +416,16 @@ classdef STRUCT_SPF
             ssRatio               = zeros(1, 3);
             cpiRatio              = zeros(1, 3);
             armed                 = false;
+            resetInhibit          = false;
+            coastBudgetExceeded   = false;
 
             % Define structure
             info = STRUCT_SPF.setInfo(mode, ssAlarm, cpiAlarm, ...
                 alarmPerAxis, maxProtectionLevel, qReval, revalComputed,...
                 dwellCount, eventLatched, eventAnchorEpoch, eventProbationStarted,...
                 eventProbationVetoed, eventHandback, anchorMissing, coastEpochs, ...
-                inputFault, numMeasClamped, solveFault, ssRatio, cpiRatio, armed);
+                inputFault, numMeasClamped, solveFault, ssRatio, cpiRatio, armed, ...
+                resetInhibit, coastBudgetExceeded);
         end
 
         function [command] = setCommand(startTrial)

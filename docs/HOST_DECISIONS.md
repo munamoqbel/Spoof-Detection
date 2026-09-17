@@ -109,7 +109,7 @@ the estimate having no information, not a sign that the attack ended.
 | Veto | `eventProbationVetoed` | none | none | none |
 | Commit | `applyCorrection`, `eventHandback` | trial `xPost` | trial `PPost` | none |
 | Alarm without usable anchor | `eventLatched`, `anchorMissing` | none | none | none; mode still COAST |
-| Every epoch | `mode`, `ssAlarm`, `cpiAlarm`, `alarmPerAxis`, `maxProtectionLevel`, `qReval`, `dwellCount`, `coastEpochs`, `ssRatio` (SS margin per axis, alarm > 1), `cpiRatio` (CPI margin per axis, alarm > 1), `armed` (monitors active; false during the warm-up after init) | | `coastCov` (diagnostic) | |
+| Every epoch | `mode`, `ssAlarm`, `cpiAlarm`, `alarmPerAxis`, `maxProtectionLevel`, `qReval`, `dwellCount`, `coastEpochs`, `ssRatio` (SS margin per axis, alarm > 1), `cpiRatio` (CPI margin per axis, alarm > 1), `armed` (monitors active; false during the warm-up after init), `resetInhibit` (gate in COAST / PROBATION or alarming: the host must not apply its protective reset on the GNSS-vs-INS discrepancy), `coastBudgetExceeded` (COAST + PROBATION longer than `COAST_BUDGET_EPOCHS`: the host may reset, integrity not assured) | | `coastCov` (diagnostic) | |
 | Fault telemetry | `inputFault` (non-finite input: epoch dropped, gate re-initialises on the next good epoch), `numMeasClamped` (host passed more than `MAX_MEAS` rows), `solveFault` (an S or residual covariance was not positive definite: that CPI epoch counts `xi = 0`, re-validation cannot pass) | | | |
 
 After a commit the anchor is the committed solution (separation zero,
@@ -136,8 +136,11 @@ Covered by `tests/test_error_handlers.m`. On a host update flagged `failed`, pas
 ## 7. Deferred
 
 - Baro-only aiding during COAST and PROBATION (vertical channel).
-- Coast-time budget (Implementation Guide rule 4): each cycle costs a coast and
-  widens the coarse re-validation gate.
+- Coast-time budget (Implementation Guide rule 4): reported only
+  (`COAST_BUDGET_EPOCHS`, `info.coastBudgetExceeded`); the host decides what
+  to do beyond it (its protective reset). The gate does not declare dead
+  reckoning itself. Each cycle still costs a coast and widens the coarse
+  re-validation gate.
 - `MAX_ANCHOR_AGE` is a startup-only guard today.
 - Warm-up arming uses a fixed protection-level limit (`ARM_PL_MAX`); a
   convergence test on the filter's own covariance rate could replace it.

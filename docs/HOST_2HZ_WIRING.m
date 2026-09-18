@@ -200,6 +200,27 @@
 % end
 % %  Limitation: during the warm-up (info.armed = false) the gate cannot
 % %  alarm, so a step spoof in that minute still triggers the reset.
+% %
+% %  Reset check living in the 100 Hz, evaluated BEFORE the 2 Hz call of the
+% %  same cycle: defer it by one cycle so the gate sees the epoch first. One
+% %  persistent logical, no constant:
+% %
+% %    % top of the 100 Hz cycle: act on a request raised last cycle (the
+% %    % 2 Hz call for that GNSS epoch has run in between)
+% %    if resetPending
+% %        if ~spfTel.info.resetInhibit || spfTel.info.coastBudgetExceeded
+% %            % reset and re-align exactly as today
+% %        end
+% %        resetPending = false;
+% %    end
+% %    % where the criterion is evaluated today: raise the request instead
+% %    if newGnssFix && (positionDiff > LIMIT)
+% %        resetPending = true;
+% %    end
+% %
+% %  Step spoof: request raised, gate latches in the 2 Hz call, refused next
+% %  cycle (and every epoch after, until the coast budget). Long outage: no
+% %  alarm, reset fires one cycle (10 ms) later than today.
 %
 % Epoch-by-epoch this gives:
 %   NOMINAL->NOMINAL   setKF(kfPost)

@@ -257,6 +257,24 @@
 %   increment. The epoch counter counts gate calls (anchor age is a time),
 %   and is reset only in alignment.
 %
+%   GNSS present but NOT applied by the host (validity flag false, RAIM
+%   rejection, any "invalid update" path): the gate must see what the
+%   filter used, i.e. numMeas = 0, xPost = xPrior, PPost = PPrior (the
+%   "invalid update" row of the setKF table). Feeding it the scratch
+%   update's rows and x+ while the operational solution stays on the INS
+%   tells the gate "25 rows accepted, solution did not move": the increments
+%   it accumulates are corrections the host never applied, they pile up as
+%   the INS drifts, and after a while that is indistinguishable from a
+%   spoofer pulling on the solution: a latch, then latch / probation /
+%   commit cycles because the host ignores the hand-back too.
+%
+%   Shadow mode (decisions not applied) exercises NOMINAL only. After a
+%   shadow latch the gate's COAST and PROBATION run against a host that
+%   keeps updating and never starts a trial, so the re-validation and the
+%   probation verdicts in that state mean nothing (typically probation /
+%   veto every few epochs). Judge shadow runs on the alarms, not on what
+%   follows them.
+%
 % ----------------------------------------------------------------------
 %  what the 100 Hz side must do
 % ----------------------------------------------------------------------

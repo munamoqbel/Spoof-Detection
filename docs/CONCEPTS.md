@@ -182,3 +182,25 @@ action), constants `CST_spfParam.m` lines 71 to 73, telemetry `info.armed`.
   step 6.
 - Limitation: during the warm-up the gate cannot alarm, so a step spoof in
   that first minute after a start or reset still goes through the reset.
+
+## 8. GNSS present but not applied (validity flag false)
+
+- Test: 2000 s of clean data with the host's GNSS validity flag forced
+  false from 500 to 1500 s. The host went to pure INS, but the 2 Hz function
+  still ran the scratch update and handed the gate 20 to 30 rows with the
+  scratch `x+` and `P+` every epoch.
+- What the gate saw: a filter that "accepted" 25 rows each epoch while the
+  operational solution stayed on the drifting INS. The increments it
+  accumulates are the corrections the host never applied, so they grow
+  with the INS drift, and after about 110 s the separation exceeded the SS
+  threshold: a latch on clean data. Then latch / probation / commit cycles,
+  because the host ignored the hand-back as well; in shadow mode a
+  probation / veto oscillation every few epochs, because no trial exists.
+- Rule (already in `docs/HOST_DECISIONS.md`, "invalid update" row): the gate
+  sees what the filter used. Not applied means `numMeas = 0`, `xPost =
+  xPrior`, `PPost = PPrior`. With that, an outage of this kind is the jammed
+  data set again: NOMINAL throughout, PL growing, and at re-acquisition
+  either a jump inside an honest P (no alarm) or the host's reset with the
+  gate warming up after it.
+- Shadow mode only exercises NOMINAL; its COAST and PROBATION verdicts are
+  not meaningful.

@@ -249,13 +249,22 @@
 %   solution and no latch is possible until the monitors arm, see
 %   ARM_EPOCHS / ARM_PL_MAX in CST_spfParam and info.armed).
 %
-%   GNSS outage (only the pressure row available): STILL call the gate,
-%   with the rows the filter used (numMeas = 1 in the host). The baro row
-%   feeds the vertical CPI legitimately, cannot pass re-validation
-%   (REVAL_MIN_MEAS), and windows, anchor and coast covariances keep
-%   propagating. Skipping the call would lose one interval of Phi/Q and one
-%   increment. The epoch counter counts gate calls (anchor age is a time),
-%   and is reset only in alignment.
+%   GNSS outage. In this host the 2 Hz function runs only when the
+%   receiver delivers data, so during an outage there is no update at all
+%   (no baro-only epoch either) and the gate is simply not called. That is
+%   acceptable on two conditions:
+%     - propTel keeps accumulating across the whole gap and is consumed
+%       by the next 2 Hz call: the gate then propagates windows, anchor
+%       and coast covariance over the gap in one step (Phi product, Q sum),
+%       which is exact for the linear error model. If anything resets the
+%       accumulation without a gate call, the gap is lost and P_C is too
+%       small at re-acquisition.
+%     - every gate counter (window length, dwell, probation, warm-up,
+%       coastEpochs, coast budget) counts CALLS, not seconds. An outage
+%       does not advance them. A window open across a gap closes N calls
+%       after it opened, whatever the elapsed time.
+%   If the host ever delivers rows it does not apply (validity false while
+%   the receiver still reports), the "invalid update" rule below applies.
 %
 %   GNSS present but NOT applied by the host (validity flag false, RAIM
 %   rejection, any "invalid update" path): the gate must see what the

@@ -204,3 +204,8 @@ action), constants `CST_spfParam.m` lines 71 to 73, telemetry `info.armed`.
   gate warming up after it.
 - Shadow mode only exercises NOMINAL; its COAST and PROBATION verdicts are
   not meaningful.
+- Repeated with the host's actual behaviour (the 2 Hz function, and so the
+  gate, is not called at all while the receiver delivers nothing): NOMINAL
+  throughout, identical with and without the gate, a warm-up after the
+  reset at re-acquisition, no latch. The gate sees the outage as one long
+  interval through `propTel`; all its counters are in calls, not seconds.

@@ -5,7 +5,7 @@ function SPF_plotLog(spfLog, fs)
 %   Figure 1  mode timeline with events (grey = warm-up, monitors not
 %             armed); numMeas
 %   Figure 2  monitor margins: SS ratio and CPI ratio per axis (alarm > 1),
-%             protection level, host NIS
+%             protection level, host NIS, innovation mean / spread
 %   Figure 3  re-validation: qReval vs its threshold, dwell count, coast time
 %   Figure 4  fault flags
 %
@@ -22,6 +22,12 @@ function SPF_plotLog(spfLog, fs)
 %     drift). Needs the coast-time budget / Q, not the thresholds.
 %   - probation opens and is vetoed repeatedly: look at which ratio vetoes
 %     (SS = the trial drifts from the coast, CPI = biased innovations).
+%   - innovation mean vs spread (figure 2, last panel): a large MEAN with a
+%     small spread is an error common to every row, i.e. the receiver clock
+%     bias; compare it with the filter's clock sigma. A large SPREAD is a
+%     position error (different projection on every line of sight). At
+%     re-acquisition after a gap the mean says whether the clock state was
+%     re-initialised or dragged the filter for a minute.
 %   - covariance honesty (host Q / initial P): at the end of a pure-INS
 %     coast compare the true position error (e.g. the jump at
 %     re-acquisition or at a host reset) with sigma_N/E/D in the PL panel.
@@ -57,21 +63,25 @@ stairs(t, spfLog.numMeas(1:n), 'k'); grid on; ylabel('numMeas'); xlabel('t [s]')
 
 %% 2. monitor margins
 figure('Name', 'SPF gate: monitor margins');
-subplot(4,1,1);
+subplot(5,1,1);
 plot(t, spfLog.ssRatio(1:n, :)); hold on; yline(1, 'r--'); grid on;
 ylabel('SS |d|/(k_{FA}\sigma_{SS})'); legend('N', 'E', 'D', 'alarm', 'Location', 'northwest');
 title('solution-separation margin (alarm > 1)');
-subplot(4,1,2);
+subplot(5,1,2);
 plot(t, spfLog.cpiRatio(1:n, :)); hold on; yline(1, 'r--'); grid on;
 ylabel('CPI q/T_N'); title('CPI margin of windows closed this epoch (alarm > 1)');
-subplot(4,1,3);
+subplot(5,1,3);
 semilogy(t, max(spfLog.pl(1:n), 1e-2), 'k', 'LineWidth', 1.2); hold on;
 semilogy(t, max(spfLog.sigmaPos(1:n, :), 1e-2)); grid on;
 ylabel('[m]'); legend('PL', '\sigma_N', '\sigma_E', '\sigma_D', 'Location', 'northwest');
 title('max protection level and host position sigma sqrt(P+) (compare sigma with the true drift after a coast)');
-subplot(4,1,4);
+subplot(5,1,4);
 semilogy(t, max(spfLog.nis(1:n), 1e-3), 'k'); hold on; yline(1, 'r--'); grid on;
-ylabel('NIS'); xlabel('t [s]'); title('host KF normalised innovation squared (~1 when R, P honest)');
+ylabel('NIS'); title('host KF normalised innovation squared (~1 when R, P honest)');
+subplot(5,1,5);
+plot(t, spfLog.innMean(1:n), 'k'); hold on; plot(t, spfLog.innStd(1:n), 'b'); grid on;
+ylabel('[m]'); xlabel('t [s]'); legend('mean (common mode: clock)', 'spread (geometry: position)', 'Location', 'northwest');
+title('innovation mean and spread over the live rows');
 
 %% 3. re-validation
 figure('Name', 'SPF gate: re-validation');

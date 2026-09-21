@@ -41,10 +41,15 @@ spfLog.budgetOut(k)   = info.coastBudgetExceeded;
 spfLog.inputFault(k)  = info.inputFault;
 spfLog.solveFault(k)  = info.solveFault;
 spfLog.clamped(k)     = info.numMeasClamped;
+if m > 0
+    y = spfMeas.innovation(1:m);
+    spfLog.innMean(k) = mean(y);
+    spfLog.innStd(k)  = std(y);
+end
 if nargin >= 4
     spfLog.nis(k) = nis;
 elseif m > 0
-    y = spfMeas.innovation(1:m); S = spfMeas.innovationCov(1:m, 1:m);
+    S = spfMeas.innovationCov(1:m, 1:m);
     spfLog.nis(k) = (y' * (S \ y)) / m;
 end
 if info.eventLatched,          spfLog.evLatch(end+1)     = k; end

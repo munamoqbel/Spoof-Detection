@@ -25,6 +25,16 @@ bookkeeping of `KF.states`.
 | `CST_spfMode.m` | mode enumeration |
 | `CST_gnssHybrid.m` | **stand-in** (`NO_STATES = 60`); the simulation has its own |
 
+## Minimalist copies for the simulation
+
+`deploy/` holds the same ten runtime files with the commentary stripped to
+a few lines each (identical logic, signatures and struct layouts; bitwise
+identical telemetry on the harness scenarios). Copy `deploy/` into the
+simulation and keep the root files as the annotated reference. See
+`deploy/README.md`. After editing either set, `tools/deployEquivalence.m`
+re-runs the harness scenarios with both and reports whether the telemetry
+is still bitwise identical.
+
 ## Harness / offline design (not deployed)
 
 `run_recovery.m` (flat 2 Hz demo + offline design), `run_scheduler_test.m` +

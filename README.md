@@ -83,6 +83,13 @@ latch possible) until the filter has had `ARM_EPOCHS` consecutive epochs
 with enough rows and a protection level below `ARM_PL_MAX`
 (`CST_spfParam`).
 
+`tools/reacqChecks.m` is the re-acquisition diagnostic: given four `.mat`
+captures of the host's `kfUpdate` (last epoch before an outage, first call
+back, first accepted update, a healthy epoch) it reproduces the host update,
+compares h(x) with H, tests the innovation and the prior against the truth,
+splits the update by row type, and traces the prior back through the
+attitude residual. The header lists the variables each capture must hold.
+
 ## Printable copies
 
 `docs/pdf/` holds PDF renderings of this README, `docs/HOST_DECISIONS.md`,

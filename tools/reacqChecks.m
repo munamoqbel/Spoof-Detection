@@ -193,6 +193,11 @@ end
 % ---------------------------------------------------------------- 7. propagation across the gap
 fprintf('\n\n############ 7. propagation across the gap (PRE -> FIRST) ############\n');
 Sp = E{1}; Sf = E{2};
+if isempty(Sf.statePropagated) && ~isempty(Sf.xPrior)
+    fprintf('  statePropagated / covPropagated absent: using xPrior / covarIn of FIRST (after any inflation)\n');
+    Sf.statePropagated = Sf.xPrior;
+    Sf.covPropagated   = Sf.covarIn;
+end
 if ~isempty(Sf.accumPhi) && ~isempty(Sp.xPost) && ~isempty(Sf.statePropagated)
     xProp = Sf.accumPhi * Sp.xPost;
     fprintf('  state      accumPhi*xPost(PRE)   statePropagated(FIRST)   diff\n');

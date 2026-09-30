@@ -19,6 +19,8 @@ function [res] = reacqChecks(filePre, fileFirst, fileAcc, fileRef)
 %     mechAtt       [roll pitch yaw] rad         refAtt     [roll pitch yaw] rad (optional)
 %     satPos        [k x 3] satellite ECEF position (m) per pseudorange row, same order as the rows
 %     rhoMeas       [k x 1] corrected pseudorange (m), rangeRateMeas [k x 1] (m/s), refPosEcef [3 x 1]
+%     satMap        [k x 3] constellation, PRN, accepted (1/0) per satellite entry; may include the
+%                   satellites the internal filter rejected (then k > number of pseudorange rows)
 %                   (optional: enable section 0, the measurement-quality check against the truth)
 %     tRx           receiver time tag (s), optional (else parsed from the file name)
 %     statePropagated covPropagated accumPhi accumQ   (fileFirst only)
@@ -55,24 +57,27 @@ for k = [3 4 1 2]
         kSat   = numel(S.rhoMeas);
         rhoRef = sqrt(sum((S.satPos - repmat(S.refPosEcef', kSat, 1)) .^ 2, 2));
         r1     = S.rhoMeas - rhoRef;
-        if ~isempty(S.rowMap) && kSat == numel(prRows)
-            con = S.rowMap(prRows, 2);
-            prn = S.rowMap(prRows, 3);
+        if ~isempty(S.satMap) && size(S.satMap, 1) == kSat
+            con = S.satMap(:, 1);  prn = S.satMap(:, 2);  acc = S.satMap(:, 3);
+        elseif ~isempty(S.rowMap) && kSat == numel(prRows)
+            con = S.rowMap(prRows, 2);  prn = S.rowMap(prRows, 3);  acc = S.rowMap(prRows, 4);
         else
-            con = ones(kSat, 1);
-            prn = (1:kSat)';
+            con = ones(kSat, 1);  prn = (1:kSat)';  acc = ones(kSat, 1);
         end
         d1 = r1;
         for c = unique(con)'
             idx = (con == c);
-            clk = median(r1(idx));
+            nAcc = sum(idx & (acc ~= 0));
+            use  = idx & (acc ~= 0);
+            if nAcc == 0, use = idx; end         % nothing accepted: clock from the rejected ones, flagged below
+            clk = median(r1(use));               % clock from the accepted satellites only
             d1(idx) = r1(idx) - clk;
-            fprintf('  constellation %d: clock (median r1) = %9.3f m   d1 rms = %7.3f m   max |d1| = %7.3f m\n', ...
-                c, clk, rms(d1(idx)), max(abs(d1(idx))));
+            fprintf('  constellation %d: clock (median r1%s) = %9.3f m   d1 rms = %7.3f m   max |d1| = %7.3f m   (%d accepted, %d rejected)\n', ...
+                c, iff(nAcc == 0, ', from REJECTED sats', ', accepted'), clk, rms(d1(idx)), max(abs(d1(idx))), nAcc, sum(idx) - nAcc);
         end
-        fprintf('  PRN   con   rho_ref [km]     r1 [m]      d1 [m]\n');
+        fprintf('  PRN   con   acc   rho_ref [km]     r1 [m]      d1 [m]\n');
         for i = 1:kSat
-            fprintf('  %3d   %2d   %10.1f   %10.3f   %9.3f\n', prn(i), con(i), rhoRef(i) / 1e3, r1(i), d1(i));
+            fprintf('  %3d   %2d    %d    %10.1f   %10.3f   %9.3f\n', prn(i), con(i), acc(i), rhoRef(i) / 1e3, r1(i), d1(i));
         end
         if any(rhoRef < 1.8e7 | rhoRef > 2.7e7)
             fprintf('  WARNING: some rho_ref outside 18000-27000 km: frame or unit mismatch between satPos and refPosEcef\n');
@@ -247,7 +252,7 @@ D = load(file);
 want = {'covarIn', 'measH', 'R', 'measZ', 'nonLinZ', 'innov', 'K', 'xUpdate', 'xPrior', 'xPost', 'covar', ...
         'rowMap', 'mechPos', 'mechVel', 'mechAtt', 'refPos', 'refPosEcef', 'refVel', 'refAtt', ...
         'statePropagated', 'covPropagated', 'accumPhi', 'accumQ', 'tRx', ...
-        'satPos', 'satVel', 'rhoMeas', 'rangeRateMeas'};
+        'satPos', 'satVel', 'rhoMeas', 'rangeRateMeas', 'satMap'};
 S = struct();
 missing = {};
 for i = 1:numel(want)
@@ -292,8 +297,13 @@ end
 if isequal(size(S.R), [m m]), S.R = S.R(live, live); end
 if ~isempty(S.K) && size(S.K, 2) == m, S.K = S.K(:, live); end
 if ~isempty(S.rowMap) && size(S.rowMap, 1) == m, S.rowMap = S.rowMap(live, :); end
-kLive = sum(S.rowMap(:, 1) == 1);
-if isempty(S.rowMap), kLive = sum(sqrt(sum(S.measH(:, 1:3) .^ 2, 2)) > 0.5 & sqrt(sum(S.measH(:, 4:6) .^ 2, 2)) < 0.5); end
+if ~isempty(S.satMap)
+    kLive = sum(S.satMap(:, 2) ~= 0);
+    S.satMap = S.satMap(1:kLive, :);
+else
+    kLive = sum(S.rowMap(:, 1) == 1);
+    if isempty(S.rowMap), kLive = sum(sqrt(sum(S.measH(:, 1:3) .^ 2, 2)) > 0.5 & sqrt(sum(S.measH(:, 4:6) .^ 2, 2)) < 0.5); end
+end
 for f = {'rhoMeas', 'rangeRateMeas'}
     if numel(S.(f{1})) > kLive, S.(f{1}) = S.(f{1})(1:kLive); end
 end
@@ -354,6 +364,10 @@ for rows = {prRows, rrRows}
         r(idx) = r(idx) - median(r(idx));
     end
 end
+end
+
+function [out] = iff(cond, a, b)
+if cond, out = a; else, out = b; end
 end
 
 function [s] = vec2str(v)

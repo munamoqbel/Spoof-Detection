@@ -140,14 +140,28 @@ for k = order
     [xTrue, haveAtt] = trueState(S, n, POS, VEL, ATT);
     if any(isfinite(xTrue(POS)))
         for sgn = [1 -1]
-            xt = sgn * xTrue;  xt(~isfinite(xt)) = 0;
-            pred = S.measH * (xt - S.xPrior);
-            resid = removeClock(S.innov - pred, S, prRows, rrRows);
+            resid = removeClock(innovResid(S, xTrue, sgn), S, prRows, rrRows);
             if sgn == 1, lab = 'x = mech - truth'; else, lab = 'x = truth - mech'; end
             fprintf('  %-18s rms residual: pseudorange %9.3f m   range-rate %8.4f m/s\n', ...
                 lab, rms(resid(prRows)), rms(resid(rrRows)));
         end
         fprintf('  (per-constellation median removed = clock; the convention with the small residual is the host''s)\n');
+        % clock mismatch implied by the innovation (with the better convention) against the prior clock sigmas
+        r1c = removeClock(innovResid(S, xTrue, 1), S, prRows, rrRows);
+        r2c = removeClock(innovResid(S, xTrue, -1), S, prRows, rrRows);
+        if rms(r1c(prRows)) <= rms(r2c(prRows)), sgnBest = 1; else, sgnBest = -1; end
+        resid = innovResid(S, xTrue, sgnBest);
+        CLKB = [16 18 21];  CLKD = [17 19 22];
+        if ~isempty(S.rowMap) && ~isempty(S.covarIn)
+            fprintf('  clock mismatch implied by the innovation (median of the residual per constellation):\n');
+            for c = unique(S.rowMap(prRows, 2))'
+                pb = prRows(S.rowMap(prRows, 2) == c);  rb = rrRows(S.rowMap(rrRows, 2) == c);
+                ib = CLKB(min(c, numel(CLKB)));  id = CLKD(min(c, numel(CLKD)));
+                fprintf('    constellation %d: bias %8.2f m (prior sigma %6.2f m)   drift %8.3f m/s (prior sigma %6.3f m/s)\n', ...
+                    c, median(resid(pb)), sqrt(S.covarIn(ib, ib)), median(resid(rb)), sqrt(S.covarIn(id, id)));
+            end
+            fprintf('    (a mismatch well beyond the prior sigma is what the inflation after a gap is for)\n');
+        end
     else
         fprintf('  mechPos / refPos missing: skipped\n');
     end
@@ -445,6 +459,14 @@ for rows = {prRows, rrRows}
         r(idx) = r(idx) - median(r(idx));
     end
 end
+end
+
+function [resid] = innovResid(S, xTrue, sgn)
+% innovation minus H*(x_true - xPrior); unknown truth entries (NaN, e.g. the clocks) are set to
+% the prior so they drop out and remain in the residual as the clock mismatch
+xt = sgn * xTrue;
+xt(~isfinite(xt)) = S.xPrior(~isfinite(xt));
+resid = S.innov - S.measH * (xt - S.xPrior);
 end
 
 function [out] = iff(cond, a, b)

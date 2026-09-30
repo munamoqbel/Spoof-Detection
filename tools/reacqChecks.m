@@ -261,6 +261,7 @@ end
 for f = {'xPrior', 'xPost', 'measZ', 'nonLinZ', 'innov', 'xUpdate', 'statePropagated', 'mechPos', 'mechVel', 'mechAtt', 'refPos', 'refVel', 'refAtt', 'refPosEcef', 'rhoMeas', 'rangeRateMeas'}
     S.(f{1}) = S.(f{1})(:);
 end
+S = stripPadding(S);
 S.file = file;
 if ~isempty(S.tRx)
     S.t = S.tRx(1);
@@ -271,6 +272,33 @@ end
 if ~isempty(missing)
     fprintf('  [%s] missing: %s\n', file, strjoin(missing, ' '));
 end
+end
+
+function [S] = stripPadding(S)
+% drop padding rows appended at the end of the fixed-size arrays: rowMap type 0,
+% or an all-zero H row when rowMap is absent; satellites are cut to the live pseudorange rows
+if isempty(S.measH), return; end
+m = size(S.measH, 1);
+if ~isempty(S.rowMap) && size(S.rowMap, 1) == m
+    live = S.rowMap(:, 1) ~= 0;
+else
+    live = any(S.measH ~= 0, 2);
+end
+if all(live), return; end
+S.measH = S.measH(live, :);
+for f = {'measZ', 'nonLinZ', 'innov'}
+    if numel(S.(f{1})) == m, S.(f{1}) = S.(f{1})(live); end
+end
+if isequal(size(S.R), [m m]), S.R = S.R(live, live); end
+if ~isempty(S.K) && size(S.K, 2) == m, S.K = S.K(:, live); end
+if ~isempty(S.rowMap) && size(S.rowMap, 1) == m, S.rowMap = S.rowMap(live, :); end
+kLive = sum(S.rowMap(:, 1) == 1);
+if isempty(S.rowMap), kLive = sum(sqrt(sum(S.measH(:, 1:3) .^ 2, 2)) > 0.5 & sqrt(sum(S.measH(:, 4:6) .^ 2, 2)) < 0.5); end
+for f = {'rhoMeas', 'rangeRateMeas'}
+    if numel(S.(f{1})) > kLive, S.(f{1}) = S.(f{1})(1:kLive); end
+end
+if size(S.satPos, 1) > kLive, S.satPos = S.satPos(1:kLive, :); end
+fprintf('  [%s] %d padding rows removed\n', 'padding', m - sum(live));
 end
 
 function [prRows, rrRows, baroRows] = rowsOf(S)

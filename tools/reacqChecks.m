@@ -1,6 +1,7 @@
 function [res] = reacqChecks(filePre, fileFirst, fileAcc, fileRef)
 %REACQCHECKS  Re-acquisition diagnostics on four saved kfUpdate epochs.
 %   reacqChecks('kf_01674.69.mat', 'kf_01857.27.mat', 'kf_01857.77.mat', 'kf_01875.00.mat')
+%   reacqChecks('kf_01674.85.mat')       one file: inventory + sections 0-6 on that epoch only
 %
 %   filePre    last accepted update before the outage
 %   fileFirst  first 2 Hz call after the outage (one row)
@@ -29,17 +30,24 @@ function [res] = reacqChecks(filePre, fileFirst, fileAcc, fileRef)
 POS = 1:3;  VEL = 4:6;  ATT = 7:9;
 G   = 9.80665;
 
-E = {loadEpoch(filePre), loadEpoch(fileFirst), loadEpoch(fileAcc), loadEpoch(fileRef)};
-names = {'PRE (last before outage)', 'FIRST (first call back)', 'ACC (first accepted update)', 'REF (healthy)'};
 res = struct();
+if nargin == 1
+    S1 = loadEpoch(filePre);
+    inventory(S1);
+    E = {S1};  names = {'SINGLE FILE'};  order = 1;
+else
+    E = {loadEpoch(filePre), loadEpoch(fileFirst), loadEpoch(fileAcc), loadEpoch(fileRef)};
+    names = {'PRE (last before outage)', 'FIRST (first call back)', 'ACC (first accepted update)', 'REF (healthy)'};
+    order = [3 4 1 2];
+end
 
 fprintf('\n================ re-acquisition checks ================\n');
-for k = 1:4
+for k = 1:numel(E)
     fprintf('%-30s t = %10.2f  file: %s\n', names{k}, E{k}.t, E{k}.file);
 end
 
 % ---------------------------------------------------------------- per-epoch checks
-for k = [3 4 1 2]
+for k = order
     S = E{k};
     fprintf('\n\n############ %s  (t = %.2f) ############\n', names{k}, S.t);
     if isempty(S.measH)
@@ -195,6 +203,11 @@ for k = [3 4 1 2]
     end
 end
 
+if nargin == 1
+    fprintf('\n(single file: sections 7 and 8 need the four epochs)\n');
+    return
+end
+
 % ---------------------------------------------------------------- 7. propagation across the gap
 fprintf('\n\n############ 7. propagation across the gap (PRE -> FIRST) ############\n');
 Sp = E{1}; Sf = E{2};
@@ -277,6 +290,74 @@ end
 if ~isempty(missing)
     fprintf('  [%s] missing: %s\n', file, strjoin(missing, ' '));
 end
+end
+
+function inventory(S)
+% what the file holds, sizes, and the consistency between the pieces
+fprintf('\n================ inventory of %s ================\n', S.file);
+f = fieldnames(S);
+for i = 1:numel(f)
+    v = S.(f{i});
+    if ischar(v) || strcmp(f{i}, 't'), continue; end
+    if isempty(v)
+        fprintf('  %-16s  MISSING\n', f{i});
+    else
+        fprintf('  %-16s  %s\n', f{i}, mat2str(size(v)));
+    end
+end
+fprintf('\n-- consistency --\n');
+if isempty(S.measH), fprintf('  measH missing: nothing more to check\n'); return; end
+[m, n] = size(S.measH);
+fprintf('  rows m = %d, states n = %d\n', m, n);
+chk('numel(measZ) == m',        numel(S.measZ) == m);
+chk('numel(nonLinZ) == m',      numel(S.nonLinZ) == m);
+chk('numel(innov) == m',        numel(S.innov) == m);
+chk('size(R) == [m m]',         isequal(size(S.R), [m m]));
+chk('size(K) == [n m]',         isequal(size(S.K), [n m]));
+chk('size(covarIn) == [n n]',   isequal(size(S.covarIn), [n n]));
+chk('numel(xPrior) == n',       numel(S.xPrior) == n);
+chk('numel(xPost) == n',        numel(S.xPost) == n);
+chk('size(rowMap,1) == m',      ~isempty(S.rowMap) && size(S.rowMap, 1) == m);
+if ~isempty(S.rowMap)
+    fprintf('  rowMap types: %d pseudorange, %d range-rate, %d pressure\n', ...
+        sum(S.rowMap(:, 1) == 1), sum(S.rowMap(:, 1) == 2), sum(S.rowMap(:, 1) == 3));
+end
+if ~isempty(S.satMap)
+    chk('size(satMap,1) == size(satPos,1) == numel(rhoMeas)', ...
+        size(S.satMap, 1) == size(S.satPos, 1) && size(S.satMap, 1) == numel(S.rhoMeas));
+    fprintf('  satMap: %d accepted, %d rejected\n', sum(S.satMap(:, 3) ~= 0), sum(S.satMap(:, 3) == 0));
+elseif ~isempty(S.satPos)
+    chk('size(satPos,1) == numel(rhoMeas)', size(S.satPos, 1) == numel(S.rhoMeas));
+end
+if ~isempty(S.measZ) && ~isempty(S.nonLinZ) && ~isempty(S.innov) && numel(S.innov) == m
+    fprintf('  max |measZ - nonLinZ - innov| = %.3e\n', max(abs(S.measZ - S.nonLinZ - S.innov)));
+end
+if ~isempty(S.K) && ~isempty(S.innov) && ~isempty(S.xPost) && isequal(size(S.K), [n m])
+    fprintf('  max |xPrior + K*innov - xPost| = %.3e\n', max(abs(S.xPrior + S.K * S.innov - S.xPost)));
+end
+hp = sqrt(sum(S.measH(:, 1:3) .^ 2, 2));  hv = sqrt(sum(S.measH(:, 4:6) .^ 2, 2));
+fprintf('  |H(:,1:3)| pseudorange rows: min %.4f max %.4f    |H(:,4:6)| range-rate rows: min %.4f max %.4f\n', ...
+    min(hp(hp > 0.5)), max(hp(hp > 0.5)), min(hv(hv > 0.5)), max(hv(hv > 0.5)));
+if numel(S.mechPos) == 3
+    chk('mechPos lat/lon look like radians', abs(S.mechPos(1)) <= pi / 2 && abs(S.mechPos(2)) <= pi);
+end
+if numel(S.refPos) == 3
+    chk('refPos lat/lon look like radians', abs(S.refPos(1)) <= pi / 2 && abs(S.refPos(2)) <= pi);
+end
+if numel(S.refPosEcef) == 3
+    chk('|refPosEcef| about Earth radius', abs(norm(S.refPosEcef) - 6.37e6) < 5e4);
+end
+if ~isempty(S.satPos) && numel(S.refPosEcef) == 3
+    rr = sqrt(sum((S.satPos - repmat(S.refPosEcef(:)', size(S.satPos, 1), 1)) .^ 2, 2));
+    chk('satellite ranges 18000-27000 km', all(rr > 1.8e7 & rr < 2.7e7));
+end
+if numel(S.mechAtt) == 3
+    chk('mechAtt looks like radians', all(abs(S.mechAtt) <= 2 * pi));
+end
+end
+
+function chk(label, ok)
+if ok, fprintf('  ok    %s\n', label); else, fprintf('  FAIL  %s\n', label); end
 end
 
 function [S] = stripPadding(S)

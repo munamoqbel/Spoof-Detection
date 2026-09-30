@@ -17,6 +17,9 @@ function [res] = reacqChecks(filePre, fileFirst, fileAcc, fileRef)
 %     mechPos       [lat lon h] rad, rad, m      refPos     [lat lon h]
 %     mechVel       [vN vE vD] m/s               refVel     [vN vE vD]
 %     mechAtt       [roll pitch yaw] rad         refAtt     [roll pitch yaw] rad (optional)
+%     satPos        [k x 3] satellite ECEF position (m) per pseudorange row, same order as the rows
+%     rhoMeas       [k x 1] corrected pseudorange (m), rangeRateMeas [k x 1] (m/s), refPosEcef [3 x 1]
+%                   (optional: enable section 0, the measurement-quality check against the truth)
 %     tRx           receiver time tag (s), optional (else parsed from the file name)
 %     statePropagated covPropagated accumPhi accumQ   (fileFirst only)
 %   State layout: 1-3 pos NED (m), 4-6 vel NED, 7-9 attitude, 16/18/21 clock bias, 17/19/22 drift.
@@ -45,6 +48,43 @@ for k = [3 4 1 2]
     n = numel(S.xPrior);
     fprintf('  rows: %d pseudorange, %d range-rate, %d pressure, states %d\n', ...
         numel(prRows), numel(rrRows), numel(baroRows), n);
+
+    % ---- 0. measurement quality against the truth (needs satPos, rhoMeas, refPosEcef) ----
+    fprintf('\n-- 0. pseudoranges against the truth (r1 = rho_meas - |sat - ref|, clock = median per constellation) --\n');
+    if ~isempty(S.satPos) && ~isempty(S.rhoMeas) && numel(S.refPosEcef) == 3 && size(S.satPos, 1) == numel(S.rhoMeas)
+        kSat   = numel(S.rhoMeas);
+        rhoRef = sqrt(sum((S.satPos - repmat(S.refPosEcef', kSat, 1)) .^ 2, 2));
+        r1     = S.rhoMeas - rhoRef;
+        if ~isempty(S.rowMap) && kSat == numel(prRows)
+            con = S.rowMap(prRows, 2);
+            prn = S.rowMap(prRows, 3);
+        else
+            con = ones(kSat, 1);
+            prn = (1:kSat)';
+        end
+        d1 = r1;
+        for c = unique(con)'
+            idx = (con == c);
+            clk = median(r1(idx));
+            d1(idx) = r1(idx) - clk;
+            fprintf('  constellation %d: clock (median r1) = %9.3f m   d1 rms = %7.3f m   max |d1| = %7.3f m\n', ...
+                c, clk, rms(d1(idx)), max(abs(d1(idx))));
+        end
+        fprintf('  PRN   con   rho_ref [km]     r1 [m]      d1 [m]\n');
+        for i = 1:kSat
+            fprintf('  %3d   %2d   %10.1f   %10.3f   %9.3f\n', prn(i), con(i), rhoRef(i) / 1e3, r1(i), d1(i));
+        end
+        if any(rhoRef < 1.8e7 | rhoRef > 2.7e7)
+            fprintf('  WARNING: some rho_ref outside 18000-27000 km: frame or unit mismatch between satPos and refPosEcef\n');
+        end
+        if ~isempty(S.rangeRateMeas) && numel(S.rangeRateMeas) == kSat && kSat >= 3
+            A = [S.rangeRateMeas(:), ones(kSat, 1)];
+            cf = A \ d1;
+            fprintf('  d1 vs range rate: slope = %.4f s (a time offset between ranges and satellite positions), intercept = %.2f m\n', cf(1), cf(2));
+        end
+    else
+        fprintf('  satPos / rhoMeas / refPosEcef missing or inconsistent sizes: skipped\n');
+    end
 
     % ---- 1. reproduce the host update -------------------------------------
     fprintf('\n-- 1. reproduce the host update --\n');
@@ -201,7 +241,8 @@ function [S] = loadEpoch(file)
 D = load(file);
 want = {'covarIn', 'measH', 'R', 'measZ', 'nonLinZ', 'innov', 'K', 'xUpdate', 'xPrior', 'xPost', 'covar', ...
         'rowMap', 'mechPos', 'mechVel', 'mechAtt', 'refPos', 'refPosEcef', 'refVel', 'refAtt', ...
-        'statePropagated', 'covPropagated', 'accumPhi', 'accumQ', 'tRx'};
+        'statePropagated', 'covPropagated', 'accumPhi', 'accumQ', 'tRx', ...
+        'satPos', 'satVel', 'rhoMeas', 'rangeRateMeas'};
 S = struct();
 missing = {};
 for i = 1:numel(want)
@@ -212,7 +253,7 @@ for i = 1:numel(want)
         missing{end + 1} = want{i}; %#ok<AGROW>
     end
 end
-for f = {'xPrior', 'xPost', 'measZ', 'nonLinZ', 'innov', 'xUpdate', 'statePropagated', 'mechPos', 'mechVel', 'mechAtt', 'refPos', 'refVel', 'refAtt'}
+for f = {'xPrior', 'xPost', 'measZ', 'nonLinZ', 'innov', 'xUpdate', 'statePropagated', 'mechPos', 'mechVel', 'mechAtt', 'refPos', 'refVel', 'refAtt', 'refPosEcef', 'rhoMeas', 'rangeRateMeas'}
     S.(f{1}) = S.(f{1})(:);
 end
 S.file = file;

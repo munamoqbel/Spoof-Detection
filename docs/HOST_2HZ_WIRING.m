@@ -194,8 +194,9 @@
 % if spfTel.info.resetInhibit && ~spfTel.info.coastBudgetExceeded
 %     % gate in COAST / PROBATION or alarming this epoch: skip the reset check
 % else
-%     % your reset check as today; coastBudgetExceeded means the gate has
-%     % held GNSS off longer than COAST_BUDGET_EPOCHS: reset if the
+%     % your reset check as today; coastBudgetExceeded means the coast's
+%     % own PL (K_MD * sigma_C) has grown past ARM_PL_MAX, so the gate
+%     % could not certify a re-validation anyway: reset if the
 %     % discrepancy demands it, integrity is not assured across that reset
 % end
 % %  Limitation: during the warm-up (info.armed = false) the gate cannot
@@ -260,8 +261,9 @@
 %       accumulation without a gate call, the gap is lost and P_C is too
 %       small at re-acquisition.
 %     - every gate counter (window length, dwell, probation, warm-up,
-%       coastEpochs, coast budget) counts CALLS, not seconds. An outage
-%       does not advance them. A window open across a gap closes N calls
+%       coastEpochs) counts CALLS, not seconds. An outage does not
+%       advance them. The coast budget is on the coast covariance
+%       (propagated with Phi, Q), so it does grow across a gap. A window open across a gap closes N calls
 %       after it opened, whatever the elapsed time.
 %   If the host ever delivers rows it does not apply (validity false while
 %   the receiver still reports), the "invalid update" rule below applies.

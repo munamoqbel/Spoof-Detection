@@ -274,9 +274,13 @@ info.numMeasClamped = kfMeas.numMeasClamped;
 info.armed          = sys.armed;
 % protective-reset arbitration: while the gate holds GNSS off (COAST,
 % PROBATION) or alarms this epoch, a GNSS-vs-INS discrepancy is its finding
-% and the host must not reset on it; the coast budget bounds the hold
+% and the host must not reset on it; the coast budget bounds the hold:
+% once the coast's own position uncertainty (K_MD * sigma_C, the PL of an
+% INS-only solution) exceeds ARM_PL_MAX the gate could no longer certify a
+% re-validation, so the host may reset. Grows with Phi/Q, not with time.
 info.resetInhibit        = (sys.mode ~= CST_spfMode.NOMINAL) || info.ssAlarm || info.cpiAlarm;
-info.coastBudgetExceeded = (sys.coastCount > double(CST_spfParam.COAST_BUDGET_EPOCHS));
+info.coastBudgetExceeded = (CST_spfParam.K_MISSED_DETECTION * max(sigmaPosition) ...
+    > CST_spfParam.ARM_PL_MAX);         % coast too uncertain to re-validate: host may reset
 
 spoofTel = STRUCT_SPF.setTel(info, kfCommand, nav);
 

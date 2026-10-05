@@ -8,8 +8,8 @@
 % 02/09/2026); older anchor -> fallback refused + anchorMissing.
 % NOTE: the anchor is refreshed on every alarm-free clean close, so at a
 % latch it is normally 1 epoch old; this guard only bites for the startup
-% anchor (initial state) before the first clean close. The real coasting
-% budget (max coast time, Implementation Guide rule 4) is not yet enforced.
+% anchor (initial state) before the first clean close. The coasting budget
+% (Implementation Guide rule 4) is the PL-based coastBudgetExceeded below.
 % - ARM_EPOCHS / ARM_PL_MAX (warm-up):
 % After a (re)initialisation the host filter is not converged (initial P,
 % few rows, interval matrices just reset) and its increments do not match
@@ -24,13 +24,18 @@
 % info.armed reports the state. The host runs ARM_EPOCHS = 120 (60 s): its
 % bias convergence after a protective reset takes that long; 10 is the
 % value the simulation references were built with.
-% - COAST_BUDGET_EPOCHS (coast-time budget, Implementation Guide rule 4):
+% - Coast budget (Implementation Guide rule 4, on the PL, not on time):
 % While the gate is in COAST or PROBATION, or alarms this epoch, the host
 % must NOT apply its protective reset (info.resetInhibit): a large
 % GNSS-vs-INS discrepancy is then the gate's finding, not a lost INS. The
-% budget bounds how long that can last: once coastEpochs exceeds it the
-% gate raises info.coastBudgetExceeded and the host may reset (integrity
-% not assured across that reset). The gate itself only reports.
+% budget bounds how long that can last: once the coast's own position
+% uncertainty K_MISSED_DETECTION * sigma_C (P_C propagated with Phi, Q,
+% never updated) exceeds ARM_PL_MAX, the same limit that qualifies a
+% filter for arming, the gate could no longer certify a re-validation and
+% raises info.coastBudgetExceeded: the host may reset (integrity not
+% assured across that reset). The gate itself only reports. The budget
+% therefore depends on the IMU through Q, not on a fixed time, and needs
+% an honest Q (sigma_C must track the true INS drift).
 % - REVAL_MIN_MEAS:
 % Minimum valid rows for a re-validation pass. The host's measurement
 % vector always carries the pressure-altitude row, so numMeas >= 1 even in
@@ -60,9 +65,6 @@ classdef CST_spfParam
         K_FALSE_ALERT = 5.233126417847868;                % SS gate
         K_MISSED_DETECTION = 4.753424308817088;           % PL term
         MONITORED_AXES = [1 2 3];                         % NED position state indices
-        COAST_BUDGET_EPOCHS = uint32(240);                % 120 s of COAST + PROBATION: beyond it
-                                                          % info.coastBudgetExceeded is raised and the
-                                                          % host may apply its protective reset
         REVAL_THRESHOLD = 39.252354790768472;     % chi-square gate, m = 16 (kept for reference)
         REVAL_THRESHOLD_TABLE = [ ...                 % chi2inv(1 - 1e-3, m), m = 1..60 (>= MAX_MEAS)
             10.82756617066, 13.81551055796, 16.26623619624, 18.46682695290, ...

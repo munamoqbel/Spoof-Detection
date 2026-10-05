@@ -72,8 +72,9 @@ plot(t, spfLog.cpiRatio(1:n, :)); hold on; yline(1, 'r--'); grid on;
 ylabel('CPI q/T_N'); title('CPI margin of windows closed this epoch (alarm > 1)');
 subplot(5,1,3);
 semilogy(t, max(spfLog.pl(1:n), 1e-2), 'k', 'LineWidth', 1.2); hold on;
-semilogy(t, max(spfLog.sigmaPos(1:n, :), 1e-2)); grid on;
-ylabel('[m]'); legend('PL', '\sigma_N', '\sigma_E', '\sigma_D', 'Location', 'northwest');
+semilogy(t, max(spfLog.sigmaPos(1:n, :), 1e-2));
+yline(CST_spfParam.ARM_PL_MAX / CST_spfParam.K_MISSED_DETECTION, 'r--'); grid on;
+ylabel('[m]'); legend('PL', '\sigma_N', '\sigma_E', '\sigma_D', 'arm / coast-budget \sigma limit', 'Location', 'northwest');
 title('max protection level and host position sigma sqrt(P+) (compare sigma with the true drift after a coast)');
 subplot(5,1,4);
 semilogy(t, max(spfLog.nis(1:n), 1e-3), 'k'); hold on; yline(1, 'r--'); grid on;
@@ -96,8 +97,9 @@ stairs(t, spfLog.dwell(1:n), 'b'); hold on; yline(double(CST_spfParam.REVAL_DWEL
 ylabel('dwell'); title('consecutive re-validation passes');
 subplot(3,1,3);
 plot(t, spfLog.coastEpochs(1:n) / fs, 'k'); hold on;
-yline(double(CST_spfParam.COAST_BUDGET_EPOCHS) / fs, 'r--'); grid on;
-ylabel('coast time [s]'); xlabel('t [s]'); title('time in COAST + PROBATION (dashed: coast budget, host may reset beyond it)');
+out = spfLog.budgetOut(1:n);
+plot(t(out), spfLog.coastEpochs(out) / fs, 'r.'); grid on;
+ylabel('coast time [s]'); xlabel('t [s]'); title('time in COAST + PROBATION (red: coast PL above ARM_PL_MAX, host may reset)');
 
 %% 4. faults
 figure('Name', 'SPF gate: faults');

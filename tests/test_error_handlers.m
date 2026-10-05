@@ -13,6 +13,9 @@
 %      the first ARM_EPOCHS qualifying epochs, arm afterwards, and a gross
 %      spoof once armed latches onto an anchor stamped with a real epoch
 %      (eventAnchorEpoch >= 1, never the 'none' sentinel 0).
+%   6. coast budget: coastBudgetExceeded is false before the latch and
+%      in COAST exactly until K_MD * max(sigma_C) passes ARM_PL_MAX, where
+%      sigma_C is the coast covariance the gate reports in nav.sigmaPosition.
 % Run from the repo root (MATLAB, or Octave with tools/octave_shim).
 
 n    = CST_gnssHybrid.NO_STATES;
@@ -185,7 +188,37 @@ fprintf('  dropout at epoch 5 -> armed at %d (expect %d) | PL outside at epoch 5
     armAtPause, nArm + 1, armAtRestart, nArm + 5, pf(ok5c));
 ok5 = ok5a && ok5b && ok5c;
 
-if ok1 && ok2 && ok3 && ok4 && ok5
+%% 6. coast budget on the coast PL
+fprintf('Coast budget (K_MD * sigma_C vs ARM_PL_MAX) ...\n');
+kMd = CST_spfParam.K_MISSED_DETECTION; plMax = CST_spfParam.ARM_PL_MAX;
+propTelBig = STRUCT_SPF.setPropTel(Phi, 1e3 * Q);               % fast-growing coast covariance
+kf_x = zeros(n, 1); kf_P = P0; latched = false; budgetBefore = false;
+flipEpoch = -1; firstOutside = -1; modeAtFlip = CST_spfMode.NOMINAL; consistent = true;
+for k = 1:(nArm + 200)
+    z = z_all(:, k); if k >= kSpoof, z = z + 50.0; end            % spoof keeps re-validation failing
+    if latched, pt = propTelBig; else, pt = propTel; end
+    [kf_x, kf_P, y, ~, ~, xp, xpP] = kalman_update_step(kf_x, kf_P, z, H_all(:, :, k), pt, V);
+    kfMeas = STRUCT_SPF.kfMeasFromUpdate(y, H_all(:, :, k), V, mm, xp, xpP, kf_x, kf_P);
+    tel = SPF_gate(kfMeas, pt, true, k == 1);
+    latched = latched || tel.info.eventLatched;
+    outside = (kMd * max(tel.nav.sigmaPosition) > plMax);
+    if ~latched
+        budgetBefore = budgetBefore || tel.info.coastBudgetExceeded;
+    else
+        consistent = consistent && (tel.info.coastBudgetExceeded == outside);   % flag IS the PL test
+        if outside && (firstOutside < 0), firstOutside = k; end
+        if tel.info.coastBudgetExceeded && (flipEpoch < 0)
+            flipEpoch = k; modeAtFlip = tel.info.mode;
+        end
+    end
+    if (flipEpoch > 0) && (k >= flipEpoch + 3), break; end
+end
+ok6 = latched && ~budgetBefore && (flipEpoch > 0) && (flipEpoch == firstOutside) ...
+    && (modeAtFlip ~= CST_spfMode.NOMINAL) && consistent;
+fprintf('  before latch: budget flag %d (expect 0) | in COAST: flag raised at epoch %d, PL passed %.0f m at epoch %d, mode %d, flag == PL test on every epoch %d -> %s\n\n', ...
+    budgetBefore, flipEpoch, plMax, firstOutside, modeAtFlip, consistent, pf(ok6));
+
+if ok1 && ok2 && ok3 && ok4 && ok5 && ok6
     fprintf('=== test_error_handlers PASS ===\n');
 else
     fprintf('=== test_error_handlers FAIL ===\n');

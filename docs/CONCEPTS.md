@@ -176,7 +176,8 @@ action), constants `CST_spfParam.m` lines 71 to 73, telemetry `info.armed`.
   GNSS held off.
 - Wiring rule: the reset check runs after the gate on the same epoch and is
   skipped while `info.resetInhibit` is true (gate in COAST or PROBATION, or
-  alarming this epoch). `COAST_BUDGET_EPOCHS` bounds the hold: beyond it
+  alarming this epoch). The coast PL bounds the hold: once
+  `K_MD * sigma_C` of the coast covariance exceeds `ARM_PL_MAX`,
   `info.coastBudgetExceeded` is raised and the host may reset, with
   integrity not assured across that reset. See `docs/HOST_2HZ_WIRING.m`
   step 6.

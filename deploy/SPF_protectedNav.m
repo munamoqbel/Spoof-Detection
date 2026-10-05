@@ -221,7 +221,8 @@ info.numMeasClamped = kfMeas.numMeasClamped;
 info.armed          = sys.armed;
 % protective-reset arbitration: the host must not reset while the gate holds GNSS off or alarms
 info.resetInhibit        = (sys.mode ~= CST_spfMode.NOMINAL) || info.ssAlarm || info.cpiAlarm;
-info.coastBudgetExceeded = (sys.coastCount > double(CST_spfParam.COAST_BUDGET_EPOCHS));
+info.coastBudgetExceeded = (CST_spfParam.K_MISSED_DETECTION * max(sigmaPosition) ...
+    > CST_spfParam.ARM_PL_MAX);         % coast too uncertain to re-validate: host may reset
 
 spoofTel = STRUCT_SPF.setTel(info, kfCommand, nav);
 

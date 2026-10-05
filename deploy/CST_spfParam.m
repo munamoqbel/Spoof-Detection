@@ -12,6 +12,7 @@ classdef CST_spfParam
         K_FALSE_ALERT = 5.233126417847868;                % SS gate
         K_MISSED_DETECTION = 4.753424308817088;           % PL term
         MONITORED_AXES = [1 2 3];                         % NED position state indices
+        COAST_BUDGET_EPOCHS = uint32(1200);               % time belt behind the PL coast budget
         REVAL_THRESHOLD = 39.252354790768472;             % chi-square gate, m = 16 (reference)
         REVAL_THRESHOLD_TABLE = [ ...                     % chi2inv(1 - 1e-3, m), m = 1..60
             10.82756617066, 13.81551055796, 16.26623619624, 18.46682695290, ...

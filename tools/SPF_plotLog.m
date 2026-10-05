@@ -98,8 +98,9 @@ ylabel('dwell'); title('consecutive re-validation passes');
 subplot(3,1,3);
 plot(t, spfLog.coastEpochs(1:n) / fs, 'k'); hold on;
 out = spfLog.budgetOut(1:n);
-plot(t(out), spfLog.coastEpochs(out) / fs, 'r.'); grid on;
-ylabel('coast time [s]'); xlabel('t [s]'); title('time in COAST + PROBATION (red: coast PL above ARM_PL_MAX, host may reset)');
+plot(t(out), spfLog.coastEpochs(out) / fs, 'r.');
+yline(double(CST_spfParam.COAST_BUDGET_EPOCHS) / fs, 'r--'); grid on;
+ylabel('coast time [s]'); xlabel('t [s]'); title('time in COAST + PROBATION (red: budget exceeded, coast PL above ARM_PL_MAX; dashed: time belt)');
 
 %% 4. faults
 figure('Name', 'SPF gate: faults');

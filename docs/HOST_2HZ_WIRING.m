@@ -195,8 +195,9 @@
 %     % gate in COAST / PROBATION or alarming this epoch: skip the reset check
 % else
 %     % your reset check as today; coastBudgetExceeded means the coast's
-%     % own PL (K_MD * sigma_C) has grown past ARM_PL_MAX, so the gate
-%     % could not certify a re-validation anyway: reset if the
+%     % own PL (K_MD * sigma_C) has grown past ARM_PL_MAX (or the hold has
+%     % lasted COAST_BUDGET_EPOCHS), so the gate could not certify a
+%     % re-validation anyway: reset if the
 %     % discrepancy demands it, integrity is not assured across that reset
 % end
 % %  Limitation: during the warm-up (info.armed = false) the gate cannot
@@ -263,7 +264,8 @@
 %     - every gate counter (window length, dwell, probation, warm-up,
 %       coastEpochs) counts CALLS, not seconds. An outage does not
 %       advance them. The coast budget is on the coast covariance
-%       (propagated with Phi, Q), so it does grow across a gap. A window open across a gap closes N calls
+%       (propagated with Phi, Q), so it does grow across a gap; its
+%       time belt (COAST_BUDGET_EPOCHS) counts calls like the rest. A window open across a gap closes N calls
 %       after it opened, whatever the elapsed time.
 %   If the host ever delivers rows it does not apply (validity false while
 %   the receiver still reports), the "invalid update" rule below applies.

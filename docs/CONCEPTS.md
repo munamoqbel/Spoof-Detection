@@ -179,7 +179,8 @@ action), constants `CST_spfParam.m` lines 71 to 73, telemetry `info.armed`.
   alarming this epoch). The coast PL bounds the hold: once
   `K_MD * sigma_C` of the coast covariance exceeds `ARM_PL_MAX`,
   `info.coastBudgetExceeded` is raised and the host may reset, with
-  integrity not assured across that reset. See `docs/HOST_2HZ_WIRING.m`
+  integrity not assured across that reset. `COAST_BUDGET_EPOCHS` (600 s)
+  is the time belt behind it for a Q too small to let `sigma_C` grow. See `docs/HOST_2HZ_WIRING.m`
   step 6.
 - Limitation: during the warm-up the gate cannot alarm, so a step spoof in
   that first minute after a start or reset still goes through the reset.

@@ -35,7 +35,11 @@
 % raises info.coastBudgetExceeded: the host may reset (integrity not
 % assured across that reset). The gate itself only reports. The budget
 % therefore depends on the IMU through Q, not on a fixed time, and needs
-% an honest Q (sigma_C must track the true INS drift).
+% an honest Q (sigma_C must track the true INS drift). COAST_BUDGET_EPOCHS
+% is the belt behind it for the one case the PL test cannot see, a Q too
+% small: after that many COAST + PROBATION epochs the flag is raised
+% whatever sigma_C says. It is set long (600 s) so that it never cuts a
+% spoof the PL budget would still cover.
 % - REVAL_MIN_MEAS:
 % Minimum valid rows for a re-validation pass. The host's measurement
 % vector always carries the pressure-altitude row, so numMeas >= 1 even in
@@ -65,6 +69,9 @@ classdef CST_spfParam
         K_FALSE_ALERT = 5.233126417847868;                % SS gate
         K_MISSED_DETECTION = 4.753424308817088;           % PL term
         MONITORED_AXES = [1 2 3];                         % NED position state indices
+        COAST_BUDGET_EPOCHS = uint32(1200);               % time belt behind the PL budget: 600 s of
+                                                          % COAST + PROBATION raises coastBudgetExceeded
+                                                          % even if sigma_C never reaches the limit
         REVAL_THRESHOLD = 39.252354790768472;     % chi-square gate, m = 16 (kept for reference)
         REVAL_THRESHOLD_TABLE = [ ...                 % chi2inv(1 - 1e-3, m), m = 1..60 (>= MAX_MEAS)
             10.82756617066, 13.81551055796, 16.26623619624, 18.46682695290, ...

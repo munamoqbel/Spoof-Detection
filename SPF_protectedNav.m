@@ -278,9 +278,12 @@ info.armed          = sys.armed;
 % once the coast's own position uncertainty (K_MD * sigma_C, the PL of an
 % INS-only solution) exceeds ARM_PL_MAX the gate could no longer certify a
 % re-validation, so the host may reset. Grows with Phi/Q, not with time.
+% COAST_BUDGET_EPOCHS is the belt behind it: a Q too small keeps sigma_C
+% under the limit however long the hold, so a long time bound closes it.
 info.resetInhibit        = (sys.mode ~= CST_spfMode.NOMINAL) || info.ssAlarm || info.cpiAlarm;
 info.coastBudgetExceeded = (CST_spfParam.K_MISSED_DETECTION * max(sigmaPosition) ...
-    > CST_spfParam.ARM_PL_MAX);         % coast too uncertain to re-validate: host may reset
+    > CST_spfParam.ARM_PL_MAX) ...      % coast too uncertain to re-validate: host may reset
+    || (sys.coastCount > double(CST_spfParam.COAST_BUDGET_EPOCHS));   % time belt (Q too small)
 
 spoofTel = STRUCT_SPF.setTel(info, kfCommand, nav);
 

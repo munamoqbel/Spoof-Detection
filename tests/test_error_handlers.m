@@ -15,7 +15,9 @@
 %      (eventAnchorEpoch >= 1, never the 'none' sentinel 0).
 %   6. coast budget: coastBudgetExceeded is false before the latch and
 %      in COAST exactly until K_MD * max(sigma_C) passes ARM_PL_MAX, where
-%      sigma_C is the coast covariance the gate reports in nav.sigmaPosition.
+%      sigma_C is the coast covariance the gate reports in nav.sigmaPosition;
+%      with a Q too small to grow sigma_C, the COAST_BUDGET_EPOCHS time belt
+%      raises it instead, exactly one epoch past the belt.
 % Run from the repo root (MATLAB, or Octave with tools/octave_shim).
 
 n    = CST_gnssHybrid.NO_STATES;
@@ -213,10 +215,36 @@ for k = 1:(nArm + 200)
     end
     if (flipEpoch > 0) && (k >= flipEpoch + 3), break; end
 end
-ok6 = latched && ~budgetBefore && (flipEpoch > 0) && (flipEpoch == firstOutside) ...
+ok6a = latched && ~budgetBefore && (flipEpoch > 0) && (flipEpoch == firstOutside) ...
     && (modeAtFlip ~= CST_spfMode.NOMINAL) && consistent;
 fprintf('  before latch: budget flag %d (expect 0) | in COAST: flag raised at epoch %d, PL passed %.0f m at epoch %d, mode %d, flag == PL test on every epoch %d -> %s\n\n', ...
-    budgetBefore, flipEpoch, plMax, firstOutside, modeAtFlip, consistent, pf(ok6));
+    budgetBefore, flipEpoch, plMax, firstOutside, modeAtFlip, consistent, pf(ok6a));
+% 6b. time belt: a Q too small never lets sigma_C reach the limit; the flag
+%     must then rise exactly when coastEpochs passes COAST_BUDGET_EPOCHS
+belt = double(CST_spfParam.COAST_BUDGET_EPOCHS);
+propTelTight = STRUCT_SPF.setPropTel(Phi, 1e-6 * Q);           % coast covariance barely grows
+nz = size(z_all, 2);
+kf_x = zeros(n, 1); kf_P = P0; latched = false; plOutside = false; beltFlip = -1; beltCoast = -1; stayedOff = true;
+for k = 1:(nArm + belt + 20)
+    kc = mod(k - 1, nz) + 1;
+    z = z_all(:, kc); if k >= kSpoof, z = z + 50.0; end
+    if latched, pt = propTelTight; else, pt = propTel; end
+    [kf_x, kf_P, y, ~, ~, xp, xpP] = kalman_update_step(kf_x, kf_P, z, H_all(:, :, kc), pt, V);
+    kfMeas = STRUCT_SPF.kfMeasFromUpdate(y, H_all(:, :, kc), V, mm, xp, xpP, kf_x, kf_P);
+    tel = SPF_gate(kfMeas, pt, true, k == 1);
+    latched = latched || tel.info.eventLatched;
+    plOutside = plOutside || (kMd * max(tel.nav.sigmaPosition) > plMax);
+    if tel.info.coastBudgetExceeded && (beltFlip < 0)
+        beltFlip = k; beltCoast = double(tel.info.coastEpochs);
+    elseif (beltFlip < 0)
+        stayedOff = stayedOff && ~tel.info.coastBudgetExceeded;
+    end
+    if (beltFlip > 0) && (k >= beltFlip + 3), break; end
+end
+ok6b = latched && ~plOutside && stayedOff && (beltFlip > 0) && (beltCoast == belt + 1);
+fprintf('  tight Q: PL never outside %d | flag raised at epoch %d with coastEpochs = %d (expect %d) -> %s\n\n', ...
+    ~plOutside, beltFlip, beltCoast, belt + 1, pf(ok6b));
+ok6 = ok6a && ok6b;
 
 if ok1 && ok2 && ok3 && ok4 && ok5 && ok6
     fprintf('=== test_error_handlers PASS ===\n');

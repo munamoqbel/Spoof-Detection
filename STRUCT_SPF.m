@@ -389,7 +389,7 @@ classdef STRUCT_SPF
                 'cpiRatio',              cpiRatio, ...   % [1x3] CPI margin: q/T_N of windows closed this epoch (alarm > 1)
                 'armed',                 logical(armed), ...       % monitors active (false during the warm-up after init)
                 'resetInhibit',          logical(resetInhibit), ... % host must not apply its protective reset this epoch
-                'coastBudgetExceeded',   logical(coastBudgetExceeded)); % coast PL (K_MD * sigma_C) above ARM_PL_MAX: host may reset
+                'coastBudgetExceeded',   logical(coastBudgetExceeded)); % coast PL (K_MD * sigma_C) above ARM_PL_MAX, or COAST_BUDGET_EPOCHS passed: host may reset
         end
 
         function [info] = zeroInfo

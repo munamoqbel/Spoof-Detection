@@ -20,7 +20,10 @@ function [res] = runCompare(runA, runB, tOut, tReacq, aidedWin)
 %                       spread evenly over the nav time span (valid when the
 %                       2 Hz function logged one record per call)
 %     tTrue    [M x 1]  truth time (s), may be a denser or offset time base
-%     truePos  [M x 3]  truth [lat lon h],   trueVel [M x 3], trueAtt [M x 3]
+%     truePos  [M x 3]  truth [lat lon h],   trueAtt [M x 3] [roll pitch yaw]
+%     trueVel  [M x 3]  truth NED velocity, optional: omitted, empty, or not
+%                       matching d(truePos)/dt (another frame, e.g. ECEF) it
+%                       is replaced by the velocity differenced from truePos
 %     biasTrue [1 x 6]  simulated IMU biases (or [M x 6] if they vary)
 %     pDiag    optional sigma source: [N x 22] diagonal of P per nav sample,
 %                       or [K x 22] per 2 Hz epoch, or a cell {K x 1} holding
@@ -35,7 +38,9 @@ function [res] = runCompare(runA, runB, tOut, tReacq, aidedWin)
 %
 %   What it prints, per run
 %     0. truth lag: the shift of the truth time base that minimises the
-%        aided horizontal position error (the call-time sampling artefact)
+%        aided horizontal position error (the call-time sampling artefact);
+%        then two truth self-checks: trueVel against d(truePos)/dt, and the
+%        yaw of nav and truth against the truth course over ground
 %     1. aided accuracy: RMS position and velocity error, bias error
 %     2. state error at tOut: velocity, tilt, bias, with sigma from pDiag
 %     3. outage trace fit: err = a + b x + c x^2 + d x^3 per NED axis, x from
@@ -125,10 +130,38 @@ if abs(tau) >= 1.49
     fprintf('   WARNING: lag at the edge of the scan, extend tauGrid or check the time bases\n');
 end
 
+%% truth self-checks: velocity frame, yaw convention
+tq     = t + tau;
+velPos = velFromPos(r.tTrue, r.truePos);                      % NED velocity differenced from the truth position
+velSource = 'position';
+if isfield(r, 'trueVel') && ~isempty(r.trueVel)
+    dVel = interpRows(r.tTrue, r.trueVel, tq) - interpRows(r.tTrue, velPos, tq);
+    okV  = inAided & all(isfinite(dVel), 2);
+    velMismatch = sqrt(mean(sum(dVel(okV, :).^2, 2)));
+    if velMismatch < 1
+        velSource = 'logged';
+        fprintf('   trueVel agrees with d(truePos)/dt to %.3f m/s rms over the aided windows\n', velMismatch);
+    else
+        fprintf('   WARNING: trueVel differs from d(truePos)/dt by %.2f m/s rms over the aided windows (another frame or\n', velMismatch);
+        fprintf('            unit?); the velocity differenced from truePos is used instead\n');
+    end
+end
+if strcmp(velSource, 'logged'), trueVel = r.trueVel; else, trueVel = velPos; end
+vq  = interpRows(r.tTrue, velPos, tq);
+mov = inAided & all(isfinite(vq), 2) & hypot(vq(:, 1), vq(:, 2)) > 3;    % moving samples: yaw ~ course over ground
+if any(mov)
+    cog = atan2(vq(mov, 2), vq(mov, 1));
+    yawNav = atan2(sin(r.navAtt(mov, 3) - cog), cos(r.navAtt(mov, 3) - cog));
+    at = interpRows(r.tTrue, r.trueAtt, tq);
+    yawTru = atan2(sin(at(mov, 3) - cog), cos(at(mov, 3) - cog));
+    fprintf('   yaw minus truth course over ground, %d moving aided samples: nav %+.1f mrad rms, trueAtt %+.1f mrad rms\n', ...
+        nnz(mov), sqrt(mean(yawNav.^2)) * 1e3, sqrt(mean(yawTru.^2)) * 1e3);
+    fprintf('   (both small: attitude conventions agree; only trueAtt large: its yaw is not the ZYX NED yaw the tool assumes)\n');
+end
+
 %% error traces with the lag applied
-tq      = t + tau;
 posErr  = posErrNed(r, tq, true(N, 1));
-velErr  = r.navVel - interpRows(r.tTrue, r.trueVel, tq);
+velErr  = r.navVel - interpRows(r.tTrue, trueVel, tq);
 attTrue = interpRows(r.tTrue, r.trueAtt, tq);
 attErr  = r.navAtt - attTrue;
 attErr(:, 3) = atan2(sin(attErr(:, 3)), cos(attErr(:, 3)));
@@ -144,8 +177,11 @@ ok = inAided & all(isfinite(posErr), 2) & all(isfinite(velErr), 2);
 rmsPos = sqrt(mean(posErr(ok, :).^2, 1));
 rmsVel = sqrt(mean(velErr(ok, :).^2, 1));
 meanPos = mean(posErr(ok, :), 1);
+okA = ok & all(isfinite(attErr), 2);
+rmsAtt = sqrt(mean(attErr(okA, :).^2, 1));
 fprintf('1. aided windows: pos rms N %.2f E %.2f D %.2f m (mean N %.2f E %.2f D %.2f), vel rms N %.3f E %.3f D %.3f m/s\n', ...
     rmsPos, meanPos, rmsVel);
+fprintf('   att rms roll %.2f pitch %.2f yaw %.2f mrad\n', rmsAtt * 1e3);
 lastWin = inAided & t <= tOut & t >= tOut - 60;
 if any(lastWin)
     bm = mean(biasErr(lastWin, :), 1);
@@ -212,7 +248,7 @@ bt = r.biasTrue(1, 1:3);
 fprintf('   scale: true accel bias uncompensated over T = %.0f m, applied with the wrong sign = %.0f m\n', ...
     0.5 * norm(bt) * T^2, norm(bt) * T^2);
 
-o = struct('name', r.name, 'tau', tau, 'rmsPos', rmsPos, 'rmsVel', rmsVel, 'tOut', t(iOut), 'T', T, ...
+o = struct('name', r.name, 'tau', tau, 'velSource', velSource, 'rmsPos', rmsPos, 'rmsVel', rmsVel, 'rmsAtt', rmsAtt, 'tOut', t(iOut), 'T', T, ...
     'posErrOut', posErr(iOut, :), 'dv', dv, 'attErr', attErr(iOut, :)', 'psi', psi, 'db', db, 'sig', sig, ...
     'drift', drift, 'coef', coef, 'velTerm', velTerm, 'biasTerm', biasTerm, 'tiltTerm', tiltTerm, ...
     'gyroTerm', gyroTerm, 'posErrTrace', posErr, 'velErrTrace', velErr, 'attErrTrace', attErr, 'biasErrTrace', biasErr, 't', t);
@@ -263,6 +299,21 @@ RE = a ./ sqrt(1 - e2 * sin(L).^2);
 e = [(navPos(:, 1) - tp(:, 1)) .* (RN + h), ...
      (navPos(:, 2) - tp(:, 2)) .* (RE + h) .* cos(L), ...
     -(navPos(:, 3) - tp(:, 3))];
+end
+
+function [v] = velFromPos(tt, pos)
+% NED velocity by central differences of truth [lat lon h] (one-sided at the ends)
+tt = tt(:);
+M  = numel(tt);
+i0 = [1, 1:M-1];  i1 = [2:M, M];
+dt = tt(i1) - tt(i0);
+L  = pos(:, 1);  h = pos(:, 3);
+a  = 6378137;  e2 = 6.69437999014e-3;
+RN = a * (1 - e2) ./ (1 - e2 * sin(L).^2).^1.5;
+RE = a ./ sqrt(1 - e2 * sin(L).^2);
+v = [(pos(i1, 1) - pos(i0, 1)) ./ dt .* (RN + h), ...
+     (pos(i1, 2) - pos(i0, 2)) ./ dt .* (RE + h) .* cos(L), ...
+    -(pos(i1, 3) - pos(i0, 3)) ./ dt];
 end
 
 function [y] = interpRows(tt, Y, tq, method)

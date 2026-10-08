@@ -96,8 +96,12 @@ gives the aided accuracy against the truth, the velocity, tilt and bias error
 at the last aided epoch with their sigmas, fits the outage error trace as
 a + b t + c t^2 + d t^3 to separate velocity, bias/tilt and gyro drift, and
 predicts the drift from the state errors. With two runs it prints their
-difference at the outage start in sigmas. The header lists the arrays each
-run struct must hold (nav, truth, bias estimates, optional P diagonal).
+difference at the outage start in sigmas. Two truth self-checks guard the
+inputs: the truth velocity is compared with the differenced truth position
+(and replaced by it when it is in another frame or missing), and the yaw of
+nav and truth is compared with the truth course over ground. The header lists
+the arrays each run struct must hold (nav, truth, bias estimates, optional P
+diagonal).
 
 ## Printable copies
 

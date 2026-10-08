@@ -90,6 +90,15 @@ compares h(x) with H, tests the innovation and the prior against the truth,
 splits the update by row type, and traces the prior back through the
 attitude residual. The header lists the variables each capture must hold.
 
+`tools/runCompare.m` decomposes an INS-only outage drift from the logs of one
+or two full runs, with nothing re-run: it estimates the truth time-tag lag,
+gives the aided accuracy against the truth, the velocity, tilt and bias error
+at the last aided epoch with their sigmas, fits the outage error trace as
+a + b t + c t^2 + d t^3 to separate velocity, bias/tilt and gyro drift, and
+predicts the drift from the state errors. With two runs it prints their
+difference at the outage start in sigmas. The header lists the arrays each
+run struct must hold (nav, truth, bias estimates, optional P diagonal).
+
 ## Printable copies
 
 `docs/pdf/` holds PDF renderings of this README, `docs/HOST_DECISIONS.md`,

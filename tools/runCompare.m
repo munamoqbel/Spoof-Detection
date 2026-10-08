@@ -56,6 +56,11 @@ if ~isempty(runB), runs{end+1} = runB; end
 res = struct();
 for k = 1:numel(runs)
     r = runs{k};
+    if ~isstruct(r) || numel(r) ~= 1
+        error('runCompare:runStruct', ['run %d must be a single struct; it is a %d x %d %s. A cell (pDiag) passed ' ...
+            'to struct() makes a struct array: assign the fields one by one, or write struct(..., ''pDiag'', {pCell})'], ...
+            k, size(r, 1), size(r, 2), class(r));
+    end
     if ~isfield(r, 'name') || isempty(r.name), r.name = sprintf('run %d', k); end
     fprintf('\n==================== %s ====================\n', r.name);
     res.(sprintf('run%d', k)) = analyseRun(r, tOut, tReacq, aidedWin, G);

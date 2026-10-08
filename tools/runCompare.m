@@ -183,12 +183,13 @@ fprintf('3. outage drift observed: N %+8.2f E %+8.2f D %+8.2f m\n', drift);
 fprintf('   fit err = a + b x + c x^2 + d x^3 over %d samples, contributions at T = %.0f s:\n', nnz(sel), T);
 fprintf('   axis      b T (vel)    c T^2 (bias/tilt)    d T^3 (gyro)    fit rms   b [m/s]\n');
 coef = zeros(3, 4);
+axName = 'NED';
 for ax = 1:3
     p = polyfit(x, posErr(sel, ax), 3);              % [d c b a]
     coef(ax, :) = p;
     fitRms = sqrt(mean((polyval(p, x) - posErr(sel, ax)).^2));
     fprintf('   %s     %+9.2f     %+9.2f            %+9.2f       %6.2f    %+.3f\n', ...
-        'NED'(ax), p(3) * T, p(2) * T^2, p(1) * T^3, fitRms, p(3));
+        axName(ax), p(3) * T, p(2) * T^2, p(1) * T^3, fitRms, p(3));
 end
 fprintf('   (b should agree with the vel err of section 2; a large gap means the lag or the logged solution is wrong)\n');
 
@@ -235,6 +236,15 @@ for i = 1:12
     end
 end
 fprintf('   drift observed   %s: N %+7.2f E %+7.2f | %s: N %+7.2f E %+7.2f\n', nameA, a.drift(1:2), nameB, b.drift(1:2));
+fprintf('   drift difference %s minus %s, predicted from the state differences (truth offsets cancel):\n', nameB, nameA);
+fprintf('                           N         E\n');
+fprintf('   velocity         %+8.2f  %+8.2f\n', b.velTerm(1:2) - a.velTerm(1:2));
+fprintf('   accel bias       %+8.2f  %+8.2f\n', b.biasTerm(1:2) - a.biasTerm(1:2));
+fprintf('   tilt             %+8.2f  %+8.2f\n', b.tiltTerm(1:2) - a.tiltTerm(1:2));
+fprintf('   gyro bias        %+8.2f  %+8.2f\n', b.gyroTerm(1:2) - a.gyroTerm(1:2));
+fprintf('   sum              %+8.2f  %+8.2f\n', (b.velTerm(1:2) + b.biasTerm(1:2) + b.tiltTerm(1:2) + b.gyroTerm(1:2)) ...
+    - (a.velTerm(1:2) + a.biasTerm(1:2) + a.tiltTerm(1:2) + a.gyroTerm(1:2)));
+fprintf('   observed         %+8.2f  %+8.2f\n', b.drift(1:2) - a.drift(1:2));
 fprintf('   aided pos rms    %s: N %5.2f E %5.2f | %s: N %5.2f E %5.2f m\n', nameA, a.rmsPos(1:2), nameB, b.rmsPos(1:2));
 fprintf('   aided vel rms    %s: N %5.3f E %5.3f | %s: N %5.3f E %5.3f m/s\n', nameA, a.rmsVel(1:2), nameB, b.rmsVel(1:2));
 fprintf('   A difference of a few sigmas or less on every row is two draws of the same filter; many sigmas on the\n');

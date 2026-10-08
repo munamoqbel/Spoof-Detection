@@ -12,11 +12,16 @@ function [res] = runCompare(runA, runB, tOut, tReacq, aidedWin)
 %     biasEst  [N x 6]  IMU bias the mechanisation SUBTRACTS from the raw
 %                       IMU: accel (m/s^2) then gyro (rad/s), body axes.
 %                       With a split host this is the fed-back value plus
-%                       the bias state.
+%                       the bias state. May be [K x 6] on the 2 Hz epochs
+%                       tKf instead (held between updates).
+%     tKf      [K x 1]  2 Hz update epochs (s), needed when biasEst or
+%                       pDiag are logged per update rather than per nav sample
 %     tTrue    [M x 1]  truth time (s), may be a denser or offset time base
 %     truePos  [M x 3]  truth [lat lon h],   trueVel [M x 3], trueAtt [M x 3]
 %     biasTrue [1 x 6]  simulated IMU biases (or [M x 6] if they vary)
-%     pDiag    [N x 22] diagonal of P, optional (sigma of the state errors)
+%     pDiag    optional sigma source: [N x 22] diagonal of P per nav sample,
+%                       or [K x 22] per 2 Hz epoch, or a cell {K x 1} holding
+%                       per epoch either the 22 x 22 P or its diagonal
 %     name     char, optional
 %   tOut     last GNSS-aided epoch before the outage (s)
 %   tReacq   first GNSS epoch after the outage (s)
@@ -64,6 +69,23 @@ end
 function [o] = analyseRun(r, tOut, tReacq, aidedWin, G)
 t = r.t(:);
 N = numel(t);
+
+%% quantities logged per 2 Hz update: bias held between updates, P taken at the last update <= tOut
+P = [];
+if isfield(r, 'pDiag') && ~isempty(r.pDiag), P = pDiagMatrix(r.pDiag); end
+if isfield(r, 'tKf') && ~isempty(r.tKf)
+    tKf = r.tKf(:);
+    if size(r.biasEst, 1) == numel(tKf) && numel(tKf) ~= N
+        r.biasEst = interpRows(tKf, r.biasEst, t, 'previous');
+    end
+    if ~isempty(P) && size(P, 1) == numel(tKf)
+        iKf = find(tKf <= tOut, 1, 'last');
+        P = repmat(P(iKf, :), N, 1);
+    end
+end
+if size(r.biasEst, 1) ~= N
+    error('runCompare:bias', 'biasEst has %d rows; give it per nav sample (%d) or per 2 Hz epoch with tKf', size(r.biasEst, 1), N);
+end
 inAided = false(N, 1);
 for w = 1:size(aidedWin, 1)
     inAided = inAided | (t >= aidedWin(w, 1) & t <= aidedWin(w, 2));
@@ -125,8 +147,8 @@ Ctrue = dcmFromEuler(attTrue(iOut, :));
 dC  = Cnav * Ctrue';
 psi = [dC(2,3) - dC(3,2); dC(3,1) - dC(1,3); dC(1,2) - dC(2,1)] / 2;   % I - [psi x]
 sig = NaN(22, 1);
-if isfield(r, 'pDiag') && ~isempty(r.pDiag)
-    sig = sqrt(max(r.pDiag(iOut, :), 0))';
+if ~isempty(P) && size(P, 1) == N
+    sig = sqrt(max(P(iOut, :), 0))';
 end
 fprintf('2. state error at t = %.2f (truth lag applied), outage T = %.1f s to t = %.2f\n', t(iOut), T, t(iEnd));
 fprintf('   pos err   N %+8.2f E %+8.2f D %+8.2f m\n', posErr(iOut, :));
@@ -216,10 +238,22 @@ e = [(navPos(:, 1) - tp(:, 1)) .* (RN + h), ...
     -(navPos(:, 3) - tp(:, 3))];
 end
 
-function [y] = interpRows(tt, Y, tq)
+function [y] = interpRows(tt, Y, tq, method)
+if nargin < 4, method = 'linear'; end
 y = NaN(numel(tq), size(Y, 2));
 for c = 1:size(Y, 2)
-    y(:, c) = interp1(tt(:), Y(:, c), tq(:), 'linear', NaN);
+    y(:, c) = interp1(tt(:), Y(:, c), tq(:), method, NaN);
+end
+end
+
+function [P] = pDiagMatrix(p)
+% per-epoch P diagonal as a K x n matrix, from a matrix or a cell of P / diag(P)
+if ~iscell(p), P = p; return; end
+K = numel(p);
+P = NaN(K, numel(diag(p{1})));
+for k = 1:K
+    v = p{k};
+    if isvector(v), P(k, :) = v(:)'; else, P(k, :) = diag(v)'; end
 end
 end
 

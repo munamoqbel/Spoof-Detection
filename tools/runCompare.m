@@ -13,15 +13,19 @@ function [res] = runCompare(runA, runB, tOut, tReacq, aidedWin)
 %                       IMU: accel (m/s^2) then gyro (rad/s), body axes.
 %                       With a split host this is the fed-back value plus
 %                       the bias state. May be [K x 6] on the 2 Hz epochs
-%                       tKf instead (held between updates).
-%     tKf      [K x 1]  2 Hz update epochs (s), needed when biasEst or
-%                       pDiag are logged per update rather than per nav sample
+%                       tKf instead (held between updates), or a single row
+%                       [1 x 6] holding the value at tOut.
+%     tKf      [K x 1]  2 Hz update epochs (s), for biasEst or pDiag logged
+%                       per update. Optional: without it the K records are
+%                       spread evenly over the nav time span (valid when the
+%                       2 Hz function logged one record per call)
 %     tTrue    [M x 1]  truth time (s), may be a denser or offset time base
 %     truePos  [M x 3]  truth [lat lon h],   trueVel [M x 3], trueAtt [M x 3]
 %     biasTrue [1 x 6]  simulated IMU biases (or [M x 6] if they vary)
 %     pDiag    optional sigma source: [N x 22] diagonal of P per nav sample,
 %                       or [K x 22] per 2 Hz epoch, or a cell {K x 1} holding
-%                       per epoch either the 22 x 22 P or its diagonal
+%                       per epoch either the 22 x 22 P or its diagonal, or a
+%                       single 22 x 22 P (or its diagonal) taken at tOut
 %     name     char, optional
 %   tOut     last GNSS-aided epoch before the outage (s)
 %   tReacq   first GNSS epoch after the outage (s)
@@ -78,6 +82,14 @@ N = numel(t);
 %% quantities logged per 2 Hz update: bias held between updates, P taken at the last update <= tOut
 P = [];
 if isfield(r, 'pDiag') && ~isempty(r.pDiag), P = pDiagMatrix(r.pDiag); end
+if size(r.biasEst, 1) == 1, r.biasEst = repmat(r.biasEst, N, 1); end          % value at tOut only
+if size(P, 1) == 1, P = repmat(P, N, 1); end                                   % value at tOut only
+K = max(size(r.biasEst, 1) * (size(r.biasEst, 1) ~= N), size(P, 1) * (size(P, 1) ~= N));
+if K > 0 && (~isfield(r, 'tKf') || isempty(r.tKf))
+    r.tKf = t(1) + (t(end) - t(1)) * (0:K-1)' / (K - 1);
+    fprintf('   NOTE: tKf not given; %d 2 Hz records spread evenly over %.2f..%.2f s, %.3f s apart (expect 0.5)\n', ...
+        K, t(1), t(end), (t(end) - t(1)) / (K - 1));
+end
 if isfield(r, 'tKf') && ~isempty(r.tKf)
     tKf = r.tKf(:);
     if size(r.biasEst, 1) == numel(tKf) && numel(tKf) ~= N
@@ -252,8 +264,14 @@ end
 end
 
 function [P] = pDiagMatrix(p)
-% per-epoch P diagonal as a K x n matrix, from a matrix or a cell of P / diag(P)
-if ~iscell(p), P = p; return; end
+% per-epoch P diagonal as a K x n matrix, from a matrix, a cell of P / diag(P), or one P / diag(P)
+if ~iscell(p)
+    if size(p, 1) == size(p, 2) && size(p, 1) > 1, P = diag(p)';       % one full P at tOut
+    elseif isvector(p),                           P = p(:)';           % one diagonal at tOut
+    else,                                         P = p;               % K x n or N x n
+    end
+    return
+end
 K = numel(p);
 P = NaN(K, numel(diag(p{1})));
 for k = 1:K

@@ -21,7 +21,8 @@ function [res] = runCompare(runA, runB, tOut, tReacq, aidedWin)
 %   tOut     last GNSS-aided epoch before the outage (s)
 %   tReacq   first GNSS epoch after the outage (s)
 %   aidedWin [K x 2]  GNSS-aided windows [t1 t2] used for the truth-lag
-%            estimate and the aided-accuracy figures, e.g. [100 760; 900 1600]
+%            estimate and the aided-accuracy figures, e.g. [100 760; 900 1600].
+%            Optional: omitted or [], the 300 s before tOut are used.
 %
 %   What it prints, per run
 %     0. truth lag: the shift of the truth time base that minimises the
@@ -44,6 +45,7 @@ function [res] = runCompare(runA, runB, tOut, tReacq, aidedWin)
 %   MATLAB desktop tool, not codegen. Runs under Octave.
 
 G = 9.80665;
+if nargin < 5 || isempty(aidedWin), aidedWin = [tOut - 300, tOut]; end
 runs = {runA};
 if ~isempty(runB), runs{end+1} = runB; end
 res = struct();

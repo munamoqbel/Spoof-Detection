@@ -208,9 +208,9 @@ runP = runB;  runP.name = 'P transposed';  runP.pDiag = pDiagCat(runB.pDiag)';  
 resP = runCompare(runP, [], 100, 250, [10 95; 255 295]);
 runQ = runB;  runQ.name = 'Q pDiag count mismatch';  runQ.pDiag = [pDiagCat(runB.pDiag); ones(3, 22)];
 resQ = runCompare(runQ, [], 100, 250, [10 95; 255 295]);
-runR = runB;  runR.name = 'R misspelt pDig';  runR.pDig = runB.pDiag;  runR = rmfield(runR, 'pDiag');
+runR = runB;  runR.name = 'R short name pDig';  runR.pDig = runB.pDiag;  runR = rmfield(runR, 'pDiag');
 resR = runCompare(runR, [], 100, 250, [10 95; 255 295]);
-okP = abs(resP.run1.sig(4) - 0.05) < 1e-12 && ~any(isfinite(resQ.run1.sig)) && ~any(isfinite(resR.run1.sig));
+okP = abs(resP.run1.sig(4) - 0.05) < 1e-12 && ~any(isfinite(resQ.run1.sig)) && abs(resR.run1.sig(4) - 0.05) < 1e-12;   % pDig accepted
 if okP, fprintf('=== pDiag shape / mismatch / misspelt check PASS ===\n'); else, fprintf('=== pDiag shape / mismatch / misspelt check FAIL ===\n'); end
 okG = resG.run1.tau == resG.run1.tauP && abs(resG.run1.tauP - 0.5) < 0.011;
 if okG, fprintf('=== unusable attitude fallback check PASS ===\n'); else, fprintf('=== unusable attitude fallback check FAIL ===\n'); end

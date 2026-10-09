@@ -26,9 +26,10 @@ function [res] = runCompare(runA, runB, tOut, tReacq, aidedWin)
 %                       is replaced by the velocity differenced from truePos
 %     biasTrue [1 x 6]  simulated IMU biases (or [M x 6] if they vary)
 %     pDiag    optional sigma source: [N x 22] diagonal of P per nav sample,
-%                       or [K x 22] per 2 Hz epoch, or a cell {K x 1} holding
-%                       per epoch either the 22 x 22 P or its diagonal, or a
-%                       single 22 x 22 P (or its diagonal) taken at tOut
+%                       or [K x 22] per 2 Hz epoch (K = numel(tKf)), or a cell
+%                       {K x 1} holding per epoch either the 22 x 22 P or its
+%                       diagonal, or a single 22 x 22 P (or its diagonal) taken
+%                       at tOut. A field named pDig is accepted as pDiag.
 %     name     char, optional
 %   tOut     last GNSS-aided epoch before the outage (s)
 %   tReacq   first GNSS epoch after the outage (s)
@@ -97,6 +98,10 @@ for k = 1:numel(runs)
     end
     if ~isfield(r, 'name') || isempty(r.name), r.name = sprintf('run %d', k); end
     fprintf('\n==================== %s ====================\n', r.name);
+    if ~isfield(r, 'pDiag') && isfield(r, 'pDig')                                  % common short name
+        r.pDiag = r.pDig;  r = rmfield(r, 'pDig');
+        fprintf('   NOTE: field pDig used as pDiag\n');
+    end
     extra = setdiff(fieldnames(r), {'t', 'navPos', 'navVel', 'navAtt', 'biasEst', 'tKf', 'tTrue', 'truePos', 'trueVel', ...
         'trueAtt', 'biasTrue', 'pDiag', 'name'});
     if ~isempty(extra)

@@ -141,7 +141,7 @@ T = res.run1.T;
 expDriftA = dvA * T + 0.5 * accA * T^2 + jerkA * T^3 / 6;
 chk = struct();
 chk.truthShifts  = abs(res.run1.sV + 0.3) < 0.011 && abs(res.run1.sA - 0.3) < 0.011;                 % logged truth arrays shifted
-chk.lagsA        = abs(res.run1.tauP - 0.5) < 0.011 && abs(res.run1.tauV - 0.5) < 0.011 && abs(res.run1.tauA - 0.5) < 0.011 && res.run1.tau == res.run1.tauA;
+chk.lagsA        = abs(res.run1.tauP - 0.5) < 0.011 && abs(res.run1.tauV - 0.5) < 0.011 && abs(res.run1.tauA - 0.5) < 0.011 && abs(res.run1.tau - 0.5) < 0.011;
 chk.lagsB        = abs(res.run2.sV) < 0.011 && abs(res.run2.sA) < 0.011 && abs(res.run2.tau - 0.5) < 0.011 && abs(res.run2.tauP - 0.5) < 0.011;
 chk.navConsistent = abs(res.run1.sNV) < 0.011 && abs(res.run2.sNV) < 0.011 && abs(res.run1.kP) < 0.03 && abs(res.run1.kV) < 0.03;   % no latency
 chk.dvA          = all(abs(res.run1.dv' - dvA) < 0.02) && all(abs(res.run1.slope10' - dvA) < 0.08);
@@ -209,8 +209,11 @@ resP = runCompare(runP, [], 100, 250, [10 95; 255 295]);
 runQ = runB;  runQ.name = 'Q pDiag count mismatch';  runQ.pDiag = [pDiagCat(runB.pDiag); ones(3, 22)];
 resQ = runCompare(runQ, [], 100, 250, [10 95; 255 295]);
 runR = runB;  runR.name = 'R short name pDig';  runR.pDig = runB.pDiag;  runR = rmfield(runR, 'pDiag');
+runS = runB;  runS.name = 'S num2cell pDiag';  runS.pDiag = num2cell(pDiagCat(runB.pDiag));
+resS = runCompare(runS, [], 100, 250, [10 95; 255 295]);
 resR = runCompare(runR, [], 100, 250, [10 95; 255 295]);
-okP = abs(resP.run1.sig(4) - 0.05) < 1e-12 && ~any(isfinite(resQ.run1.sig)) && abs(resR.run1.sig(4) - 0.05) < 1e-12;   % pDig accepted
+okP = abs(resP.run1.sig(4) - 0.05) < 1e-12 && ~any(isfinite(resQ.run1.sig)) && abs(resR.run1.sig(4) - 0.05) < 1e-12 ...
+   && abs(resS.run1.sig(4) - 0.05) < 1e-12;   % pDig accepted, num2cell accepted
 if okP, fprintf('=== pDiag shape / mismatch / misspelt check PASS ===\n'); else, fprintf('=== pDiag shape / mismatch / misspelt check FAIL ===\n'); end
 okG = resG.run1.tau == resG.run1.tauP && abs(resG.run1.tauP - 0.5) < 0.011;
 if okG, fprintf('=== unusable attitude fallback check PASS ===\n'); else, fprintf('=== unusable attitude fallback check FAIL ===\n'); end

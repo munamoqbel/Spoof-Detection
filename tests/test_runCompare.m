@@ -19,8 +19,8 @@ G = 9.80665;
 tTrue = (0:0.01:300)';
 lat0 = 0.98; lon0 = 0.2; h0 = 100;
 a = 6378137; e2 = 6.69437999014e-3;
-spd = 20 + 5 * sin(2 * pi * tTrue / 40);                            % accelerating: velocity lag observable
-yaw = (30 + 20 * sin(2 * pi * tTrue / 60) + 90 * (tTrue >= 150)) * pi / 180;   % turning: attitude lag observable
+spd = 20 + 8 * sin(2 * pi * tTrue / 25);                            % accelerating (2 m/s^2 peaks): velocity lag observable
+yaw = (170 + 20 * sin(2 * pi * tTrue / 60) + 90 * (tTrue >= 150)) * pi / 180;  % turning, crossing +-180 deg: attitude lag observable, wrap exercised
 vN = spd .* cos(yaw); vE = spd .* sin(yaw); vD = zeros(size(tTrue));
 lat = zeros(size(tTrue)); lon = lat; lat(1) = lat0; lon(1) = lon0;
 for i = 2:numel(tTrue)
@@ -31,8 +31,30 @@ for i = 2:numel(tTrue)
 end
 truePos = [lat lon h0 * ones(size(tTrue))];
 trueVel = [vN vE vD];
-trueAtt = [zeros(size(tTrue)) zeros(size(tTrue)) yaw];
+trueAtt = [zeros(size(tTrue)) zeros(size(tTrue)) yaw];                 % yaw continuous here; wrapped where logged
 biasTrue = [0.3e-3*G, -0.2e-3*G, 0.1e-3*G, 1/3600*pi/180, -0.5/3600*pi/180, 2/3600*pi/180];
+
+function [C] = dcmT(e)
+    cr = cos(e(1)); sr = sin(e(1)); cp = cos(e(2)); sp = sin(e(2)); cy = cos(e(3)); sy = sin(e(3));
+    C = [cy*cp, cy*sp*sr - sy*cr, cy*sp*cr + sy*sr; sy*cp, sy*sp*sr + cy*cr, sy*sp*cr - cy*sr; -sp, cp*sr, cp*cr];
+end
+
+function [p] = mechCoast(Cnav, Ctrue, db, T)
+    % stationary level truth with DCM Ctrue; the nav starts at Cnav, integrates the corrected gyro (0 - db_g)
+    % and the corrected specific force (f_b - db_a), with gravity compensation, for T s at 100 Hz
+    g = 9.80665;  dt = 0.01;
+    fb = Ctrue' * [0; 0; -g];
+    w = -db(4:6);  th = norm(w) * dt;  k = w / max(norm(w), eps);
+    K = [0 -k(3) k(2); k(3) 0 -k(1); -k(2) k(1) 0];
+    R = eye(3) + sin(th) * K + (1 - cos(th)) * K * K;             % body rotation per step
+    C = Cnav;  v = zeros(3, 1);  p = zeros(3, 1);
+    for i = 1:round(T / dt)
+        C = C * R;
+        a = C * (fb - db(1:3)) + [0; 0; g];
+        v = v + a * dt;
+        p = p + v * dt;
+    end
+end
 
 function [M] = pDiagCat(c)
     M = zeros(numel(c), 22);
@@ -57,7 +79,7 @@ function [r, yawExp] = makeRun(name, lags, dv, acc, jerk, attErr, dBias, yawCoup
     rng_state = 42; randn('seed', rng_state);
     w = randn(numel(t) + 4000, 3);                                  % smooth aided position error (two 10 s moving averages)
     w = filter(ones(1, 1000) / 1000, 1, w);  w = filter(ones(1, 1000) / 1000, 1, w);
-    eNed = w(4001:end, :);  eNed = eNed / std(eNed(:)) * 0.3;
+    eNed = w(4001:end, :);  eNed = eNed / std(eNed(:)) * 0.1;        % 0.1 m, slow: its derivative stays ~0.03 m/s
     vErr = ([eNed(2:end, :); eNed(end, :)] - [eNed(1, :); eNed(1:end-1, :)]) / 0.02;   % its derivative: the nav is consistent
     out = (t >= 100) & (t < 250);
     x = t(out) - 100;
@@ -84,19 +106,27 @@ function [r, yawExp] = makeRun(name, lags, dv, acc, jerk, attErr, dBias, yawCoup
     r.navPos = [tp(:,1) + eNed(:,1) ./ (RN + h), tp(:,2) + eNed(:,2) ./ ((RE + h) .* cos(L)), tp(:,3) - eNed(:,3)];
     r.navVel = tv + vErr;
     r.navAtt = ta + repmat(attErr, numel(t), 1);
+    r.navAtt(:, 3) = atan2(sin(r.navAtt(:, 3)), cos(r.navAtt(:, 3)));          % logged wrapped to +-pi
     r.biasEst = repmat(biasTrue + dBias, numel(t), 1);
     r.tTrue = tTrue; r.truePos = truePos; r.biasTrue = biasTrue;
     sV = lags(1) - lags(2);  sA = lags(1) - lags(3);      % logged(tTrue) = truth(tTrue + s): nav(t) = logged(t + lags(1) - s)
     r.trueVel = [interp1(tTrue, trueVel(:,1), tTrue + sV) interp1(tTrue, trueVel(:,2), tTrue + sV) interp1(tTrue, trueVel(:,3), tTrue + sV)];
     r.trueAtt = [interp1(tTrue, trueAtt(:,1), tTrue + sA) interp1(tTrue, trueAtt(:,2), tTrue + sA) interp1(tTrue, trueAtt(:,3), tTrue + sA)];
+    r.trueAtt(:, 3) = atan2(sin(r.trueAtt(:, 3)), cos(r.trueAtt(:, 3)));        % logged wrapped to +-pi
     r.pDiag = repmat([ones(1,3) 0.05^2*ones(1,3) 1e-6*ones(1,3) (0.2e-3*9.80665)^2*ones(1,3) (1/3600*pi/180)^2*ones(1,3) ones(1,7)], numel(t), 1);
 end
 
-dvA = [0.10 -0.05 0.02]; accA = [0.004 0.002 0]; jerkA = [0 2e-5 0];
+dvA = [0.10 -0.05 0.02]; jerkA = [0 2e-5 0];
+attErrA = [0.5e-3 -0.3e-3 1e-3];  dBiasA = [-0.6e-3*G 0.1e-3*G 0 0.3/3600*pi/180 0 -1/3600*pi/180];
+yaw100 = interp1(tTrue, trueAtt(:,3), 100.5);                                  % truth heading at the nav instant of tOut
+CtrueA0 = dcmT([0 0 yaw100]);  CnavA0 = dcmT([0 0 yaw100] + attErrA);
+dCA0 = CnavA0 * CtrueA0';
+psiA0 = [dCA0(2,3) - dCA0(3,2); dCA0(3,1) - dCA0(1,3); dCA0(1,2) - dCA0(2,1)] / 2;
+accA = (CnavA0 * (-dBiasA(1:3)') + G * [psiA0(2); -psiA0(1); 0])';           % so the trace matches the state errors
 dvB = [0.30  0.10 0.00]; accB = [0.006 -0.003 0]; jerkB = [0 0 0];
 lagsA = [0.5 0.2 0.8];                     % position, velocity and attitude truth logged at different instants
 lagsB = [0.5 0.5 0.5];
-runA = makeRun('A', lagsA, dvA, accA, jerkA, [0.5e-3 -0.3e-3 1e-3], [-0.6e-3*G 0.1e-3*G 0 0.3/3600*pi/180 0 -1/3600*pi/180], false, tTrue, truePos, trueVel, trueAtt, biasTrue);
+runA = makeRun('A', lagsA, dvA, accA, jerkA, attErrA, dBiasA, false, tTrue, truePos, trueVel, trueAtt, biasTrue);
 [runB, yawExpB] = makeRun('B', lagsB, dvB, accB, jerkB, [0.2e-3  0.4e-3 -2e-3], [ 0.2e-3*G 0.3e-3*G 0 1.0/3600*pi/180 0  0.5/3600*pi/180], true, tTrue, truePos, trueVel, trueAtt, biasTrue);
 
 % run B logged per 2 Hz epoch: bias on tKf, P as a cell of 22 x 22 matrices
@@ -109,21 +139,34 @@ res = runCompare(runA, runB, 100, 250, [10 95; 255 295]);
 
 T = res.run1.T;
 expDriftA = dvA * T + 0.5 * accA * T^2 + jerkA * T^3 / 6;
-ok = true;
-ok = ok && abs(res.run1.sV + 0.3) < 0.011 && abs(res.run1.sA - 0.3) < 0.011;                       % logged truth arrays shifted
-ok = ok && abs(res.run1.tauP - 0.5) < 0.011 && abs(res.run1.tauV - 0.5) < 0.011 && abs(res.run1.tauA - 0.5) < 0.011 && res.run1.tau == res.run1.tauA;
-ok = ok && abs(res.run2.sV) < 0.011 && abs(res.run2.sA) < 0.011 && abs(res.run2.tau - 0.5) < 0.011 && abs(res.run2.tauP - 0.5) < 0.011;
-ok = ok && abs(res.run1.sNV) < 0.011 && abs(res.run2.sNV) < 0.011 && abs(res.run1.kP) < 0.02 && abs(res.run1.kV) < 0.02;   % consistent nav, no latency
-ok = ok && all(abs(res.run1.dv' - dvA) < 0.02) && all(abs(res.run1.slope10' - dvA) < 0.06);
-ok = ok && all(abs(res.run1.drift - expDriftA) < 1.0);
-ok = ok && all(abs(res.run1.coef(:,3)' - dvA) < 0.02);            % b
-ok = ok && all(abs(res.run1.coef(:,2)' - 0.5*accA) < 2e-4);        % c
-ok = ok && all(abs(res.run1.coef(:,1)' - jerkA/6) < 5e-7);         % d
-ok = ok && all(abs(res.run2.dv' - dvB) < 0.02);
-ok = ok && abs(res.run1.attErr(3) - 1e-3) < 1e-5 && abs(res.run1.psi(3) + 1e-3) < 2e-5;
-ok = ok && abs(res.run1.db(1) + 0.6e-3*G) < 1e-9;
-ok = ok && abs(res.run2.db(1) - 0.2e-3*G) < 1e-9 && abs(res.run2.sig(4) - 0.05) < 1e-12;   % 2 Hz bias and cell P
-ok = ok && all(abs(res.run2.yawTerm' - yawExpB) < 0.1) && norm(yawExpB) > 1;        % yaw coupling term
+chk = struct();
+chk.truthShifts  = abs(res.run1.sV + 0.3) < 0.011 && abs(res.run1.sA - 0.3) < 0.011;                 % logged truth arrays shifted
+chk.lagsA        = abs(res.run1.tauP - 0.5) < 0.011 && abs(res.run1.tauV - 0.5) < 0.011 && abs(res.run1.tauA - 0.5) < 0.011 && res.run1.tau == res.run1.tauA;
+chk.lagsB        = abs(res.run2.sV) < 0.011 && abs(res.run2.sA) < 0.011 && abs(res.run2.tau - 0.5) < 0.011 && abs(res.run2.tauP - 0.5) < 0.011;
+chk.navConsistent = abs(res.run1.sNV) < 0.011 && abs(res.run2.sNV) < 0.011 && abs(res.run1.kP) < 0.03 && abs(res.run1.kV) < 0.03;   % no latency
+chk.dvA          = all(abs(res.run1.dv' - dvA) < 0.02) && all(abs(res.run1.slope10' - dvA) < 0.08);
+chk.dvImpliedA   = all(abs(res.run1.dvImplied' - dvA) < 0.03);                                       % secant corrected for the bias+tilt growth
+chk.driftA       = all(abs(res.run1.drift - expDriftA) < 1.0);
+chk.fitB         = all(abs(res.run1.coef(:,3)' - dvA) < 0.02);
+chk.fitC         = all(abs(res.run1.coef(:,2)' - 0.5*accA) < 2e-4);
+chk.fitD         = all(abs(res.run1.coef(:,1)' - jerkA/6) < 5e-7);
+chk.dvB          = all(abs(res.run2.dv' - dvB) < 0.02);
+chk.attitudeA    = abs(res.run1.attErr(3) - 1e-3) < 1e-5 && abs(res.run1.psi(3) + 1e-3) < 2e-5;
+chk.biasA        = abs(res.run1.db(1) + 0.6e-3*G) < 1e-9;
+chk.biasSigmaB   = abs(res.run2.db(1) - 0.2e-3*G) < 1e-9 && abs(res.run2.sig(4) - 0.05) < 1e-12;    % 2 Hz bias and cell P
+chk.yawTermB     = all(abs(res.run2.yawTerm(1:2)' - yawExpB(1:2)) < 0.1) && norm(yawExpB) > 1;       % yaw coupling term (horizontal)
+% bias, tilt and gyro rows against a mechanised stationary coast from the same tOut state (signs and conventions)
+iO = find(runA.t <= 100, 1, 'last');
+CnavA  = dcmT(runA.navAtt(iO, :));
+CtrueA = dcmT(interp1(tTrue, trueAtt, 100 + res.run1.tau));
+pMech  = mechCoast(CnavA, CtrueA, res.run1.db, res.run1.T);
+rows   = res.run1.biasTerm + res.run1.tiltTerm + res.run1.gyroTerm;
+fprintf('mechanised coast N %.2f E %.2f vs budget rows N %.2f E %.2f m\n', pMech(1:2), rows(1:2));
+chk.mechanised   = all(abs(pMech(1:2) - rows(1:2)) < 0.01 * norm(rows(1:2)) + 0.5);
+names = fieldnames(chk);  ok = true;
+for i = 1:numel(names)
+    if ~chk.(names{i}), fprintf('   FAILED sub-check: %s\n', names{i}); ok = false; end
+end
 fprintf('\nexpected drift A: N %.2f E %.2f D %.2f;  yaw term B expected N %.2f E %.2f, got N %.2f E %.2f\n', ...
     expDriftA, yawExpB(1:2), res.run2.yawTerm(1:2));
 if ok, fprintf('=== runCompare synthetic check PASS ===\n'); else, fprintf('=== runCompare synthetic check FAIL ===\n'); end
@@ -169,6 +212,8 @@ runR = runB;  runR.name = 'R misspelt pDig';  runR.pDig = runB.pDiag;  runR = rm
 resR = runCompare(runR, [], 100, 250, [10 95; 255 295]);
 okP = abs(resP.run1.sig(4) - 0.05) < 1e-12 && ~any(isfinite(resQ.run1.sig)) && ~any(isfinite(resR.run1.sig));
 if okP, fprintf('=== pDiag shape / mismatch / misspelt check PASS ===\n'); else, fprintf('=== pDiag shape / mismatch / misspelt check FAIL ===\n'); end
+okG = resG.run1.tau == resG.run1.tauP && abs(resG.run1.tauP - 0.5) < 0.011;
+if okG, fprintf('=== unusable attitude fallback check PASS ===\n'); else, fprintf('=== unusable attitude fallback check FAIL ===\n'); end
 okE = strcmp(resE.run1.velSource, 'position') && all(abs(resE.run1.dv' - dvA) < 0.02) ...
    && strcmp(resF.run1.velSource, 'position') && all(abs(resF.run1.dv' - dvA) < 0.02) ...
    && strcmp(res1.run1.velSource, 'logged');

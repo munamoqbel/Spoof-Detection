@@ -37,14 +37,20 @@ function [res] = runCompare(runA, runB, tOut, tReacq, aidedWin)
 %            Optional: omitted or [], the 300 s before tOut are used.
 %
 %   What it prints, per run
-%     0. truth lag: the shift of the truth time base that minimises the
-%        aided error, found separately for the position (horizontal error),
-%        the velocity (horizontal velocity error) and the attitude (yaw
-%        error on moving samples), because a host often logs the three at
-%        different instants of its step; each quantity is compared with the
-%        truth at its own lag. Two truth self-checks follow: trueVel against
-%        d(truePos)/dt (frame), and the yaw of nav and truth against the
-%        truth course over ground (convention)
+%     0. time alignment. (a) truth arrays: trueVel and the yaw of trueAtt
+%        are checked against the differenced truePos (a logged array shifted
+%        in time, in another frame or with another convention shows here)
+%        and re-aligned to the position. (b) nav arrays: navVel against the
+%        differenced navPos (a mechanised solution must agree between the
+%        2 Hz jumps). (c) the lag of the nav solution behind the truth, found
+%        separately on the position, the velocity and the yaw. The attitude
+%        lag is the reference instant for all errors: a gyro-integrated
+%        attitude cannot trail the truth, so its lag is the time-base offset
+%        of the logged truth; what the position and velocity trail beyond it
+%        is error of the nav solution (a position error proportional to the
+%        velocity and a velocity error proportional to the acceleration are
+%        the signature of GNSS measurements applied late). The regression of
+%        the errors on the truth velocity / acceleration quantifies that.
 %     1. aided accuracy: RMS position, velocity and attitude error, bias error
 %     2. state error at tOut: velocity, tilt, bias, with sigma from pDiag
 %     3. outage trace: the slope over the first 10 s (must match the tOut
@@ -123,65 +129,113 @@ for w = 1:size(aidedWin, 1)
     inAided = inAided | (t >= aidedWin(w, 1) & t <= aidedWin(w, 2));
 end
 
-%% 0. truth lag per quantity: nav(t) is compared with truth(t + tau)
+%% 0. time alignment: nav(t) is compared with the truth at t + lag
 tauGrid = -1.5:0.01:1.5;
+tT = r.tTrue(:);
 tA = t(inAided);
-[tau, stdBest, std0] = lagScan(tauGrid, @(s) stdRows(posErrNed(r, tA + s, inAided), 1:2));
-fprintf('0. truth lag: nav(t) matches truth(t %+.2f s) in position; aided horizontal error std %.2f m (was %.2f m at zero lag)\n', ...
-    tau, stdBest, std0);
-if abs(tau) >= 1.49
-    fprintf('   WARNING: lag at the edge of the scan, extend tauGrid or check the time bases\n');
+inT = false(numel(tT), 1);
+for w = 1:size(aidedWin, 1)
+    inT = inT | (tT >= aidedWin(w, 1) - 2 & tT <= aidedWin(w, 2) + 2);
 end
+fprintf('0. time alignment\n');
 
-%% truth self-checks: velocity time tag and frame, attitude time tag and yaw convention
-velPos = velFromPos(r.tTrue, r.truePos);                      % NED velocity differenced from the truth position
+%% (a) truth arrays against the differenced truth position
+velPos = velFromPos(tT, r.truePos);                           % NED velocity differenced from the truth position
 velSource = 'position';
-tauV = tau;
+sV = 0;
 if isfield(r, 'trueVel') && ~isempty(r.trueVel)
-    velCost = @(s) stdRows(r.navVel(inAided, :) - interpRows(r.tTrue, r.trueVel, tA + s), 1:2);
-    [tauV, vBest, ~] = lagScan(tauGrid, velCost);
-    velMismatch = rmsRows(interpRows(r.tTrue, r.trueVel, tA + tauV) - interpRows(r.tTrue, velPos, tA + tau), 1:3);
-    if velMismatch < 1
+    [sV, ~, ~] = lagScan(tauGrid, @(s) stdRows(interpRows(tT, r.trueVel, tT(inT) + s) - velPos(inT, :), 1:3, 0));
+    rV = rmsRows(interpRows(tT, r.trueVel, tT(inT) + sV) - velPos(inT, :), 1:3);
+    if rV < 1
         velSource = 'logged';
-        fprintf('   velocity lag %+.2f s: aided horizontal vel error std %.3f m/s (%.3f at the position lag); trueVel agrees with d(truePos)/dt to %.3f m/s rms\n', ...
-            tauV, vBest, velCost(tau), velMismatch);
+        fprintf('   truth arrays: trueVel is d(truePos)/dt shifted by %+.2f s (residual %.3f m/s rms)\n', sV, rV);
     else
-        tauV = tau;
-        fprintf('   WARNING: trueVel differs from d(truePos)/dt by %.2f m/s rms over the aided windows (another frame or\n', velMismatch);
-        fprintf('            unit?); the velocity differenced from truePos is used instead\n');
+        sV = 0;
+        fprintf('   WARNING: trueVel differs from d(truePos)/dt by %.2f m/s rms at its best shift (another frame or unit?);\n', rV);
+        fprintf('            the velocity differenced from truePos is used instead\n');
     end
 end
-if strcmp(velSource, 'logged'), trueVel = r.trueVel; else, trueVel = velPos; end
-vq  = interpRows(r.tTrue, velPos, tA + tau);
-mov = all(isfinite(vq), 2) & hypot(vq(:, 1), vq(:, 2)) > 3;      % moving aided samples: yaw ~ course over ground
-tauA = tau;
-if any(mov)
-    tM = tA(mov);
-    yawNav = r.navAtt(inAided, 3);  yawNav = yawNav(mov);
-    yawCost = @(s) yawStd(yawNav, interpRows(r.tTrue, r.trueAtt(:, 3), tM + s));
-    [tauA, aBest, ~] = lagScan(tauGrid, yawCost);
-    cog = atan2(vq(mov, 2), vq(mov, 1));
-    fprintf('   attitude lag %+.2f s: moving aided yaw error std %.1f mrad (%.1f at the position lag)\n', tauA, aBest * 1e3, yawCost(tau) * 1e3);
-    fprintf('   yaw minus truth course over ground, %d moving aided samples: nav %.1f mrad rms, trueAtt %.1f mrad rms\n', ...
-        nnz(mov), yawRms(yawNav, cog) * 1e3, yawRms(interpRows(r.tTrue, r.trueAtt(:, 3), tM + tauA), cog) * 1e3);
-    fprintf('   (both small: attitude conventions agree; only trueAtt large: its yaw is not the ZYX NED yaw the tool assumes)\n');
+if strcmp(velSource, 'logged'), trueVel = interpRows(tT, r.trueVel, tT + sV); else, trueVel = velPos; end
+sA = 0;
+spdT = hypot(velPos(:, 1), velPos(:, 2));
+movT = inT & spdT > 3 & all(isfinite(velPos), 2);
+if any(movT)
+    cogT = atan2(velPos(movT, 2), velPos(movT, 1));
+    [sA, ~, ~] = lagScan(tauGrid, @(s) yawStd(interpRows(tT, r.trueAtt(:, 3), tT(movT) + s), cogT));
+    rA = yawRms(interpRows(tT, r.trueAtt(:, 3), tT(movT) + sA), cogT);
+    fprintf('   truth arrays: trueAtt yaw is the truth course over ground shifted by %+.2f s (residual %.1f mrad rms: sideslip, or a convention if large)\n', ...
+        sA, rA * 1e3);
 end
-if abs(tauV - tau) > 0.05 || abs(tauA - tau) > 0.05
-    fprintf('   NOTE: the truth velocity / attitude are time-tagged %+.2f / %+.2f s apart from the truth position (logged at\n', tauV - tau, tauA - tau);
-    fprintf('         another point of the host step); each quantity is compared with the truth at its own lag\n');
+trueAtt = interpRows(tT, r.trueAtt, tT + sA);
+if abs(sV) > 0.05 || abs(sA) > 0.05
+    fprintf('   (the shifted truth arrays are re-aligned to the truth position before anything below)\n');
 end
 
-%% error traces with the lags applied
+%% (b) nav arrays against the differenced nav position
+velNav = velFromPos(t, r.navPos);                             % d(navPos)/dt on the nav time base
+[sNV, ~, ~] = lagScan(tauGrid, @(s) stdRows(interpRows(t, r.navVel, tA + s) - velNav(inAided, :), 1:2, 0.1));
+rNV = stdRows(interpRows(t, r.navVel, tA + sNV) - velNav(inAided, :), 1:2, 0.1);
+spdN = hypot(velNav(:, 1), velNav(:, 2));
+movN = inAided & spdN > 3 & all(isfinite(velNav), 2);
+rNA = NaN;
+if any(movN)
+    rNA = yawRmsTrim(r.navAtt(movN, 3), atan2(velNav(movN, 2), velNav(movN, 1)), 0.1);
+end
+fprintf('   nav arrays:   navVel is d(navPos)/dt shifted by %+.2f s (residual %.3f m/s std, 2 Hz jumps excluded); navAtt yaw minus the nav course %.1f mrad rms\n', ...
+    sNV, rNV, rNA * 1e3);
+if abs(sNV) > 0.05
+    fprintf('   WARNING: a mechanised solution has navVel = d(navPos)/dt; a shift means the two nav arrays were logged at different points of the host step\n');
+end
+
+%% (c) lag of the nav solution behind the truth, per quantity
+navPosA = r.navPos(inAided, :);
+[tauP, pBest, p0] = lagScan(tauGrid, @(s) stdRows(nedDelta(navPosA, interpRows(tT, r.truePos, tA + s)), 1:2, 0));
+[tauV, vBest, v0] = lagScan(tauGrid, @(s) stdRows(r.navVel(inAided, :) - interpRows(tT, trueVel, tA + s), 1:2, 0));
+vqP = interpRows(tT, velPos, tA + tauP);
+mov = all(isfinite(vqP), 2) & hypot(vqP(:, 1), vqP(:, 2)) > 3;      % moving aided samples: turns make the yaw lag visible
+tauA = tauP;  aBest = NaN;  a0 = NaN;
+if any(mov)
+    yawNav = r.navAtt(inAided, 3);  yawNav = yawNav(mov);
+    tM = tA(mov);
+    [tauA, aBest, a0] = lagScan(tauGrid, @(s) yawStd(yawNav, interpRows(tT, trueAtt(:, 3), tM + s)));
+end
+tau = tauA;
+fprintf('   lag of the nav solution behind the truth (nav(t) = truth(t + lag)): position %+.2f s, velocity %+.2f s, attitude %+.2f s\n', tauP, tauV, tauA);
+fprintf('   (aided error std at its own lag / at zero lag: position %.2f / %.2f m, velocity %.3f / %.3f m/s, yaw %.1f / %.1f mrad)\n', ...
+    pBest, p0, vBest, v0, aBest * 1e3, a0 * 1e3);
+if any(mov)
+    fprintf('   reference instant for the errors below: the attitude lag. A gyro-integrated attitude cannot trail the truth, so its lag is the\n');
+    fprintf('   time-base offset of the logged truth; what the position and velocity trail beyond it is error of the nav solution.\n');
+else
+    fprintf('   reference instant for the errors below: the position lag (no moving aided samples for an attitude lag)\n');
+end
+if abs(tau) >= 1.49 || abs(tauP) >= 1.49
+    fprintf('   WARNING: lag at the edge of the scan, extend tauGrid or check the time bases\n');
+end
+tqA = tA + tau;
+eP  = nedDelta(navPosA, interpRows(tT, r.truePos, tqA));
+eV  = r.navVel(inAided, :) - interpRows(tT, trueVel, tqA);
+vT  = interpRows(tT, velPos, tqA);
+aT  = interpRows(tT, diffRows(tT, velPos, 5), tqA);              % truth acceleration, 0.1 s stencil
+[kP, r2P] = fitK(eP(:, 1:2), vT(:, 1:2));
+[kV, r2V] = fitK(eV(:, 1:2), aT(:, 1:2));
+fprintf('   at the reference instant: pos err = %+.3f s x truth velocity (%.0f%% of the horizontal error variance), vel err = %+.3f s x truth acceleration (%.0f%%)\n', ...
+    kP, 100 * r2P, kV, 100 * r2V);
+if abs(tauP - tau) > 0.05 || abs(tauV - tau) > 0.05
+    fprintf('   NOTE: the nav position / velocity trail the reference by %+.2f / %+.2f s. With consistent truth and nav arrays (above) that is\n', tau - tauP, tau - tauV);
+    fprintf('         not a logging artefact: the GNSS measurements are applied late relative to the IMU (pseudoranges ~%.2f s, Doppler ~%.2f s),\n', tau - tauP, tau - tauV);
+    fprintf('         or the truth used to build them is taken earlier than the nav epoch.\n');
+end
+
+%% error traces at the reference instant
 tq      = t + tau;
-tqV     = t + tauV;
-tqA     = t + tauA;
 posErr  = posErrNed(r, tq, true(N, 1));
-velErr  = r.navVel - interpRows(r.tTrue, trueVel, tqV);
-attTrue = interpRows(r.tTrue, r.trueAtt, tqA);
+velErr  = r.navVel - interpRows(tT, trueVel, tq);
+attTrue = interpRows(tT, trueAtt, tq);
 attErr  = r.navAtt - attTrue;
 attErr(:, 3) = atan2(sin(attErr(:, 3)), cos(attErr(:, 3)));
 if size(r.biasTrue, 1) > 1
-    biasTrue = interpRows(r.tTrue, r.biasTrue, tq);
+    biasTrue = interpRows(tT, r.biasTrue, tq);
 else
     biasTrue = repmat(r.biasTrue(:)', N, 1);
 end
@@ -233,10 +287,15 @@ x   = t(sel) - t(iOut);
 drift = posErr(iEnd, :) - posErr(iOut, :);
 i10 = min(find(t <= t(iOut) + 10, 1, 'last'), iEnd);
 slope10 = (posErr(i10, :) - posErr(iOut, :)) / (t(i10) - t(iOut));
+[jump, iJ] = max(sqrt(sum(diff(posErr(iOut:i10, :), 1, 1).^2, 2)));
 fprintf('3. outage drift observed: N %+8.2f E %+8.2f D %+8.2f m\n', drift);
 fprintf('   slope over the first %.0f s of the outage: N %+.3f E %+.3f D %+.3f m/s; this IS the velocity error at tOut.\n', ...
     t(i10) - t(iOut), slope10);
 fprintf('   If section 2 differs by more than a few cm/s, the truth velocity (or its lag) is wrong, not the filter.\n');
+if jump > 0.5
+    fprintf('   WARNING: the position error jumps by %.2f m at t = %.2f inside those %.0f s (a solution switch?); the slope above includes it\n', ...
+        jump, t(iOut + iJ), t(i10) - t(iOut));
+end
 fprintf('   fit err = a + b x + c x^2 + d x^3 over %d samples, contributions at T = %.0f s:\n', nnz(sel), T);
 fprintf('   axis      b T (vel)    c T^2 (bias/tilt)    d T^3 (gyro)    fit rms   b [m/s]\n');
 coef = zeros(3, 4);
@@ -257,8 +316,8 @@ dfTilt   = G * [psi(2); -psi(1); 0];
 tiltTerm = 0.5 * dfTilt * T^2;
 psiDot   = Cnav * (-db(4:6));
 gyroTerm = G * [psiDot(2); -psiDot(1); 0] * T^3 / 6;
-dpTrue   = nedDelta(interpRows(r.tTrue, r.truePos, tq(iEnd)), interpRows(r.tTrue, r.truePos, tq(iOut)))';
-v0       = interpRows(r.tTrue, trueVel, tqV(iOut))';
+dpTrue   = nedDelta(interpRows(tT, r.truePos, tq(iEnd)), interpRows(tT, r.truePos, tq(iOut)))';
+v0       = interpRows(tT, trueVel, tq(iOut))';
 u        = dpTrue - v0 * T;                                 % displacement from the integrated specific force
 yawTerm  = [psi(3) * u(2); -psi(3) * u(1); 0];              % -psi x u with psi = [0 0 psi_D]
 total    = velTerm + biasTerm + tiltTerm + gyroTerm + yawTerm;
@@ -274,7 +333,8 @@ bt = r.biasTrue(1, 1:3);
 fprintf('   scale: true accel bias uncompensated over T = %.0f m, applied with the wrong sign = %.0f m\n', ...
     0.5 * norm(bt) * T^2, norm(bt) * T^2);
 
-o = struct('name', r.name, 'tau', tau, 'tauV', tauV, 'tauA', tauA, 'velSource', velSource, 'rmsPos', rmsPos, ...
+o = struct('name', r.name, 'tau', tau, 'tauP', tauP, 'tauV', tauV, 'tauA', tauA, 'sV', sV, 'sA', sA, 'sNV', sNV, ...
+    'kP', kP, 'r2P', r2P, 'kV', kV, 'r2V', r2V, 'velSource', velSource, 'rmsPos', rmsPos, ...
     'rmsVel', rmsVel, 'meanVel', meanVel, 'rmsAtt', rmsAtt, 'tOut', t(iOut), 'T', T, ...
     'posErrOut', posErr(iOut, :), 'dv', dv, 'slope10', slope10', 'attErr', attErr(iOut, :)', 'psi', psi, 'db', db, 'sig', sig, ...
     'drift', drift, 'coef', coef, 'velTerm', velTerm, 'biasTerm', biasTerm, 'tiltTerm', tiltTerm, ...
@@ -350,12 +410,47 @@ ok = all(isfinite(e), 2);
 v  = sqrt(mean(sum(e(ok, cols).^2, 2)));
 end
 
-function [v] = stdRows(e, cols)
-% pooled standard deviation (mean of each column removed) over the finite rows, using the given columns
+function [v] = stdRows(e, cols, trim)
+% pooled standard deviation (mean of each column removed) over the finite rows, using the given columns;
+% trim > 0 drops that fraction of the rows with the largest norm first (the 2 Hz jumps of a nav solution)
 ok = all(isfinite(e), 2);
 e  = e(ok, cols);
 e  = e - repmat(mean(e, 1), size(e, 1), 1);
+if trim > 0 && size(e, 1) > 10
+    n  = sqrt(sum(e.^2, 2));
+    ns = sort(n);
+    e  = e(n <= ns(max(1, floor(numel(ns) * (1 - trim)))), :);
+    e  = e - repmat(mean(e, 1), size(e, 1), 1);
+end
 v  = sqrt(mean(sum(e.^2, 2)));
+end
+
+function [v] = yawRmsTrim(a, b, trim)
+% rms of the wrapped difference a - b after dropping the fraction trim with the largest |difference|
+d  = a(:) - b(:);
+d  = atan2(sin(d), cos(d));
+d  = abs(d(isfinite(d)));
+ds = sort(d);
+d  = d(d <= ds(max(1, floor(numel(ds) * (1 - trim)))));
+v  = sqrt(mean(d.^2));
+end
+
+function [k, r2] = fitK(e, x)
+% least-squares gain k in e = k x, pooled over the columns, means removed; r2 = fraction of the variance of e explained
+ok = all(isfinite([e x]), 2);
+e  = e(ok, :);  x = x(ok, :);
+e  = e - repmat(mean(e, 1), size(e, 1), 1);
+x  = x - repmat(mean(x, 1), size(x, 1), 1);
+k  = sum(sum(e .* x)) / sum(sum(x .* x));
+r2 = 1 - sum(sum((e - k * x).^2)) / sum(sum(e.^2));
+end
+
+function [d] = diffRows(tt, Y, h)
+% central difference of each column with a stencil of h samples on each side (one-sided at the ends)
+tt = tt(:);
+M  = numel(tt);
+i0 = max((1:M) - h, 1);  i1 = min((1:M) + h, M);
+d  = (Y(i1, :) - Y(i0, :)) ./ repmat(tt(i1) - tt(i0), 1, size(Y, 2));
 end
 
 function [v] = yawRms(a, b)

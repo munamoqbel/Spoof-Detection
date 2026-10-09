@@ -96,17 +96,20 @@ gives the aided accuracy against the truth, the velocity, tilt and bias error
 at the last aided epoch with their sigmas, fits the outage error trace as
 a + b t + c t^2 + d t^3 to separate velocity, bias/tilt and gyro drift, and
 predicts the drift from the state errors. With two runs it prints their
-difference at the outage start in sigmas. The truth lag is estimated
-separately for position, velocity and attitude, because a host often logs the
-three at different points of its step, and each quantity is compared with the
-truth at its own lag. Two truth self-checks guard the inputs: the truth
-velocity is compared with the differenced truth position (and replaced by it
-when it is in another frame or missing), and the yaw of nav and truth is
-compared with the truth course over ground. The slope of the position error
-over the first 10 s of the outage is printed as the model-free value of the
-velocity error at the outage start, and the budget includes the yaw error
-acting on the manoeuvres of the outage. The header lists the arrays each run
-struct must hold (nav, truth, bias estimates, optional P diagonal).
+difference at the outage start in sigmas. Its time-alignment section first
+checks the truth arrays against the differenced truth position (a velocity
+logged at another point of the host step, in another frame or missing, and a
+yaw with another convention show there) and the nav velocity against the
+differenced nav position, then finds the lag of the nav solution behind the
+truth separately on the position, the velocity and the yaw. The attitude lag
+is the reference, because a gyro-integrated attitude cannot trail the truth;
+what the position and velocity trail beyond it is error of the nav solution,
+the signature of GNSS measurements applied late, and the regression of the
+errors on the truth velocity and acceleration quantifies it. The slope of the
+position error over the first 10 s of the outage is printed as the model-free
+value of the velocity error at the outage start, and the budget includes the
+yaw error acting on the manoeuvres of the outage. The header lists the arrays
+each run struct must hold (nav, truth, bias estimates, optional P diagonal).
 
 ## Printable copies
 

@@ -72,6 +72,14 @@ function [res] = runCompare(runA, runB, tOut, tReacq, aidedWin)
 %     yaw error psi_D rotates the integrated specific force, i.e. the part
 %     of the true displacement not explained by the initial velocity:
 %     -psi x (dp - v0 T) with psi = [0 0 psi_D].
+%   Result: res.run1 (and res.run2) with tau (reference lag), tauP, tauV,
+%   tauA, sV, sA, sNV, kP, r2P, kV, r2V, velSource, rmsPos, rmsVel, meanVel,
+%   rmsAtt, tOut, T, posErrOut, dv, slope10, attErr, psi, db, sig, drift,
+%   coef, velTerm, biasTerm, tiltTerm, gyroTerm, yawTerm and the traces
+%   posErrTrace, velErrTrace, attErrTrace, biasErrTrace on t. sig is the
+%   square root of the P diagonal (22 x 1) at the last update <= tOut; it
+%   is NaN, and the sigma columns print n/a, when pDiag is missing or its
+%   records cannot be matched to tKf (a NOTE says so).
 %   MATLAB desktop tool, not codegen. Runs under Octave.
 
 G = 9.80665;
@@ -88,6 +96,11 @@ for k = 1:numel(runs)
     end
     if ~isfield(r, 'name') || isempty(r.name), r.name = sprintf('run %d', k); end
     fprintf('\n==================== %s ====================\n', r.name);
+    extra = setdiff(fieldnames(r), {'t', 'navPos', 'navVel', 'navAtt', 'biasEst', 'tKf', 'tTrue', 'truePos', 'trueVel', ...
+        'trueAtt', 'biasTrue', 'pDiag', 'name'});
+    if ~isempty(extra)
+        fprintf('   NOTE: run fields the tool does not use (misspelt?): %s\n', strjoin(extra(:)', ', '));
+    end
     res.(sprintf('run%d', k)) = analyseRun(r, tOut, tReacq, aidedWin, G);
 end
 if numel(runs) == 2
@@ -105,6 +118,11 @@ P = [];
 if isfield(r, 'pDiag') && ~isempty(r.pDiag), P = pDiagMatrix(r.pDiag); end
 if size(r.biasEst, 1) == 1, r.biasEst = repmat(r.biasEst, N, 1); end          % value at tOut only
 if size(P, 1) == 1, P = repmat(P, N, 1); end                                   % value at tOut only
+nKf = 0;
+if isfield(r, 'tKf') && ~isempty(r.tKf), nKf = numel(r.tKf); end
+if ~isempty(P) && size(P, 1) ~= N && size(P, 1) ~= nKf && any(size(P, 2) == [N, nKf, size(r.biasEst, 1)])
+    P = P';                                                                    % given as states x records
+end
 K = max(size(r.biasEst, 1) * (size(r.biasEst, 1) ~= N), size(P, 1) * (size(P, 1) ~= N));
 if K > 0 && (~isfield(r, 'tKf') || isempty(r.tKf))
     r.tKf = t(1) + (t(end) - t(1)) * (0:K-1)' / (K - 1);
@@ -118,7 +136,16 @@ if isfield(r, 'tKf') && ~isempty(r.tKf)
     end
     if ~isempty(P) && size(P, 1) == numel(tKf)
         iKf = find(tKf <= tOut, 1, 'last');
-        P = repmat(P(iKf, :), N, 1);
+        if isempty(iKf)
+            fprintf('   NOTE: no tKf epoch at or before tOut = %.2f (tKf runs %.2f..%.2f): sigmas not available\n', tOut, tKf(1), tKf(end));
+            P = [];
+        else
+            P = repmat(P(iKf, :), N, 1);
+        end
+    elseif ~isempty(P) && size(P, 1) ~= N
+        fprintf('   NOTE: pDiag has %d records, tKf %d epochs, the nav %d samples: sigmas not available (log pDiag and tKf at the same place)\n', ...
+            size(P, 1), numel(tKf), N);
+        P = [];
     end
 end
 if size(r.biasEst, 1) ~= N
@@ -272,6 +299,9 @@ psi = [dC(2,3) - dC(3,2); dC(3,1) - dC(1,3); dC(1,2) - dC(2,1)] / 2;   % I - [ps
 sig = NaN(22, 1);
 if ~isempty(P) && size(P, 1) == N
     sig = sqrt(max(P(iOut, :), 0))';
+end
+if ~any(isfinite(sig))
+    fprintf('   (no sigmas: pDiag missing or not matched to the epochs, see the NOTEs above)\n');
 end
 fprintf('2. state error at t = %.2f (truth lag applied), outage T = %.1f s to t = %.2f\n', t(iOut), T, t(iEnd));
 fprintf('   pos err   N %+8.2f E %+8.2f D %+8.2f m\n', posErr(iOut, :));

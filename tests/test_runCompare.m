@@ -34,6 +34,11 @@ trueVel = [vN vE vD];
 trueAtt = [zeros(size(tTrue)) zeros(size(tTrue)) yaw];
 biasTrue = [0.3e-3*G, -0.2e-3*G, 0.1e-3*G, 1/3600*pi/180, -0.5/3600*pi/180, 2/3600*pi/180];
 
+function [M] = pDiagCat(c)
+    M = zeros(numel(c), 22);
+    for k = 1:numel(c), M(k, :) = diag(c{k})'; end
+end
+
 function [e] = nedDeltaT(p, q)
     a = 6378137; e2 = 6.69437999014e-3;
     L = p(:,1); h = p(:,3);
@@ -41,7 +46,7 @@ function [e] = nedDeltaT(p, q)
     e = [(p(:,1) - q(:,1)) .* (RN + h), (p(:,2) - q(:,2)) .* (RE + h) .* cos(L), -(p(:,3) - q(:,3))];
 end
 
-function [r] = makeRun(name, lags, dv, acc, jerk, attErr, dBias, yawCouple, tTrue, truePos, trueVel, trueAtt, biasTrue)
+function [r, yawExp] = makeRun(name, lags, dv, acc, jerk, attErr, dBias, yawCouple, tTrue, truePos, trueVel, trueAtt, biasTrue)
     % lags(1): the nav at time t is the truth at t + lags(1). lags(2), lags(3): the logged truth velocity
     % and attitude arrays are shifted so that the tool must find lags(2) and lags(3) for them.
     a = 6378137; e2 = 6.69437999014e-3;
@@ -58,14 +63,14 @@ function [r] = makeRun(name, lags, dv, acc, jerk, attErr, dBias, yawCouple, tTru
     x = t(out) - 100;
     eNed(out, :) = x * dv + 0.5 * x.^2 * acc + x.^3 * jerk / 6;
     vErr(out, :) = repmat(dv, nnz(out), 1) + x * acc + 0.5 * x.^2 * jerk;
-    r.yawExp = [0 0 0];
+    yawExp = [0 0 0];
     if yawCouple                             % yaw error rotates the integrated specific force: -psi x (dp - v0 x)
         iOut = find(out, 1);
         psiD = -attErr(3);
         u = nedDeltaT(tp(out, :), repmat(tp(iOut, :), nnz(out), 1)) - x * tv(iOut, :);
         eNed(out, :) = eNed(out, :) + [psiD * u(:, 2), -psiD * u(:, 1), zeros(nnz(out), 1)];
         vErr(out, :) = vErr(out, :) + [psiD * (tv(out, 2) - tv(iOut, 2)), -psiD * (tv(out, 1) - tv(iOut, 1)), zeros(nnz(out), 1)];
-        r.yawExp = [psiD * u(end, 2), -psiD * u(end, 1), 0];
+        yawExp = [psiD * u(end, 2), -psiD * u(end, 1), 0];
     end
     if numel(lags) > 3                       % lags(4): GNSS measurements applied late: pos err = -lat v, vel err = -lat a
         aTrue = ([trueVel(2:end, :); trueVel(end, :)] - [trueVel(1, :); trueVel(1:end-1, :)]) / 0.02;
@@ -92,7 +97,7 @@ dvB = [0.30  0.10 0.00]; accB = [0.006 -0.003 0]; jerkB = [0 0 0];
 lagsA = [0.5 0.2 0.8];                     % position, velocity and attitude truth logged at different instants
 lagsB = [0.5 0.5 0.5];
 runA = makeRun('A', lagsA, dvA, accA, jerkA, [0.5e-3 -0.3e-3 1e-3], [-0.6e-3*G 0.1e-3*G 0 0.3/3600*pi/180 0 -1/3600*pi/180], false, tTrue, truePos, trueVel, trueAtt, biasTrue);
-runB = makeRun('B', lagsB, dvB, accB, jerkB, [0.2e-3  0.4e-3 -2e-3], [ 0.2e-3*G 0.3e-3*G 0 1.0/3600*pi/180 0  0.5/3600*pi/180], true, tTrue, truePos, trueVel, trueAtt, biasTrue);
+[runB, yawExpB] = makeRun('B', lagsB, dvB, accB, jerkB, [0.2e-3  0.4e-3 -2e-3], [ 0.2e-3*G 0.3e-3*G 0 1.0/3600*pi/180 0  0.5/3600*pi/180], true, tTrue, truePos, trueVel, trueAtt, biasTrue);
 
 % run B logged per 2 Hz epoch: bias on tKf, P as a cell of 22 x 22 matrices
 runB.tKf = (1:0.5:298)';
@@ -118,9 +123,9 @@ ok = ok && all(abs(res.run2.dv' - dvB) < 0.02);
 ok = ok && abs(res.run1.attErr(3) - 1e-3) < 1e-5 && abs(res.run1.psi(3) + 1e-3) < 2e-5;
 ok = ok && abs(res.run1.db(1) + 0.6e-3*G) < 1e-9;
 ok = ok && abs(res.run2.db(1) - 0.2e-3*G) < 1e-9 && abs(res.run2.sig(4) - 0.05) < 1e-12;   % 2 Hz bias and cell P
-ok = ok && all(abs(res.run2.yawTerm' - runB.yawExp) < 0.1) && norm(runB.yawExp) > 1;        % yaw coupling term
+ok = ok && all(abs(res.run2.yawTerm' - yawExpB) < 0.1) && norm(yawExpB) > 1;        % yaw coupling term
 fprintf('\nexpected drift A: N %.2f E %.2f D %.2f;  yaw term B expected N %.2f E %.2f, got N %.2f E %.2f\n', ...
-    expDriftA, runB.yawExp(1:2), res.run2.yawTerm(1:2));
+    expDriftA, yawExpB(1:2), res.run2.yawTerm(1:2));
 if ok, fprintf('=== runCompare synthetic check PASS ===\n'); else, fprintf('=== runCompare synthetic check FAIL ===\n'); end
 
 % single-run mode
@@ -155,6 +160,15 @@ resH = runCompare(runH, [], 100, 250, [10 95; 255 295]);
 okH = abs(resH.run1.tauA - 0.5) < 0.011 && abs(resH.run1.tauP - 0.07) < 0.011 && abs(resH.run1.tauV - 0.07) < 0.011 ...
    && abs(resH.run1.kP + 0.43) < 0.02 && resH.run1.r2P > 0.95 && abs(resH.run1.kV + 0.43) < 0.03 && abs(resH.run1.sNV) < 0.011;
 if okH, fprintf('=== latency check PASS ===\n'); else, fprintf('=== latency check FAIL ===\n'); end
+% pDiag given as states x records, with the wrong record count, and under a misspelt field name
+runP = runB;  runP.name = 'P transposed';  runP.pDiag = pDiagCat(runB.pDiag)';           % 22 x K
+resP = runCompare(runP, [], 100, 250, [10 95; 255 295]);
+runQ = runB;  runQ.name = 'Q pDiag count mismatch';  runQ.pDiag = [pDiagCat(runB.pDiag); ones(3, 22)];
+resQ = runCompare(runQ, [], 100, 250, [10 95; 255 295]);
+runR = runB;  runR.name = 'R misspelt pDig';  runR.pDig = runB.pDiag;  runR = rmfield(runR, 'pDiag');
+resR = runCompare(runR, [], 100, 250, [10 95; 255 295]);
+okP = abs(resP.run1.sig(4) - 0.05) < 1e-12 && ~any(isfinite(resQ.run1.sig)) && ~any(isfinite(resR.run1.sig));
+if okP, fprintf('=== pDiag shape / mismatch / misspelt check PASS ===\n'); else, fprintf('=== pDiag shape / mismatch / misspelt check FAIL ===\n'); end
 okE = strcmp(resE.run1.velSource, 'position') && all(abs(resE.run1.dv' - dvA) < 0.02) ...
    && strcmp(resF.run1.velSource, 'position') && all(abs(resF.run1.dv' - dvA) < 0.02) ...
    && strcmp(res1.run1.velSource, 'logged');

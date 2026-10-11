@@ -285,7 +285,7 @@ if ~haveA
     tau = tauP;
     fprintf('   reference instant for the errors below: the position lag (no usable attitude lag: no moving samples, truth yaw off the\n');
     fprintf('   course, or at the scan edge)\n');
-elseif abs(tauA - tauP) <= 0.05
+elseif abs(tauA - tauP) <= 0.1
     tau = tauA;
     fprintf('   position and attitude lags agree: the logged truth is %+.2f s off the nav time base and the nav position does not trail\n', tauA);
     fprintf('   the truth; the attitude lag is the reference instant for the errors below\n');
@@ -344,6 +344,20 @@ rmsAtt = sqrt(mean(attErr(okA, :).^2, 1));
 fprintf('1. aided windows: pos rms N %.2f E %.2f D %.2f m (mean N %.2f E %.2f D %.2f)\n', rmsPos, meanPos);
 fprintf('   vel rms N %.3f E %.3f D %.3f m/s (mean N %+.3f E %+.3f D %+.3f), att rms roll %.2f pitch %.2f yaw %.2f mrad\n', ...
     rmsVel, meanVel, rmsAtt * 1e3);
+% lever arm: the velocity of a point r (body, x forward, y right) off the reference point differs by yaw rate x r,
+% i.e. +psidot*r_x laterally and -psidot*r_y longitudinally; fit the aided velocity error on the nav yaw rate
+yawN   = unwrap(r.navAtt(:, 3));
+psiDot = diffRows(t, yawN, 5);
+cy = cos(r.navAtt(:, 3));  sy = sin(r.navAtt(:, 3));
+eLong  =  cy .* velErr(:, 1) + sy .* velErr(:, 2);
+eLat   = -sy .* velErr(:, 1) + cy .* velErr(:, 2);
+okL = ok & isfinite(psiDot) & isfinite(eLong) & isfinite(eLat);
+[rx, r2x] = fitK(eLat(okL), psiDot(okL), winA(okL));
+[ry, r2y] = fitK(eLong(okL), -psiDot(okL), winA(okL));
+leverArm = [rx, ry];
+fprintf('   lever-arm signature of the velocity error: r_x %+.2f m (%.0f%% of the lateral variance), r_y %+.2f m (%.0f%%); large shares with\n', ...
+    rx, 100 * r2x, ry, 100 * r2y);
+fprintf('   metre-sized arms mean the GNSS antenna sits that far from the reference point and h(x) carries no lever arm\n');
 lastWin = inAided & t <= tOut & t >= tOut - 60;
 if any(lastWin)
     bm = mean(biasErr(lastWin, :), 1);
@@ -451,7 +465,7 @@ fprintf('   scale: true accel bias uncompensated over T = %.0f m, applied with t
 
 o = struct('name', r.name, 'tau', tau, 'tauP', tauP, 'tauV', tauV, 'tauVp', tauVp, 'tauA', tauA, 'sV', sV, 'sA', sA, 'sNV', sNV, ...
     'kP', kP, 'r2P', r2P, 'kV', kV, 'r2V', r2V, 'velSource', velSource, 'rmsPos', rmsPos, ...
-    'rmsVel', rmsVel, 'meanVel', meanVel, 'rmsAtt', rmsAtt, 'tOut', t(iOut), 'T', T, ...
+    'rmsVel', rmsVel, 'meanVel', meanVel, 'rmsAtt', rmsAtt, 'leverArm', leverArm, 'tOut', t(iOut), 'T', T, ...
     'posErrOut', posErr(iOut, :), 'dv', dv, 'slope10', slope10', 'dvImplied', dvImplied', 'velJump', velJump, 'tJump', tJump, 'yawJump', yawJump, 'attErr', attErr(iOut, :)', 'psi', psi, 'db', db, 'sig', sig, ...
     'drift', drift, 'coef', coef, 'velTerm', velTerm, 'biasTerm', biasTerm, 'tiltTerm', tiltTerm, ...
     'gyroTerm', gyroTerm, 'yawTerm', yawTerm, 'posErrTrace', posErr, 'velErrTrace', velErr, 'attErrTrace', attErr, 'biasErrTrace', biasErr, 't', t);

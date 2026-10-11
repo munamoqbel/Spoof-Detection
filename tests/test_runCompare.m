@@ -127,6 +127,14 @@ dvB = [0.30  0.10 0.00]; accB = [0.006 -0.003 0]; jerkB = [0 0 0];
 lagsA = [0.5 0.2 0.8];                     % position, velocity and attitude truth logged at different instants
 lagsB = [0.5 0.5 0.5];
 runA = makeRun('A', lagsA, dvA, accA, jerkA, attErrA, dBiasA, false, tTrue, truePos, trueVel, trueAtt, biasTrue);
+% the nav velocity is that of a point 0.6 m ahead and 0.2 m left of the reference point (an unmodelled lever arm)
+rArm = [1.5 -0.5];                                                      % applied outside the outage, whose errors are set by hand
+yawRateT = ([trueAtt(2:end, 3); trueAtt(end, 3)] - [trueAtt(1, 3); trueAtt(1:end-1, 3)]) / 0.02;
+pdA = interp1(tTrue, yawRateT, runA.t + lagsA(1));  yawA = interp1(tTrue, trueAtt(:, 3), runA.t + lagsA(1));
+pdA(runA.t >= 100 & runA.t < 250) = 0;
+vLong = -pdA * rArm(2);  vLat = pdA * rArm(1);
+runA.navVel(:, 1) = runA.navVel(:, 1) + cos(yawA) .* vLong - sin(yawA) .* vLat;
+runA.navVel(:, 2) = runA.navVel(:, 2) + sin(yawA) .* vLong + cos(yawA) .* vLat;
 [runB, yawExpB] = makeRun('B', lagsB, dvB, accB, jerkB, [0.2e-3  0.4e-3 -2e-3], [ 0.2e-3*G 0.3e-3*G 0 1.0/3600*pi/180 0  0.5/3600*pi/180], true, tTrue, truePos, trueVel, trueAtt, biasTrue);
 
 % run B: the coast switches solution 1 s into the outage (velocity step 0.3 m/s N, position consistent with it)
@@ -162,6 +170,7 @@ chk.biasA        = abs(res.run1.db(1) + 0.6e-3*G) < 1e-9;
 chk.biasSigmaB   = abs(res.run2.db(1) - 0.2e-3*G) < 1e-9 && abs(res.run2.sig(4) - 0.05) < 1e-12;    % 2 Hz bias and cell P
 chk.yawTermB     = all(abs(res.run2.yawTerm(1:2)' - yawExpB(1:2)) < 0.1) && norm(yawExpB) > 1;       % yaw coupling term (horizontal)
 chk.velJumpB     = res.run2.velJump > 0.25 && abs(res.run2.tJump - 101) < 0.02 && res.run1.velJump < 0.05;   % solution switch seen
+chk.leverArmA    = all(abs(res.run1.leverArm - rArm) < 0.3) && all(abs(res.run2.leverArm) < 0.3);             % lever arm read back
 % bias, tilt and gyro rows against a mechanised stationary coast from the same tOut state (signs and conventions)
 iO = find(runA.t <= 100, 1, 'last');
 CnavA  = dcmT(runA.navAtt(iO, :));

@@ -247,3 +247,23 @@ innovL = 0.45 * uvL + repmat(3 * randn(KL, 1), 1, ML) + 1.0 * randn(KL, ML);
 innovL(:, 9:10) = NaN;                                                   % two satellites unused
 [dltL, r2L] = latencyFromInnov(innovL, losL, velL);
 if abs(median(dltL(isfinite(dltL))) - 0.45) < 0.03, fprintf('=== latencyFromInnov check PASS ===\n'); else, fprintf('=== latencyFromInnov check FAIL ===\n'); end
+% pairing check: pseudoranges measured 0.5 s before the pulse the host assigns, two constellations, one satellite unused
+randn('seed', 3);  rand('seed', 3);
+ecefT = zeros(numel(tTrue), 3);
+NT = a ./ sqrt(1 - e2 * sin(truePos(:,1)).^2);
+ecefT = [(NT + truePos(:,3)) .* cos(truePos(:,1)) .* cos(truePos(:,2)), (NT + truePos(:,3)) .* cos(truePos(:,1)) .* sin(truePos(:,2)), (NT * (1 - e2) + truePos(:,3)) .* sin(truePos(:,1))];
+KP = 400;  MP = 8;  tEp = 20 + 0.5 * (0:KP-1)';
+upv = ecefT(1,:) / norm(ecefT(1,:));
+dirs = randn(MP, 3);  dirs = dirs - (dirs * upv') * upv;  dirs = dirs ./ repmat(sqrt(sum(dirs.^2, 2)), 1, 3);
+elv = 0.2 + 0.6 * rand(MP, 1);  dirs = repmat(cos(elv), 1, 3) .* dirs + repmat(sin(elv), 1, 3) .* repmat(upv, MP, 1);
+satP = zeros(KP, MP, 3);  prP = zeros(KP, MP);
+for kk = 1:KP
+    satk = repmat(ecefT(1,:), MP, 1) + 2.0e7 * dirs;
+    satP(kk, :, :) = reshape(satk, 1, MP, 3);
+    pT = interp1(tTrue, ecefT, tEp(kk) - 0.5);
+    prP(kk, :) = sqrt(sum((satk - repmat(pT, MP, 1)).^2, 2))' + 1500 + 2 * randn(1, MP);
+end
+prP(:, 8) = NaN;  sysP = [ones(KP, 5) 2 * ones(KP, 3)];  prP(:, 6:7) = prP(:, 6:7) + 40;
+[costP, shP] = pairingCheck(tEp, prP, satP, tTrue, truePos, -1.5:0.1:0.5, sysP);
+[~, iP] = min(costP);
+if abs(shP(iP) + 0.5) < 0.01, fprintf('=== pairingCheck check PASS ===\n'); else, fprintf('=== pairingCheck check FAIL ===\n'); end

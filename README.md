@@ -119,6 +119,11 @@ function: per epoch it fits the pseudorange innovations to a clock term plus
 dlt times the line-of-sight velocity, so observables one epoch older than the
 state they are compared with show up as dlt of 0.5 s, and a split by epoch
 type tells which of the two 2 Hz epochs is paired wrongly.
+`tools/pairingCheck.m` needs no filter quantity at all: from the measured
+pseudoranges, the satellite positions the host uses in h(x) and the
+reference position, it finds the shift of the reference instant at which the
+ranges fit, so observables one epoch older than the pulse they are paired
+with show a minimum at −0.5 s.
 
 ## Printable copies
 

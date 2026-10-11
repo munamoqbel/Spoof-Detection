@@ -129,6 +129,12 @@ lagsB = [0.5 0.5 0.5];
 runA = makeRun('A', lagsA, dvA, accA, jerkA, attErrA, dBiasA, false, tTrue, truePos, trueVel, trueAtt, biasTrue);
 [runB, yawExpB] = makeRun('B', lagsB, dvB, accB, jerkB, [0.2e-3  0.4e-3 -2e-3], [ 0.2e-3*G 0.3e-3*G 0 1.0/3600*pi/180 0  0.5/3600*pi/180], true, tTrue, truePos, trueVel, trueAtt, biasTrue);
 
+% run B: the coast switches solution 1 s into the outage (velocity step 0.3 m/s N, position consistent with it)
+kS = runB.t >= 101 & runB.t < 250;                                     % velocity step during the outage only
+runB.navVel(kS, 1) = runB.navVel(kS, 1) + 0.3;
+kP = runB.t >= 101;                                                     % the position it integrates, then a constant offset
+LS = runB.navPos(kP, 1);  RNS = a * (1 - e2) ./ (1 - e2 * sin(LS).^2).^1.5;   % (the second aided window keeps a 45 m offset)
+runB.navPos(kP, 1) = runB.navPos(kP, 1) + 0.3 * (min(runB.t(kP), 250) - 101) ./ (RNS + runB.navPos(kP, 3));
 % run B logged per 2 Hz epoch: bias on tKf, P as a cell of 22 x 22 matrices
 runB.tKf = (1:0.5:298)';
 runB.biasEst = repmat(runB.biasEst(1, :), numel(runB.tKf), 1);
@@ -155,6 +161,7 @@ chk.attitudeA    = abs(res.run1.attErr(3) - 1e-3) < 1e-5 && abs(res.run1.psi(3) 
 chk.biasA        = abs(res.run1.db(1) + 0.6e-3*G) < 1e-9;
 chk.biasSigmaB   = abs(res.run2.db(1) - 0.2e-3*G) < 1e-9 && abs(res.run2.sig(4) - 0.05) < 1e-12;    % 2 Hz bias and cell P
 chk.yawTermB     = all(abs(res.run2.yawTerm(1:2)' - yawExpB(1:2)) < 0.1) && norm(yawExpB) > 1;       % yaw coupling term (horizontal)
+chk.velJumpB     = res.run2.velJump > 0.25 && abs(res.run2.tJump - 101) < 0.02 && res.run1.velJump < 0.05;   % solution switch seen
 % bias, tilt and gyro rows against a mechanised stationary coast from the same tOut state (signs and conventions)
 iO = find(runA.t <= 100, 1, 'last');
 CnavA  = dcmT(runA.navAtt(iO, :));
@@ -211,9 +218,11 @@ resQ = runCompare(runQ, [], 100, 250, [10 95; 255 295]);
 runR = runB;  runR.name = 'R short name pDig';  runR.pDig = runB.pDiag;  runR = rmfield(runR, 'pDiag');
 runS = runB;  runS.name = 'S num2cell pDiag';  runS.pDiag = num2cell(pDiagCat(runB.pDiag));
 resS = runCompare(runS, [], 100, 250, [10 95; 255 295]);
+runT = runD;  runT.name = 'T gyro biases first in P';  runT.pDiag = runD.pDiag([1:9 13:15 10:12 16:22]);  runT.pGyroFirst = true;
+resT = runCompare(runT, [], 100, 250);
 resR = runCompare(runR, [], 100, 250, [10 95; 255 295]);
 okP = abs(resP.run1.sig(4) - 0.05) < 1e-12 && ~any(isfinite(resQ.run1.sig)) && abs(resR.run1.sig(4) - 0.05) < 1e-12 ...
-   && abs(resS.run1.sig(4) - 0.05) < 1e-12;   % pDig accepted, num2cell accepted
+   && abs(resS.run1.sig(4) - 0.05) < 1e-12 && abs(resT.run1.sig(10) / (9.80665e-3) - 0.2) < 1e-9;   % pDig, num2cell, pGyroFirst
 if okP, fprintf('=== pDiag shape / mismatch / misspelt check PASS ===\n'); else, fprintf('=== pDiag shape / mismatch / misspelt check FAIL ===\n'); end
 okG = resG.run1.tau == resG.run1.tauP && abs(resG.run1.tauP - 0.5) < 0.011;
 if okG, fprintf('=== unusable attitude fallback check PASS ===\n'); else, fprintf('=== unusable attitude fallback check FAIL ===\n'); end

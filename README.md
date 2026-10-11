@@ -110,6 +110,10 @@ position error over the first 10 s of the outage is printed as the model-free
 value of the velocity error at the outage start, and the budget includes the
 yaw error acting on the manoeuvres of the outage. The header lists the arrays
 each run struct must hold (nav, truth, bias estimates, optional P diagonal).
+`tools/timeOffset.m` is the filter-free companion: the time shift between
+two position records of the same vehicle, for instance the receiver's own
+position output against the reference, which says whether the GNSS tags run
+late against the reference before anything in the host is changed.
 
 ## Printable copies
 

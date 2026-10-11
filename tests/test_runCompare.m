@@ -231,3 +231,7 @@ okE = strcmp(resE.run1.velSource, 'position') && all(abs(resE.run1.dv' - dvA) < 
    && strcmp(res1.run1.velSource, 'logged');
 if okE, fprintf('=== truth velocity fallback check PASS ===\n'); else, fprintf('=== truth velocity fallback check FAIL ===\n'); end
 if abs(res1.run1.tau - 0.5) < 0.011 && all(abs(res1.run1.dv' - dvA) < 0.02), fprintf('=== default window check PASS ===\n'); else, fprintf('=== default window check FAIL ===\n'); end
+% filter-free offset between two position records: a receiver record stamped 0.45 s late against the reference
+kR = 1:50:numel(tTrue);                                                  % a 2 Hz receiver record
+tauR = timeOffset(tTrue(kR) + 0.45, truePos(kR, :), tTrue, truePos);
+if abs(tauR + 0.45) < 0.011, fprintf('=== timeOffset check PASS ===\n'); else, fprintf('=== timeOffset check FAIL ===\n'); end

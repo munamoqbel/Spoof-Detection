@@ -235,3 +235,15 @@ if abs(res1.run1.tau - 0.5) < 0.011 && all(abs(res1.run1.dv' - dvA) < 0.02), fpr
 kR = 1:50:numel(tTrue);                                                  % a 2 Hz receiver record
 tauR = timeOffset(tTrue(kR) + 0.45, truePos(kR, :), tTrue, truePos);
 if abs(tauR + 0.45) < 0.011, fprintf('=== timeOffset check PASS ===\n'); else, fprintf('=== timeOffset check FAIL ===\n'); end
+% latency from pseudorange innovations: 10 satellites, observables 0.45 s older than the state, 1 m noise, a clock term
+randn('seed', 7);
+KL = 300;  ML = 10;
+losL = randn(KL, ML, 3);  losL(:, :, 3) = -abs(losL(:, :, 3));            % satellites above the horizon (NED: up is -D)
+nrm = sqrt(sum(losL.^2, 3));  losL = losL ./ repmat(nrm, [1 1 3]);
+velL = 12 * [cos(0.01 * (1:KL)') sin(0.01 * (1:KL)') zeros(KL, 1)];
+uvL = zeros(KL, ML);
+for kk = 1:KL, uvL(kk, :) = (reshape(losL(kk, :, :), ML, 3) * velL(kk, :)')'; end
+innovL = 0.45 * uvL + repmat(3 * randn(KL, 1), 1, ML) + 1.0 * randn(KL, ML);
+innovL(:, 9:10) = NaN;                                                   % two satellites unused
+[dltL, r2L] = latencyFromInnov(innovL, losL, velL);
+if abs(median(dltL(isfinite(dltL))) - 0.45) < 0.03, fprintf('=== latencyFromInnov check PASS ===\n'); else, fprintf('=== latencyFromInnov check FAIL ===\n'); end

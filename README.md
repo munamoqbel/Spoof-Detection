@@ -114,6 +114,11 @@ each run struct must hold (nav, truth, bias estimates, optional P diagonal).
 two position records of the same vehicle, for instance the receiver's own
 position output against the reference, which says whether the GNSS tags run
 late against the reference before anything in the host is changed.
+`tools/latencyFromInnov.m` measures the same latency from inside the 2 Hz
+function: per epoch it fits the pseudorange innovations to a clock term plus
+dlt times the line-of-sight velocity, so observables one epoch older than the
+state they are compared with show up as dlt of 0.5 s, and a split by epoch
+type tells which of the two 2 Hz epochs is paired wrongly.
 
 ## Printable copies
 

@@ -127,6 +127,17 @@ pseudoranges, the satellite positions the host uses in h(x) and the
 reference position, it finds the shift of the reference instant at which the
 ranges fit, so observables one epoch older than the pulse they are paired
 with show a minimum at −0.5 s.
+`tools/dopplerCheck.m` reads the spfMeas records saved per 2 Hz epoch (the
+struct the host already builds for the gate, which carries y, S, H, R and the
+state before and after the update) and says what the range-rate rows do in
+the update: per row type the measurement sigma, what the filter expects from
+its own state, the innovation rms, the gain fraction applied, the NIS, the
+velocity correction per epoch, and whether the velocity partial of the
+range-rate rows shares the sign and frame of the position partial of the range
+rows. Verdict lines name an R far above the state uncertainty (rows switched
+off in effect), a range rate built from the nav solution itself, and an
+opposite-sign or wrong-frame derivative. `tests/test_dopplerCheck.m` covers
+the five cases.
 
 ## Printable copies
 

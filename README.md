@@ -108,8 +108,11 @@ the signature of GNSS measurements applied late, and the regression of the
 errors on the truth velocity and acceleration quantifies it. The slope of the
 position error over the first 10 s of the outage is printed as the model-free
 value of the velocity error at the outage start, and the budget includes the
-yaw error acting on the manoeuvres of the outage. The header lists the arrays
-each run struct must hold (nav, truth, bias estimates, optional P diagonal).
+yaw error acting on the manoeuvres of the outage. A clean run without an
+outage is analysed with tOut and tReacq empty: the alignment and aided-accuracy
+sections then run over the whole run and the outage sections are skipped. The
+header lists the arrays each run struct must hold (nav, truth, bias estimates,
+optional P diagonal).
 `tools/timeOffset.m` is the filter-free companion: the time shift between
 two position records of the same vehicle, for instance the receiver's own
 position output against the reference, which says whether the GNSS tags run

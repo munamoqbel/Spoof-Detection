@@ -2,6 +2,7 @@ function [res] = runCompare(runA, runB, tOut, tReacq, aidedWin)
 %RUNCOMPARE  Decompose an INS-only outage drift from the logs of one or two runs.
 %   res = runCompare(runA, runB, tOut, tReacq, aidedWin)
 %   res = runCompare(runA, [],   tOut, tReacq, aidedWin)      one run only
+%   res = runCompare(runA, runB, [],   [],     aidedWin)      no outage: sections 0 and 1 only
 %
 %   Post-processing only: nothing is re-run. Each run is a struct of the
 %   arrays the host already logs (nav solution, truth, bias estimates):
@@ -33,11 +34,14 @@ function [res] = runCompare(runA, runB, tOut, tReacq, aidedWin)
 %     pGyroFirst  optional, true when the host's P orders the gyro biases
 %                       (10:12) before the accelerometer biases (13:15)
 %     name     char, optional
-%   tOut     last GNSS-aided epoch before the outage (s)
-%   tReacq   first GNSS epoch after the outage (s)
+%   tOut     last GNSS-aided epoch before the outage (s); [] for a run
+%            without an outage (a clean aided run): sections 2 to 4 and the
+%            two-run state comparison are then skipped
+%   tReacq   first GNSS epoch after the outage (s); [] with tOut = []
 %   aidedWin [K x 2]  GNSS-aided windows [t1 t2] used for the truth-lag
 %            estimate and the aided-accuracy figures, e.g. [100 760; 900 1600].
-%            Optional: omitted or [], the 300 s before tOut are used.
+%            Optional: omitted or [], the 300 s before tOut are used, or the
+%            whole run when tOut is []
 %
 %   What it prints, per run
 %     0. time alignment. (a) truth arrays: trueVel and the yaw of trueAtt
@@ -89,7 +93,8 @@ function [res] = runCompare(runA, runB, tOut, tReacq, aidedWin)
 %   MATLAB desktop tool, not codegen. Runs under Octave.
 
 G = 9.80665;
-if nargin < 5 || isempty(aidedWin), aidedWin = [tOut - 300, tOut]; end
+if nargin < 5, aidedWin = []; end
+if isempty(aidedWin) && ~isempty(tOut), aidedWin = [tOut - 300, tOut]; end
 runs = {runA};
 if ~isempty(runB), runs{end+1} = runB; end
 res = struct();
@@ -113,7 +118,7 @@ for k = 1:numel(runs)
     end
     res.(sprintf('run%d', k)) = analyseRun(r, tOut, tReacq, aidedWin, G);
 end
-if numel(runs) == 2
+if numel(runs) == 2 && ~isempty(tOut)
     compareRuns(res.run1, res.run2, runs{1}.name, runs{2}.name);
 end
 end
@@ -122,6 +127,9 @@ end
 function [o] = analyseRun(r, tOut, tReacq, aidedWin, G)
 t = r.t(:);
 N = numel(t);
+hasOut = ~isempty(tOut);
+if ~hasOut, tOut = t(end); tReacq = t(end); end               % no outage: the whole run is aided, the state is read at its end
+if isempty(aidedWin), aidedWin = [t(1), t(end)]; end
 yawT = r.trueAtt(:, 3);  okY = isfinite(yawT);  yawT(okY) = unwrap(yawT(okY));  r.trueAtt(:, 3) = yawT;   % continuous across +-pi for interpolation
 rA = NaN;
 
@@ -361,107 +369,116 @@ fprintf('   metre-sized arms mean the GNSS antenna sits that far from the refere
 lastWin = inAided & t <= tOut & t >= tOut - 60;
 if any(lastWin)
     bm = mean(biasErr(lastWin, :), 1);
-    fprintf('   bias error, mean over the last 60 s before tOut: accel %+.3f %+.3f %+.3f mg, gyro %+.3f %+.3f %+.3f deg/h\n', ...
-        bm(1:3) / (G * 1e-3), bm(4:6) * 180 / pi * 3600);
+    fprintf('   bias error, mean over the last 60 s of aiding before t = %.2f: accel %+.3f %+.3f %+.3f mg, gyro %+.3f %+.3f %+.3f deg/h\n', ...
+        tOut, bm(1:3) / (G * 1e-3), bm(4:6) * 180 / pi * 3600);
 end
 
-%% 2. state error at tOut
-iOut = find(t <= tOut, 1, 'last');
-iEnd = find(t < tReacq, 1, 'last');            % last INS-only sample before the first update
-T    = t(iEnd) - t(iOut);
-dv   = velErr(iOut, :)';
-db   = biasErr(iOut, :)';
-Cnav  = dcmFromEuler(r.navAtt(iOut, :));
-Ctrue = dcmFromEuler(attTrue(iOut, :));
-dC  = Cnav * Ctrue';
-psi = [dC(2,3) - dC(3,2); dC(3,1) - dC(1,3); dC(1,2) - dC(2,1)] / 2;   % I - [psi x]
-sig = NaN(22, 1);
-if ~isempty(P) && size(P, 1) == N
-    sig = sqrt(max(P(iOut, :), 0))';
-    if isfield(r, 'pGyroFirst') && r.pGyroFirst
-        sig([10:12 13:15]) = sig([13:15 10:12]);               % host orders the gyro biases before the accelerometer biases
+%% 2. state error at tOut, 3. outage trace, 4. budget: only with an outage
+iOut = N;  iEnd = N;  T = NaN;  dv = NaN(3, 1);  db = NaN(6, 1);  psi = NaN(3, 1);  sig = NaN(22, 1);
+drift = NaN(1, 3);  slope10 = NaN(1, 3);  dvImplied = NaN(1, 3);  velJump = NaN;  tJump = NaN;  yawJump = NaN;
+coef = NaN(3, 4);  velTerm = NaN(3, 1);  biasTerm = velTerm;  tiltTerm = velTerm;  gyroTerm = velTerm;  yawTerm = velTerm;
+if ~hasOut
+    fprintf('2.-4. no outage given (tOut = []): the state, trace and budget sections are skipped\n');
+else
+    %% 2. state error at tOut
+    iOut = find(t <= tOut, 1, 'last');
+    iEnd = find(t < tReacq, 1, 'last');            % last INS-only sample before the first update
+    T    = t(iEnd) - t(iOut);
+    dv   = velErr(iOut, :)';
+    db   = biasErr(iOut, :)';
+    Cnav  = dcmFromEuler(r.navAtt(iOut, :));
+    Ctrue = dcmFromEuler(attTrue(iOut, :));
+    dC  = Cnav * Ctrue';
+    psi = [dC(2,3) - dC(3,2); dC(3,1) - dC(1,3); dC(1,2) - dC(2,1)] / 2;   % I - [psi x]
+    sig = NaN(22, 1);
+    if ~isempty(P) && size(P, 1) == N
+        sig = sqrt(max(P(iOut, :), 0))';
+        if isfield(r, 'pGyroFirst') && r.pGyroFirst
+            sig([10:12 13:15]) = sig([13:15 10:12]);               % host orders the gyro biases before the accelerometer biases
+        end
     end
-end
-if ~any(isfinite(sig))
-    fprintf('   (no sigmas: pDiag missing or not matched to the epochs, see the NOTEs above)\n');
-end
-fprintf('2. state error at t = %.2f (truth lag applied), outage T = %.1f s to t = %.2f\n', t(iOut), T, t(iEnd));
-fprintf('   pos err   N %+8.2f E %+8.2f D %+8.2f m\n', posErr(iOut, :));
-fprintf('   vel err   N %+8.3f E %+8.3f D %+8.3f m/s     sigma %s\n', dv, sigStr(sig(4:6)));
-fprintf('   euler err roll %+7.3f pitch %+7.3f yaw %+7.3f mrad   sigma(mrad) %s\n', attErr(iOut, :) * 1e3, sigStr(sig(7:9) * 1e3));
-fprintf('   tilt psi  N %+7.3f E %+7.3f D %+7.3f mrad (from the DCMs)\n', psi * 1e3);
-fprintf('   accel bias err %+7.3f %+7.3f %+7.3f mg      sigma(mg) %s\n', db(1:3) / (G * 1e-3), sigStr(sig(10:12) / (G * 1e-3)));
-fprintf('   gyro  bias err %+7.3f %+7.3f %+7.3f deg/h   sigma(deg/h) %s\n', db(4:6) * 180 / pi * 3600, sigStr(sig(13:15) * 180 / pi * 3600));
-if all(isfinite(sig(10:15))) && max(sig(10:12)) / (G * 1e-3) < 0.02 && min(sig(13:15)) * 180 / pi * 3600 > 100
-    fprintf('   NOTE: sigma(accel bias) below 0.02 mg next to sigma(gyro bias) above 100 deg/h is not a plausible pair. Read with the two\n');
-    fprintf('         bias blocks swapped they are %.3f %.3f %.3f mg and %.2f %.2f %.2f deg/h. If the host orders the gyro biases before the\n', ...
-        sig(13:15) / (G * 1e-3), sig(10:12) * 180 / pi * 3600);
-    fprintf('         accelerometer biases in its state vector, set run.pGyroFirst = true.\n');
-end
+    if ~any(isfinite(sig))
+        fprintf('   (no sigmas: pDiag missing or not matched to the epochs, see the NOTEs above)\n');
+    end
+    fprintf('2. state error at t = %.2f (truth lag applied), outage T = %.1f s to t = %.2f\n', t(iOut), T, t(iEnd));
+    fprintf('   pos err   N %+8.2f E %+8.2f D %+8.2f m\n', posErr(iOut, :));
+    fprintf('   vel err   N %+8.3f E %+8.3f D %+8.3f m/s     sigma %s\n', dv, sigStr(sig(4:6)));
+    fprintf('   euler err roll %+7.3f pitch %+7.3f yaw %+7.3f mrad   sigma(mrad) %s\n', attErr(iOut, :) * 1e3, sigStr(sig(7:9) * 1e3));
+    fprintf('   tilt psi  N %+7.3f E %+7.3f D %+7.3f mrad (from the DCMs)\n', psi * 1e3);
+    fprintf('   accel bias err %+7.3f %+7.3f %+7.3f mg      sigma(mg) %s\n', db(1:3) / (G * 1e-3), sigStr(sig(10:12) / (G * 1e-3)));
+    fprintf('   gyro  bias err %+7.3f %+7.3f %+7.3f deg/h   sigma(deg/h) %s\n', db(4:6) * 180 / pi * 3600, sigStr(sig(13:15) * 180 / pi * 3600));
+    if all(isfinite(sig(10:15))) && max(sig(10:12)) / (G * 1e-3) < 0.02 && min(sig(13:15)) * 180 / pi * 3600 > 100
+        fprintf('   NOTE: sigma(accel bias) below 0.02 mg next to sigma(gyro bias) above 100 deg/h is not a plausible pair. Read with the two\n');
+        fprintf('         bias blocks swapped they are %.3f %.3f %.3f mg and %.2f %.2f %.2f deg/h. If the host orders the gyro biases before the\n', ...
+            sig(13:15) / (G * 1e-3), sig(10:12) * 180 / pi * 3600);
+        fprintf('         accelerometer biases in its state vector, set run.pGyroFirst = true.\n');
+    end
 
-%% 3. outage trace fit
-sel = (t >= t(iOut)) & (t <= t(iEnd)) & all(isfinite(posErr), 2);
-x   = t(sel) - t(iOut);
-drift = posErr(iEnd, :) - posErr(iOut, :);
-i10 = min(find(t <= t(iOut) + 10, 1, 'last'), iEnd);
-slope10 = (posErr(i10, :) - posErr(iOut, :)) / (t(i10) - t(iOut));
-[jump, iJ] = max(sqrt(sum(diff(posErr(iOut:i10, :), 1, 1).^2, 2)));
-fprintf('3. outage drift observed: N %+8.2f E %+8.2f D %+8.2f m\n', drift);
-aErr = Cnav * (-db(1:3)) + G * [psi(2); -psi(1); 0];        % bias + tilt acceleration error of section 2
-dvImplied = slope10 - 0.5 * aErr' * (t(i10) - t(iOut));
-fprintf('   slope over the first %.0f s of the outage: N %+.3f E %+.3f D %+.3f m/s = vel err at tOut + %.0f s x the bias+tilt acceleration\n', ...
-    t(i10) - t(iOut), slope10, 0.5 * (t(i10) - t(iOut)));
-fprintf('   implied vel err at tOut: N %+.3f E %+.3f D %+.3f m/s; a gap of more than ~0.1 m/s to section 2 means the truth velocity or its lag is wrong\n', ...
-    dvImplied);
-if jump > 0.5
-    fprintf('   WARNING: the position error jumps by %.2f m at t = %.2f inside those %.0f s (a solution switch?); the slope above includes it\n', ...
-        jump, t(iOut + iJ), t(i10) - t(iOut));
-end
-[velJump, iVJ] = max(sqrt(sum(diff(velErr(iOut:i10, 1:2), 1, 1).^2, 2)));
-dYaw = diff(attErr(iOut:i10, 3));  [yawJump, iYJ] = max(abs(atan2(sin(dYaw), cos(dYaw))));
-tJump = t(iOut + iVJ);
-if velJump > 0.1
-    fprintf('   WARNING: the velocity error jumps by %.3f m/s at t = %.2f: the coast starts from another state than section 2 describes\n', velJump, tJump);
-    fprintf('            (a solution switch, e.g. a latch to an anchor); vel err just after it: N %+.3f E %+.3f D %+.3f m/s\n', velErr(iOut + iVJ, :));
-end
-if yawJump > 0.005
-    fprintf('   WARNING: the yaw error jumps by %.1f mrad at t = %.2f (a solution switch)\n', yawJump * 1e3, t(iOut + iYJ));
-end
-fprintf('   fit err = a + b x + c x^2 + d x^3 over %d samples, contributions at T = %.0f s:\n', nnz(sel), T);
-fprintf('   axis      b T (vel)    c T^2 (bias/tilt)    d T^3 (gyro)    fit rms   b [m/s]\n');
-coef = zeros(3, 4);
-axName = 'NED';
-for ax = 1:3
-    p = polyfit(x, posErr(sel, ax), 3);              % [d c b a]
-    coef(ax, :) = p;
-    fitRms = sqrt(mean((polyval(p, x) - posErr(sel, ax)).^2));
-    fprintf('   %s     %+9.2f     %+9.2f            %+9.2f       %6.2f    %+.3f\n', ...
-        axName(ax), p(3) * T, p(2) * T^2, p(1) * T^3, fitRms, p(3));
-end
-fprintf('   (b should agree with the vel err of section 2; a large gap means the lag or the logged solution is wrong)\n');
+    %% 3. outage trace fit
+    sel = (t >= t(iOut)) & (t <= t(iEnd)) & all(isfinite(posErr), 2);
+    x   = t(sel) - t(iOut);
+    drift = posErr(iEnd, :) - posErr(iOut, :);
+    i10 = min(find(t <= t(iOut) + 10, 1, 'last'), iEnd);
+    slope10 = (posErr(i10, :) - posErr(iOut, :)) / (t(i10) - t(iOut));
+    [jump, iJ] = max(sqrt(sum(diff(posErr(iOut:i10, :), 1, 1).^2, 2)));
+    fprintf('3. outage drift observed: N %+8.2f E %+8.2f D %+8.2f m\n', drift);
+    aErr = Cnav * (-db(1:3)) + G * [psi(2); -psi(1); 0];        % bias + tilt acceleration error of section 2
+    dvImplied = slope10 - 0.5 * aErr' * (t(i10) - t(iOut));
+    fprintf('   slope over the first %.0f s of the outage: N %+.3f E %+.3f D %+.3f m/s = vel err at tOut + %.0f s x the bias+tilt acceleration\n', ...
+        t(i10) - t(iOut), slope10, 0.5 * (t(i10) - t(iOut)));
+    fprintf('   implied vel err at tOut: N %+.3f E %+.3f D %+.3f m/s; a gap of more than ~0.1 m/s to section 2 means the truth velocity or its lag is wrong\n', ...
+        dvImplied);
+    if jump > 0.5
+        fprintf('   WARNING: the position error jumps by %.2f m at t = %.2f inside those %.0f s (a solution switch?); the slope above includes it\n', ...
+            jump, t(iOut + iJ), t(i10) - t(iOut));
+    end
+    [velJump, iVJ] = max(sqrt(sum(diff(velErr(iOut:i10, 1:2), 1, 1).^2, 2)));
+    dYaw = diff(attErr(iOut:i10, 3));  [yawJump, iYJ] = max(abs(atan2(sin(dYaw), cos(dYaw))));
+    tJump = t(iOut + iVJ);
+    if velJump > 0.1
+        fprintf('   WARNING: the velocity error jumps by %.3f m/s at t = %.2f: the coast starts from another state than section 2 describes\n', velJump, tJump);
+        fprintf('            (a solution switch, e.g. a latch to an anchor); vel err just after it: N %+.3f E %+.3f D %+.3f m/s\n', velErr(iOut + iVJ, :));
+    end
+    if yawJump > 0.005
+        fprintf('   WARNING: the yaw error jumps by %.1f mrad at t = %.2f (a solution switch)\n', yawJump * 1e3, t(iOut + iYJ));
+    end
+    fprintf('   fit err = a + b x + c x^2 + d x^3 over %d samples, contributions at T = %.0f s:\n', nnz(sel), T);
+    fprintf('   axis      b T (vel)    c T^2 (bias/tilt)    d T^3 (gyro)    fit rms   b [m/s]\n');
+    coef = zeros(3, 4);
+    axName = 'NED';
+    for ax = 1:3
+        p = polyfit(x, posErr(sel, ax), 3);              % [d c b a]
+        coef(ax, :) = p;
+        fitRms = sqrt(mean((polyval(p, x) - posErr(sel, ax)).^2));
+        fprintf('   %s     %+9.2f     %+9.2f            %+9.2f       %6.2f    %+.3f\n', ...
+            axName(ax), p(3) * T, p(2) * T^2, p(1) * T^3, fitRms, p(3));
+    end
+    fprintf('   (b should agree with the vel err of section 2; a large gap means the lag or the logged solution is wrong)\n');
 
-%% 4. budget from the tOut state
-velTerm  = dv * T;
-biasTerm = 0.5 * (Cnav * (-db(1:3))) * T^2;                 % -(est - true) is the residual on the corrected IMU
-tiltTerm = 0.5 * (dC - eye(3)) * [0; 0; -G] * T^2;          % exact: (C_nav C_true' - I) acting on the gravity reaction; -psi x f to first order
-psiDot   = Cnav * db(4:6);                                  % the nav integrates omega_true - (est - true): psi_dot = +C db for C_nav = (I - [psi x]) C_true
-gyroTerm = G * [psiDot(2); -psiDot(1); 0] * T^3 / 6;
-dpTrue   = nedDelta(interpRows(tT, r.truePos, tq(iEnd)), interpRows(tT, r.truePos, tq(iOut)))';
-v0       = interpRows(tT, trueVel, tq(iOut))';
-u        = dpTrue - v0 * T;                                 % displacement from the integrated specific force
-yawTerm  = (dC - eye(3)) * u;                               % exact; [psi_D u_E, -psi_D u_N, 0] to first order
-total    = velTerm + biasTerm + tiltTerm + gyroTerm + yawTerm;
-fprintf('4. budget from the tOut state (m):   N         E         D\n');
-fprintf('   velocity  dv T           %+8.2f  %+8.2f  %+8.2f\n', velTerm);
-fprintf('   accel bias 1/2 C db T^2  %+8.2f  %+8.2f  %+8.2f\n', biasTerm);
-fprintf('   tilt   (dC-I) g T^2/2    %+8.2f  %+8.2f  %+8.2f\n', tiltTerm);
-fprintf('   gyro bias g psidot T^3/6 %+8.2f  %+8.2f  %+8.2f\n', gyroTerm);
-fprintf('   yaw   (dC-I)(dp - v0 T)  %+8.2f  %+8.2f  %+8.2f   (manoeuvre displacement |dp - v0 T| = %.0f m)\n', yawTerm, norm(u(1:2)));
-fprintf('   sum                      %+8.2f  %+8.2f  %+8.2f\n', total);
-fprintf('   observed                 %+8.2f  %+8.2f  %+8.2f\n', drift);
-bt = r.biasTrue(1, 1:3);
-fprintf('   scale: true accel bias uncompensated over T = %.0f m, applied with the wrong sign = %.0f m\n', ...
-    0.5 * norm(bt) * T^2, norm(bt) * T^2);
+    %% 4. budget from the tOut state
+    velTerm  = dv * T;
+    biasTerm = 0.5 * (Cnav * (-db(1:3))) * T^2;                 % -(est - true) is the residual on the corrected IMU
+    tiltTerm = 0.5 * (dC - eye(3)) * [0; 0; -G] * T^2;          % exact: (C_nav C_true' - I) acting on the gravity reaction; -psi x f to first order
+    psiDot   = Cnav * db(4:6);                                  % the nav integrates omega_true - (est - true): psi_dot = +C db for C_nav = (I - [psi x]) C_true
+    gyroTerm = G * [psiDot(2); -psiDot(1); 0] * T^3 / 6;
+    dpTrue   = nedDelta(interpRows(tT, r.truePos, tq(iEnd)), interpRows(tT, r.truePos, tq(iOut)))';
+    v0       = interpRows(tT, trueVel, tq(iOut))';
+    u        = dpTrue - v0 * T;                                 % displacement from the integrated specific force
+    yawTerm  = (dC - eye(3)) * u;                               % exact; [psi_D u_E, -psi_D u_N, 0] to first order
+    total    = velTerm + biasTerm + tiltTerm + gyroTerm + yawTerm;
+    fprintf('4. budget from the tOut state (m):   N         E         D\n');
+    fprintf('   velocity  dv T           %+8.2f  %+8.2f  %+8.2f\n', velTerm);
+    fprintf('   accel bias 1/2 C db T^2  %+8.2f  %+8.2f  %+8.2f\n', biasTerm);
+    fprintf('   tilt   (dC-I) g T^2/2    %+8.2f  %+8.2f  %+8.2f\n', tiltTerm);
+    fprintf('   gyro bias g psidot T^3/6 %+8.2f  %+8.2f  %+8.2f\n', gyroTerm);
+    fprintf('   yaw   (dC-I)(dp - v0 T)  %+8.2f  %+8.2f  %+8.2f   (manoeuvre displacement |dp - v0 T| = %.0f m)\n', yawTerm, norm(u(1:2)));
+    fprintf('   sum                      %+8.2f  %+8.2f  %+8.2f\n', total);
+    fprintf('   observed                 %+8.2f  %+8.2f  %+8.2f\n', drift);
+    bt = r.biasTrue(1, 1:3);
+    fprintf('   scale: true accel bias uncompensated over T = %.0f m, applied with the wrong sign = %.0f m\n', ...
+        0.5 * norm(bt) * T^2, norm(bt) * T^2);
+
+end
 
 o = struct('name', r.name, 'tau', tau, 'tauP', tauP, 'tauV', tauV, 'tauVp', tauVp, 'tauA', tauA, 'sV', sV, 'sA', sA, 'sNV', sNV, ...
     'kP', kP, 'r2P', r2P, 'kV', kV, 'r2V', r2V, 'velSource', velSource, 'rmsPos', rmsPos, ...

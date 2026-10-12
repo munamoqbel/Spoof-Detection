@@ -276,3 +276,9 @@ prP(:, 8) = NaN;  sysP = [ones(KP, 5) 2 * ones(KP, 3)];  prP(:, 6:7) = prP(:, 6:
 [costP, shP] = pairingCheck(tEp, prP, satP, tTrue, truePos, -1.5:0.1:0.5, sysP);
 [~, iP] = min(costP);
 if abs(shP(iP) + 0.5) < 0.01, fprintf('=== pairingCheck check PASS ===\n'); else, fprintf('=== pairingCheck check FAIL ===\n'); end
+% a clean run without an outage (tOut = []): sections 0 and 1 only, no state comparison, the whole run aided by default
+resN = runCompare(runA, runB, [], [], [10 95; 255 295]);
+resN0 = runCompare(runA, [], [], []);
+okN = abs(resN.run1.tau - 0.5) < 0.011 && abs(resN.run2.tau - 0.5) < 0.011 && isnan(resN.run1.T) && ~any(isfinite(resN.run1.dv)) ...
+   && all(isfinite(resN.run1.rmsPos)) && all(abs(resN.run1.rmsPos - res.run1.rmsPos) < 1e-9) && isnan(resN0.run1.T) && all(isfinite(resN0.run1.rmsPos));
+if okN, fprintf('=== no-outage check PASS ===\n'); else, fprintf('=== no-outage check FAIL ===\n'); end

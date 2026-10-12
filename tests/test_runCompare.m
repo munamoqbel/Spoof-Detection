@@ -217,8 +217,20 @@ resG = runCompare(runG, [], 100, 250);
 runH = makeRun('H latency 0.43 s', [0.5 0.5 0.5 0.43], dvA, accA, jerkA, [0.5e-3 -0.3e-3 1e-3], [-0.6e-3*G 0.1e-3*G 0 0.3/3600*pi/180 0 -1/3600*pi/180], false, tTrue, truePos, trueVel, trueAtt, biasTrue);
 resH = runCompare(runH, [], 100, 250, [10 95; 255 295]);
 okH = abs(resH.run1.tauA - 0.5) < 0.011 && abs(resH.run1.tauP - 0.07) < 0.011 && abs(resH.run1.tauV - 0.07) < 0.011 ...
+   && abs(resH.run1.posLatency + 0.43) < 0.03 && all(abs(resH.run1.posOffset) < 0.4) ...
    && abs(resH.run1.kP + 0.43) < 0.02 && resH.run1.r2P > 0.95 && abs(resH.run1.kV + 0.43) < 0.03 && abs(resH.run1.sNV) < 0.011;
 if okH, fprintf('=== latency check PASS ===\n'); else, fprintf('=== latency check FAIL ===\n'); end
+% the nav position refers to a point 1.4 m ahead and 0.3 m left of the truth reference point: read back as an offset, not a latency
+runJ = runA;  runJ.name = 'J reference-point offset';
+yawJ = interp1(tTrue, trueAtt(:, 3), runJ.t + lagsA(1));
+dNJ = cos(yawJ) * 1.4 - sin(yawJ) * (-0.3);  dEJ = sin(yawJ) * 1.4 + cos(yawJ) * (-0.3);
+LJ = runJ.navPos(:, 1);  RNJ = a * (1 - e2) ./ (1 - e2 * sin(LJ).^2).^1.5;  REJ = a ./ sqrt(1 - e2 * sin(LJ).^2);
+runJ.navPos(:, 1) = runJ.navPos(:, 1) + dNJ ./ (RNJ + runJ.navPos(:, 3));
+runJ.navPos(:, 2) = runJ.navPos(:, 2) + dEJ ./ ((REJ + runJ.navPos(:, 3)) .* cos(LJ));
+resJ = runCompare(runJ, [], 100, 250, [10 95; 255 295]);
+okJ = abs(resJ.run1.posOffset(1) - 1.4) < 0.25 && abs(resJ.run1.posOffset(2) + 0.3) < 0.25 && abs(resJ.run1.posLatency) < 0.015 ...
+   && all(abs(res.run1.posOffset) < 0.3) && abs(res.run1.posLatency) < 0.015;
+if okJ, fprintf('=== reference-point offset check PASS ===\n'); else, fprintf('=== reference-point offset check FAIL ===\n'); end
 % pDiag given as states x records, with the wrong record count, and under a misspelt field name
 runP = runB;  runP.name = 'P transposed';  runP.pDiag = pDiagCat(runB.pDiag)';           % 22 x K
 resP = runCompare(runP, [], 100, 250, [10 95; 255 295]);

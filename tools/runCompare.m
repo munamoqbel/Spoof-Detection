@@ -59,7 +59,9 @@ function [res] = runCompare(runA, runB, tOut, tReacq, aidedWin)
 %        is error of the nav solution (a position error proportional to the
 %        velocity and a velocity error proportional to the acceleration are
 %        the signature of GNSS measurements applied late). The regression of
-%        the errors on the truth velocity / acceleration quantifies that.
+%        the errors on the truth velocity / acceleration quantifies that, and
+%        the position error in the body frame regressed on the speed splits
+%        it into a reference-point offset (constant) and a latency (speed term).
 %     1. aided accuracy: RMS position, velocity and attitude error, bias error
 %     2. state error at tOut: velocity, tilt, bias, with sigma from pDiag
 %     3. outage trace: the slope over the first 10 s (must match the tOut
@@ -83,7 +85,8 @@ function [res] = runCompare(runA, runB, tOut, tReacq, aidedWin)
 %     -psi x (dp - v0 T) with psi = [0 0 psi_D]. The tilt and yaw rows use
 %     the exact rotation (C_nav C_true' - I), the gyro row psi_dot = C db.
 %   Result: res.run1 (and res.run2) with tau (reference lag), tauP, tauV,
-%   tauA, sV, sA, sNV, kP, r2P, kV, r2V, velSource, rmsPos, rmsVel, meanVel,
+%   tauA, sV, sA, sNV, kP, r2P, kV, r2V, posOffset [along cross], posLatency and
+%   their fit sigmas posOffsetSig, posLatencySig, velSource, rmsPos, rmsVel, meanVel,
 %   rmsAtt, tOut, T, posErrOut, dv, slope10, attErr, psi, db, sig, drift,
 %   coef, velTerm, biasTerm, tiltTerm, gyroTerm, yawTerm and the traces
 %   posErrTrace, velErrTrace, attErrTrace, biasErrTrace on t. sig is the
@@ -321,6 +324,33 @@ aT  = interpRows(tT, diffRows(tT, velRef, 5), tqK);              % truth acceler
 [kV, r2V] = fitK(eV(:, 1:2), aT(:, 1:2), gA);
 fprintf('   at the %s: pos err = %+.3f s x truth velocity (%.0f%% of the horizontal error variance), vel err = %+.3f s x truth acceleration (%.0f%%)\n', ...
     kName, kP, 100 * r2P, kV, 100 * r2V);
+% the same position error split into a reference-point offset and a latency, fitted together with a constant per aided
+% window: e = R(course) [along; cross] + latency x truth velocity + mean(window). The offset is between the truth reference
+% point and the nav point (it turns with the heading, so the window mean does not absorb it), the latency is of the position rows
+spdK = hypot(vT(:, 1), vT(:, 2));
+movK = spdK > 3 & all(isfinite(eP(:, 1:2)), 2) & all(isfinite(vT(:, 1:2)), 2);
+posOffset = NaN(1, 2);  posLatency = NaN;  posOffsetSig = NaN(1, 2);  posLatencySig = NaN;
+if nnz(movK) > 10
+    n  = nnz(movK);
+    cK = atan2(vT(movK, 2), vT(movK, 1));
+    w  = gA(movK);  nW = max(w);
+    Z  = zeros(n, nW);  Z(sub2ind([n, nW], (1:n)', w)) = 1;
+    A  = [cos(cK), -sin(cK), vT(movK, 1), Z, zeros(n, nW); ...
+          sin(cK),  cos(cK), vT(movK, 2), zeros(n, nW), Z];
+    b  = [eP(movK, 1); eP(movK, 2)];
+    x  = A \ b;
+    rs = b - A * x;
+    rho = max(0, min(0.999, (rs(1:end-1)' * rs(2:end)) / (rs' * rs)));      % neighbouring samples are not independent
+    cv  = (rs' * rs) / (2 * n - size(A, 2)) * (1 + rho) / (1 - rho) * inv(A' * A);
+    posOffset = x(1:2)';  posLatency = x(3);
+    posOffsetSig = sqrt(diag(cv(1:2, 1:2)))';  posLatencySig = sqrt(cv(3, 3));
+    sp = sort(spdK(movK));  spdRange = [sp(max(1, round(0.05 * numel(sp)))), sp(round(0.95 * numel(sp)))];
+    fprintf('   position error = offset in the body frame + latency x velocity: along-track %+.2f (+-%.2f) m, cross-track %+.2f (+-%.2f) m,\n', ...
+        posOffset(1), posOffsetSig(1), posOffset(2), posOffsetSig(2));
+    fprintf('   latency %+.3f (+-%.3f) s (speed %.0f-%.0f m/s). The offset is between the truth reference point and the nav point, the\n', ...
+        posLatency, posLatencySig, spdRange);
+    fprintf('   latency is of the position rows; +- is the fit uncertainty, large when the heading or the speed hardly varies\n');
+end
 if haveA && (abs(tauP - tauA) > 0.05 || abs(tauV - tauA) > 0.05)
     fprintf('   NOTE: relative to the attitude lag the nav position trails by %+.2f s and the velocity by %+.2f s. With consistent truth and\n', tauA - tauP, tauA - tauV);
     fprintf('         nav arrays (above) that is not a logging artefact: the GNSS measurements are applied late relative to the IMU\n');
@@ -481,7 +511,7 @@ else
 end
 
 o = struct('name', r.name, 'tau', tau, 'tauP', tauP, 'tauV', tauV, 'tauVp', tauVp, 'tauA', tauA, 'sV', sV, 'sA', sA, 'sNV', sNV, ...
-    'kP', kP, 'r2P', r2P, 'kV', kV, 'r2V', r2V, 'velSource', velSource, 'rmsPos', rmsPos, ...
+    'kP', kP, 'r2P', r2P, 'kV', kV, 'r2V', r2V, 'posOffset', posOffset, 'posLatency', posLatency, 'posOffsetSig', posOffsetSig, 'posLatencySig', posLatencySig, 'velSource', velSource, 'rmsPos', rmsPos, ...
     'rmsVel', rmsVel, 'meanVel', meanVel, 'rmsAtt', rmsAtt, 'leverArm', leverArm, 'tOut', t(iOut), 'T', T, ...
     'posErrOut', posErr(iOut, :), 'dv', dv, 'slope10', slope10', 'dvImplied', dvImplied', 'velJump', velJump, 'tJump', tJump, 'yawJump', yawJump, 'attErr', attErr(iOut, :)', 'psi', psi, 'db', db, 'sig', sig, ...
     'drift', drift, 'coef', coef, 'velTerm', velTerm, 'biasTerm', biasTerm, 'tiltTerm', tiltTerm, ...

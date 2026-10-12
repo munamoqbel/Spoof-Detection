@@ -105,7 +105,10 @@ truth separately on the position, the velocity and the yaw. The attitude lag
 is the reference, because a gyro-integrated attitude cannot trail the truth;
 what the position and velocity trail beyond it is error of the nav solution,
 the signature of GNSS measurements applied late, and the regression of the
-errors on the truth velocity and acceleration quantifies it. The slope of the
+errors on the truth velocity and acceleration quantifies it, and the position
+error in the body frame regressed on the speed separates a reference-point
+offset (a constant along or across the heading) from a latency (a speed
+term). The slope of the
 position error over the first 10 s of the outage is printed as the model-free
 value of the velocity error at the outage start, and the budget includes the
 yaw error acting on the manoeuvres of the outage. A clean run without an

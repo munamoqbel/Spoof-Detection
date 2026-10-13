@@ -18,6 +18,9 @@
 %      sigma_C is the coast covariance the gate reports in nav.sigmaPosition;
 %      with a Q too small to grow sigma_C, the COAST_BUDGET_EPOCHS time belt
 %      raises it instead, exactly one epoch past the belt.
+%   7. re-validation dwell in COAST: an epoch with too few rows to test (no
+%      GNSS, or baro only) holds the count, a failed test resets it, and the
+%      dwell still opens PROBATION after REVAL_DWELL_REQUIRED passes.
 % Run from the repo root (MATLAB, or Octave with tools/octave_shim).
 
 n    = CST_gnssHybrid.NO_STATES;
@@ -246,7 +249,36 @@ fprintf('  tight Q: PL never outside %d | flag raised at epoch %d with coastEpoc
     ~plOutside, beltFlip, beltCoast, belt + 1, pf(ok6b));
 ok6 = ok6a && ok6b;
 
-if ok1 && ok2 && ok3 && ok4 && ok5 && ok6
+%% 7. re-validation dwell: too few rows holds the count, a fail resets it
+fprintf('Re-validation dwell on epochs without rows ...\n');
+kf_x = zeros(n, 1); kf_P = P0; latched = false; prevDwell = 0;
+holdAt0 = -1; holdAt1 = -1; failAt = -1; probAt = -1;
+for k = 1:(nArm + 150)
+    kc = mod(k - 1, nz) + 1;
+    z = z_all(:, kc);
+    spoofed = (k >= kSpoof) && (k < kSpoof + 6);                   % six spoofed epochs: latch, then clean
+    if latched && (prevDwell == 6) && (failAt < 0), spoofed = true; failAt = k; end   % one failing epoch
+    if spoofed, z = z + 50.0; end
+    [kf_x, kf_P, y, ~, ~, xp, xpP] = kalman_update_step(kf_x, kf_P, z, H_all(:, :, kc), propTel, V);
+    kfMeas = STRUCT_SPF.kfMeasFromUpdate(y, H_all(:, :, kc), V, mm, xp, xpP, kf_x, kf_P);
+    if latched && (prevDwell == 3) && (holdAt0 < 0), kfMeas.numMeas = uint8(0); holdAt0 = k; end   % no rows
+    if latched && (prevDwell == 4) && (holdAt1 < 0), kfMeas.numMeas = uint8(1); holdAt1 = k; end   % baro only
+    tel = SPF_gate(kfMeas, propTel, true, k == 1);
+    latched = latched || tel.info.eventLatched;
+    dw = double(tel.info.dwellCount);
+    if k == holdAt0, dwellHold0 = dw; end
+    if k == holdAt1, dwellHold1 = dw; end
+    if k == failAt,  dwellFail  = dw; end
+    if (tel.info.mode == CST_spfMode.PROBATION) && (probAt < 0), probAt = k; end
+    if probAt > 0, break; end
+    prevDwell = dw;
+end
+ok7 = latched && (holdAt0 > 0) && (dwellHold0 == 3) && (holdAt1 > 0) && (dwellHold1 == 4) ...
+    && (failAt > 0) && (dwellFail == 0) && (probAt > failAt);           % PROBATION opens only after a full dwell
+fprintf('  no rows at dwell 3 -> dwell %d (expect 3) | baro only at dwell 4 -> %d (expect 4) | fail at dwell 6 -> %d (expect 0) | PROBATION opened at epoch %d after the fail at %d -> %s\n\n', ...
+    dwellHold0, dwellHold1, dwellFail, probAt, failAt, pf(ok7));
+
+if ok1 && ok2 && ok3 && ok4 && ok5 && ok6 && ok7
     fprintf('=== test_error_handlers PASS ===\n');
 else
     fprintf('=== test_error_handlers FAIL ===\n');

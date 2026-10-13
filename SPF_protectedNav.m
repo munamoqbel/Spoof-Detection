@@ -9,7 +9,8 @@
 %   COAST      host does NOT update its operational KF (100 Hz extrapolation
 %              makes it the INS-only coast); the update is still computed
 %              on a scratch copy to feed y, S here; re-validation counts
-%              consecutive passes; full dwell => PROBATION.
+%              consecutive passes (an epoch with too few rows to test holds
+%              the count); full dwell => PROBATION.
 %              Monitor silence NEVER exits this mode (capture).
 %   PROBATION  host updates a TRIAL copy; monitors watch the trial; alarm
 %              => VETO; full quiet probation => COMMIT (handback).
@@ -176,9 +177,9 @@ switch sys.mode
 
         if (passed)
             sys.dwellCount = sys.dwellCount + 1;
-        else
-            sys.dwellCount = 0;
-        end
+        elseif (double(kfMeas.numMeas) >= double(CST_spfParam.REVAL_MIN_MEAS))
+            sys.dwellCount = 0;                      % a failed test restarts the dwell; an epoch with too few
+        end                                          % rows to test (no GNSS, baro only, a repeated message) holds it
 
         % ---- 3. dwell full: open PROBATION (never direct handback) ----
         if (sys.dwellCount >= CST_spfParam.REVAL_DWELL_REQUIRED)

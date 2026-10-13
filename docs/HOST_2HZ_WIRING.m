@@ -138,6 +138,10 @@
 % %   numMeas = 0, kfPost.states = activeKF.states, kfPost.covariance = activeKF.covariance
 % %   (or set the gate's resetRequest = kfPost.failed; a NaN that slips through
 % %   is caught by the gate's input check and reported as info.inputFault).
+% %   A GNSS message whose TOW equals the previous call's is the previous
+% %   epoch's observables, 0.5 s stale: drop its rows (numMeas = 0 when no
+% %   constellation is fresh). The gate neither counts nor resets its
+% %   re-validation dwell on an epoch with too few rows to test.
 % %   (kfPost, not 'kfUpdate': a variable named like the function shadows it.)
 %
 % % ---- 3. gate: EVERY 2 Hz epoch, also with numMeas = 0 ----

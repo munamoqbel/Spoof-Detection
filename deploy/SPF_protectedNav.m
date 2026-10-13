@@ -128,8 +128,8 @@ switch sys.mode
 
         if (passed)
             sys.dwellCount = sys.dwellCount + 1;
-        else
-            sys.dwellCount = 0;
+        elseif (double(kfMeas.numMeas) >= double(CST_spfParam.REVAL_MIN_MEAS))
+            sys.dwellCount = 0;                      % a fail restarts the dwell; too few rows to test holds it
         end
 
         % 3. dwell full: open PROBATION

@@ -25,7 +25,9 @@ function [res] = runCompare(runA, runB, tOut, tReacq, aidedWin)
 %     trueVel  [M x 3]  truth NED velocity, optional: omitted, empty, or not
 %                       matching d(truePos)/dt (another frame, e.g. ECEF) it
 %                       is replaced by the velocity differenced from truePos
-%     biasTrue [1 x 6]  simulated IMU biases (or [M x 6] if they vary)
+%     biasTrue [1 x 6]  IMU biases the nav should estimate (simulated or
+%                       calibrated), any orientation; or [M x 6] on tTrue,
+%                       [N x 6] on t, [K x 6] on tKf if they vary
 %     pDiag    optional sigma source: [N x 22] diagonal of P per nav sample,
 %                       or [K x 22] per 2 Hz epoch (K = numel(tKf)), or a cell
 %                       {K x 1} holding per epoch either the 22 x 22 P or its
@@ -364,10 +366,17 @@ velErr  = r.navVel - interpRows(tT, trueVel, tq);
 attTrue = interpRows(tT, trueAtt, tq);
 attErr  = r.navAtt - attTrue;
 attErr(:, 3) = atan2(sin(attErr(:, 3)), cos(attErr(:, 3)));
-if size(r.biasTrue, 1) > 1
-    biasTrue = interpRows(tT, r.biasTrue, tq);
+if numel(r.biasTrue) == 6
+    biasTrue = repmat(r.biasTrue(:)', N, 1);                           % one value, any orientation
+elseif size(r.biasTrue, 1) == numel(tT)
+    biasTrue = interpRows(tT, r.biasTrue, tq);                         % on the truth time base
+elseif size(r.biasTrue, 1) == N
+    biasTrue = r.biasTrue;                                             % on the nav samples
+elseif isfield(r, 'tKf') && size(r.biasTrue, 1) == numel(r.tKf)
+    biasTrue = interpRows(r.tKf(:), r.biasTrue, t, 'previous');        % per 2 Hz epoch, held between updates
 else
-    biasTrue = repmat(r.biasTrue(:)', N, 1);
+    error('runCompare:biasTrue', 'biasTrue has %d rows; give one value [1 x 6], or rows on tTrue (%d), on t (%d) or on tKf', ...
+        size(r.biasTrue, 1), numel(tT), N);
 end
 biasErr = r.biasEst - biasTrue;
 
@@ -504,7 +513,7 @@ else
     fprintf('   yaw   (dC-I)(dp - v0 T)  %+8.2f  %+8.2f  %+8.2f   (manoeuvre displacement |dp - v0 T| = %.0f m)\n', yawTerm, norm(u(1:2)));
     fprintf('   sum                      %+8.2f  %+8.2f  %+8.2f\n', total);
     fprintf('   observed                 %+8.2f  %+8.2f  %+8.2f\n', drift);
-    bt = r.biasTrue(1, 1:3);
+    bt = biasTrue(iOut, 1:3);
     fprintf('   scale: true accel bias uncompensated over T = %.0f m, applied with the wrong sign = %.0f m\n', ...
         0.5 * norm(bt) * T^2, norm(bt) * T^2);
 

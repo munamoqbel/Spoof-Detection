@@ -197,7 +197,13 @@ resC = runCompare(runC, [], 100, 250);
 % a single bias row at tOut
 runD = runA;  runD.name = 'D bias row';  runD.biasEst = runA.biasEst(1, :);  runD.pDiag = runA.pDiag(1, :);
 resD = runCompare(runD, [], 100, 250);
-okC = abs(resC.run1.db(1) + 0.6e-3*G) < 1e-9 && abs(resC.run1.sig(4) - 0.05) < 1e-12 ...
+% biasTrue as a column, and per 2 Hz epoch on tKf: same bias error as the row form
+runV = runA;  runV.name = 'V biasTrue column';  runV.biasTrue = runA.biasTrue(:);
+resV = runCompare(runV, [], 100, 250);
+runW = runB;  runW.name = 'W biasTrue on tKf';  runW.biasTrue = repmat(runB.biasTrue, numel(runB.tKf), 1);
+resW = runCompare(runW, [], 100, 250, [10 95; 255 295]);
+okC = abs(resV.run1.db(1) + 0.6e-3*G) < 1e-9 && all(abs(resW.run1.db - res.run2.db) < 1e-12) ...
+   && abs(resC.run1.db(1) + 0.6e-3*G) < 1e-9 && abs(resC.run1.sig(4) - 0.05) < 1e-12 ...
    && abs(resD.run1.db(1) + 0.6e-3*G) < 1e-9 && abs(resD.run1.sig(10)/(9.80665e-3) - 0.2) < 1e-9;
 if okC, fprintf('=== no-tKf / single-value check PASS ===\n'); else, fprintf('=== no-tKf / single-value check FAIL ===\n'); end
 % truth velocity logged in ECEF (wrong frame): the tool must warn and fall back to d(truePos)/dt

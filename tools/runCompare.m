@@ -333,7 +333,7 @@ posOffset = NaN(1, 2);  posLatency = NaN;  posOffsetSig = NaN(1, 2);  posLatency
 if nnz(movK) > 10
     n  = nnz(movK);
     cK = atan2(vT(movK, 2), vT(movK, 1));
-    w  = gA(movK);  nW = max(w);
+    [~, ~, w] = unique(gA(movK));  nW = max(w);                % windows without moving samples get no column
     Z  = zeros(n, nW);  Z(sub2ind([n, nW], (1:n)', w)) = 1;
     A  = [cos(cK), -sin(cK), vT(movK, 1), Z, zeros(n, nW); ...
           sin(cK),  cos(cK), vT(movK, 2), zeros(n, nW), Z];

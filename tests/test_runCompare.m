@@ -230,6 +230,9 @@ runJ.navPos(:, 2) = runJ.navPos(:, 2) + dEJ ./ ((REJ + runJ.navPos(:, 3)) .* cos
 resJ = runCompare(runJ, [], 100, 250, [10 95; 255 295]);
 okJ = abs(resJ.run1.posOffset(1) - 1.4) < 0.25 && abs(resJ.run1.posOffset(2) + 0.3) < 0.25 && abs(resJ.run1.posLatency) < 0.015 ...
    && all(abs(res.run1.posOffset) < 0.3) && abs(res.run1.posLatency) < 0.015;
+% an aided window with no samples (beyond the data) must not break the fit or its sigmas
+resW = runCompare(runA, [], 100, 250, [10 95; 255 295; 400 450]);
+okJ = okJ && isfinite(resW.run1.posLatencySig) && all(isfinite(resW.run1.posOffsetSig)) && abs(resW.run1.posLatency - res.run1.posLatency) < 1e-9;
 if okJ, fprintf('=== reference-point offset check PASS ===\n'); else, fprintf('=== reference-point offset check FAIL ===\n'); end
 % pDiag given as states x records, with the wrong record count, and under a misspelt field name
 runP = runB;  runP.name = 'P transposed';  runP.pDiag = pDiagCat(runB.pDiag)';           % 22 x K

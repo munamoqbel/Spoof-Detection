@@ -141,6 +141,14 @@ rows. Verdict lines name an R far above the state uncertainty (rows switched
 off in effect), a range rate built from the nav solution itself, and an
 opposite-sign or wrong-frame derivative. `tests/test_dopplerCheck.m` covers
 the five cases.
+`tools/designConstants.m` is the offline design step (quickstart step 2) on
+recorded data: from the same spfMeas records it takes Eq. 20 per monitored
+axis on every usable epoch, the worst-sky minimum, the window length per axis
+from `solve_N_min`, the common window and the CPI threshold, SS gate and PL
+multiplier at it, printed next to the values in `CST_spfParam`; with the P
+diagonal it also reports the epoch from which the protection level allows
+arming. S carries the host's P and R, so it is rerun after every change of Q
+or R.
 
 ## Printable copies
 

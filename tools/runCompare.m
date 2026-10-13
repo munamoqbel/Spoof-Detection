@@ -446,6 +446,12 @@ else
     fprintf('   tilt psi  N %+7.3f E %+7.3f D %+7.3f mrad (from the DCMs)\n', psi * 1e3);
     fprintf('   accel bias err %+7.3f %+7.3f %+7.3f mg      sigma(mg) %s\n', db(1:3) / (G * 1e-3), sigStr(sig(10:12) / (G * 1e-3)));
     fprintf('   gyro  bias err %+7.3f %+7.3f %+7.3f deg/h   sigma(deg/h) %s\n', db(4:6) * 180 / pi * 3600, sigStr(sig(13:15) * 180 / pi * 3600));
+    if max(abs(db(1:3))) / (G * 1e-3) < 0.02 && min(abs(db(4:6))) * 180 / pi * 3600 > 100
+        fprintf('   NOTE: an accel bias error below 0.02 mg next to a gyro bias error above 100 deg/h is not a plausible pair. Read with the\n');
+        fprintf('         two blocks swapped they are %.3f %.3f %.3f mg and %.2f %.2f %.2f deg/h: biasEst (and biasTrue) must hold the\n', ...
+            db(4:6) / (G * 1e-3), db(1:3) * 180 / pi * 3600);
+        fprintf('         accelerometer biases (m/s^2) in columns 1:3 and the gyro biases (rad/s) in 4:6.\n');
+    end
     if all(isfinite(sig(10:15))) && max(sig(10:12)) / (G * 1e-3) < 0.02 && min(sig(13:15)) * 180 / pi * 3600 > 100
         fprintf('   NOTE: sigma(accel bias) below 0.02 mg next to sigma(gyro bias) above 100 deg/h is not a plausible pair. Read with the two\n');
         fprintf('         bias blocks swapped they are %.3f %.3f %.3f mg and %.2f %.2f %.2f deg/h. If the host orders the gyro biases before the\n', ...

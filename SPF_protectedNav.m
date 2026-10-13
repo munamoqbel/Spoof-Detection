@@ -178,8 +178,8 @@ switch sys.mode
         if (passed)
             sys.dwellCount = sys.dwellCount + 1;
         elseif (double(kfMeas.numMeas) >= double(CST_spfParam.REVAL_MIN_MEAS))
-            sys.dwellCount = 0;                      % a failed test restarts the dwell; an epoch with too few
-        end                                          % rows to test (no GNSS, baro only, a repeated message) holds it
+            sys.dwellCount = 0;                      % a failed test restarts the dwell
+        end % ELSE: too few rows to test (no GNSS, baro only): no evidence either way, the dwell holds
 
         % ---- 3. dwell full: open PROBATION (never direct handback) ----
         if (sys.dwellCount >= CST_spfParam.REVAL_DWELL_REQUIRED)

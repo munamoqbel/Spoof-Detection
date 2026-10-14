@@ -21,6 +21,11 @@ function [des] = designConstants(spfMeasLog, sigmaT, pDiag)
 %   error sigma_t from which the requirement is met at the current WINDOW_LENGTH and at MAX_WINDOW.
 %   The values are printed next to the ones hard-coded in CST_spfParam. Rerun after any change of Q, R, the
 %   measurement set or the budgets: S carries the host's P and R, so these constants belong to one tuning.
+%   With CST_spfParam.NOMINAL_BIAS set (B metres per axis: the nominal GNSS excursion the host tolerates) the
+%   tool states what that costs: the separation test fires beyond B + k_FA sigma_SS, the CPI counts only the
+%   axis innovation beyond B, so the sigma_t design applies to a spoofer whose offset exceeds B. In both cases
+%   it prints the constant offset the CPI reports within one window on the median sky,
+%       d_min = B + sqrt(T_N / N) / sqrt(s2med)                                    (N ((d - B) / sigma_a)^2 = T_N)
 %   MATLAB desktop tool, not codegen (gaminv, norminv). Runs under Octave with tools/octave_shim.
 
 MAX_WINDOW = 240;                                            % epochs (2 min at 2 Hz): longer is not a monitor
@@ -107,6 +112,19 @@ else
     fprintf('   larger sigma_t printed above. K_MISSED_DETECTION k_MD %.6f (CST_spfParam %.6f) does not depend on it.\n', kMd, cur.kMd);
 end
 
+%% nominal bias allowance and the constant offset the CPI reports within one window
+nominalBias = double(CST_spfParam.NOMINAL_BIAS(:))';
+bAxis = nominalBias(axes);
+nUse = N;  tUse = tN;
+if ~isfinite(N), nUse = cur.N;  tUse = cur.tN; end           % no common window designed: at the current one
+cpiOffsetMin = bAxis + sqrt(tUse / nUse) ./ sqrt(s2med);     % sigma_a = 1 / sqrt(s2) on the median sky
+if any(bAxis > 0)
+    fprintf('   NOMINAL_BIAS %s m on the monitored axes: the separation test fires beyond B + k_FA sigma_SS and the\n', mat2str(bAxis));
+    fprintf('   CPI counts only the axis innovation beyond B. The sigma_t design above applies to a spoofer whose offset\n');
+    fprintf('   exceeds B; tracking jitter alone below B is invisible to the CPI.\n');
+end
+fprintf('   constant offset the CPI reports within one window of %d epochs (median sky, B included): %s m\n', nUse, sprintf('%.2f ', cpiOffsetMin));
+
 %% arming: first epoch from which the protection level stays inside ARM_PL_MAX for ARM_EPOCHS epochs
 armEpoch = NaN;
 if ~isempty(pDiag)
@@ -128,7 +146,7 @@ end
 
 des = struct('axes', axes, 's2', s2, 's2min', s2min, 's2med', s2med, 'nAxis', nAxis, 'pmdAxis', pmdAxis, ...
     'sigmaTreq', sigmaTreq, 'N', N, 'tN', tN, 'kFa', kFa, 'kMd', kMd, 'pmdAtN', pmdAtN, 'sigmaT', sigmaT, ...
-    'armEpoch', armEpoch, 'current', cur);
+    'nominalBias', bAxis, 'cpiOffsetMin', cpiOffsetMin, 'armEpoch', armEpoch, 'current', cur);
 end
 
 %------------------------------------------------------------------------

@@ -56,14 +56,19 @@ covariance line next to it is E31 unchanged.
 - `P_C - P_KF` is what GNSS has contributed since the reference and, for a
   consistent linear filter, the covariance of the separation. The SS test uses
   its diagonal on each monitored axis: `sigma_SS = sqrt(P_C - P_KF)`, alarm when
-  `|d| > k_FA * sigma_SS`.
+  `|d| > k_FA * sigma_SS + B`. B is `CST_spfParam.NOMINAL_BIAS` on that axis, the
+  nominal GNSS excursion the host tolerates (multipath, reacquisition) without a
+  latch: 0 in the repository, the published design; the host sets its own from
+  the largest separation a clean run produced. The protection level grows by B
+  and the CPI counts only the axis innovation beyond B, so a spoofer must move
+  the solution beyond B before either test sees it.
 
 | | Variance | Sigma |
 |---|---|---|
 | P_C after 5 s of coast (Q adds 0.2 m2/s) | 5 m2 | 2.24 m |
 | P_KF after five GNSS updates | 1 m2 | 1 m |
 | P_C - P_KF (separation) | 4 m2 | 2 m |
-| SS threshold k_FA * sigma_SS | | 10.5 m |
+| SS threshold k_FA * sigma_SS + B (B = 0 here) | | 10.5 m |
 
 Consequences: the threshold is not a fixed distance (tolerant under poor
 geometry, tight under strong GNSS; the test asks whether the pull is

@@ -17,6 +17,9 @@
 %   - kfIncrement          [n x 1]  x+ - x_bar of the watched filter this epoch
 %   - kfCovariance         [n x n]  P+ of the watched filter this epoch
 %   - propTel              .accumPhi / .accumQ  interval Phi / Q
+%   - nominalBias          [1 x 3]  tolerated nominal excursion per NED position
+%                          state (m), CST_spfParam.NOMINAL_BIAS from the pool;
+%                          a test passes its own
 %   k_FA and k_MD are CST_spfParam.K_FALSE_ALERT / K_MISSED_DETECTION.
 %
 % OUTPUTS:
@@ -33,13 +36,14 @@
 %    separation:            Eq. 49  q_SS = u'(x_KF - x_C) = u' d
 %    separation variance:   Eq. 50  sigma_SS^2 = u'(P_C - P_KF)u
 %    coast variance:        Eq. 52  sigma_C^2  = u' P_C u
-%    protection level:      Eq. 51  PL = k_FA*sigma_SS + k_MD*sigma_C
-%    alarm rule:            |q_SS| > k_FA * sigma_SS
+%    protection level:      Eq. 51  PL = k_FA*sigma_SS + B + k_MD*sigma_C
+%    alarm rule:            |q_SS| > k_FA * sigma_SS + B
+%    (B = nominalBias(axis): the nominal bias allowance, 0 in the paper)
 %
 %******************************************************************************************
 %#codegen
 function [separation, coastCovariance, ssResult] = SPF_ssMonitor...
-    (separation, coastCovariance, kfIncrement, kfCovariance, propTel)
+    (separation, coastCovariance, kfIncrement, kfCovariance, propTel, nominalBias)
 
 % Define variables
 monitoredAxes      = CST_spfParam.MONITORED_AXES;
@@ -83,11 +87,11 @@ for idx = 1:numAxes
         sigmaCoast = 0.0;
     end
 
-    protectionLevel(idx) = kFalseAlert * sigmaSeparation(idx) ...
-        + kMissedDetection * sigmaCoast;                                 % Eq. 51
+    gate = kFalseAlert * sigmaSeparation(idx) + nominalBias(axisIdx);   % k_FA sigma_SS + B
+    protectionLevel(idx) = gate + kMissedDetection * sigmaCoast;         % Eq. 51 with the allowance
 
-    % alarm rule (section 5 under Eq. 52)
-    if testable && (abs(sepAxis(idx)) > (kFalseAlert * sigmaSeparation(idx)))
+    % alarm rule (section 5 under Eq. 52), with the nominal bias allowance
+    if testable && (abs(sepAxis(idx)) > gate)
         alarmPerAxis(idx) = true;
         anyAlarm = true;
     end % ELSE is trivial

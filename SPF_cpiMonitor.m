@@ -9,6 +9,9 @@
 %   - numMeasBuffer             [N x 1] valid measurement count per epoch
 %                               (rows/cols beyond it are padding)
 %   - axisIdx                   monitored position state index
+%   - nominalBias               tolerated nominal excursion on this axis (m),
+%                               CST_spfParam.NOMINAL_BIAS(axisIdx) from the pool;
+%                               a test passes its own
 %   Window length N and threshold T_N are CST_spfParam.WINDOW_LENGTH and
 %   CST_spfParam.CPI_THRESHOLD; the buffers are N deep.
 %
@@ -34,13 +37,16 @@
 %    Eq. 17: gamma_u = f'*(S\gamma), f = H(:,axis_idx) = (H * u)
 %    Eq. 20: sigma2 = f'*(S\f)
 %    Eq. 29: xi = gamma_u / sqrt(sigma2) ~ N(0,1) under H0
+%            with the nominal bias allowance B (metres, 0 in the paper) the
+%            position-domain innovation gamma_u / sigma2 counts only beyond B:
+%            xi = max(|gamma_u| / sqrt(sigma2) - B * sqrt(sigma2), 0)
 %    Eq. 33: q = sum(xi.^2) ~ Gamma(N/2,2) under H0
 %    Eq. 35: alarm iff q > cpi_threshold (T_N, precomputed offline)
 %
 %******************************************************************************************
 %#codegen
 function [cpiAlarm, qStatistic, xiHistory, solveFault] = SPF_cpiMonitor...
-    (innovationBuffer, innovationCovBuffer, obsMatrixBuffer, numMeasBuffer, axisIdx)
+    (innovationBuffer, innovationCovBuffer, obsMatrixBuffer, numMeasBuffer, axisIdx, nominalBias)
 
 % Define variables
 windowLength = CST_spfParam.WINDOW_LENGTH;
@@ -94,7 +100,9 @@ for idx = 1:windowLength
 
             % Exception handler: axis unobservable this epoch (f = 0) -> xi = 0
             if (sigma2Projection > 0.0) && isfinite(sigma2Projection) && isfinite(gammaProjection)
-                xiNormalised = gammaProjection / sqrt(sigma2Projection);   % Eq. 29
+                % Eq. 29, with the deadband of B metres on the position-domain innovation
+                xiNormalised = max(abs(gammaProjection) / sqrt(sigma2Projection) ...
+                    - nominalBias * sqrt(sigma2Projection), 0.0);
             end % ELSE is trivial
         else
             solveFault = true;

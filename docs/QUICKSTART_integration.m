@@ -38,6 +38,8 @@
 %   T_N   = gaminv(1 - PFAp/3, N/2, 2)
 %   k_FA  = norminv(1 - (PFAm/3/N)/2)
 %   k_MD  = norminv(1 - 1e-6)
+%   B     = NOMINAL_BIAS per axis: the largest separation a clean run produced
+%           (0 = the published design); SS gate k_FA*sigma_SS + B, CPI deadband B
 %   T_reval(m) = gaminv(1 - 1e-3, m/2, 2)    for each possible sat count
 % Hard-code all values. Re-run only if IMU / constellation / budget change.
 %

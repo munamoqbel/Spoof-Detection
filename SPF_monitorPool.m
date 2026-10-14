@@ -57,7 +57,7 @@ for wIdx = 1:windowLength
         % ------------------------------------------------------------------
         [newSeparation, newCoastCov, ssResult] = SPF_ssMonitor( ...
             poolIn.separation(:, wIdx), poolIn.coastCovariance(:, :, wIdx), ...
-            kfIncrement, kfMeas.postCov, propTel);
+            kfIncrement, kfMeas.postCov, propTel, CST_spfParam.NOMINAL_BIAS);
 
         poolOut.separation(:, wIdx)         = newSeparation;
         poolOut.coastCovariance(:, :, wIdx) = newCoastCov;
@@ -76,7 +76,8 @@ for wIdx = 1:windowLength
         % telemetry: SS margin per monitored axis, max over the open windows
         for idx = 1:numAxes
             if (ssResult.sigmaSeparation(idx) > 0.0)
-                ratio = abs(ssResult.separation(idx)) / (CST_spfParam.K_FALSE_ALERT * ssResult.sigmaSeparation(idx));
+                ratio = abs(ssResult.separation(idx)) / (CST_spfParam.K_FALSE_ALERT * ssResult.sigmaSeparation(idx) ...
+                    + CST_spfParam.NOMINAL_BIAS(monitoredAxes(idx)));
                 if (ratio > report.ssRatio(idx))
                     report.ssRatio(idx) = ratio;
                 end % ELSE is trivial
@@ -94,7 +95,7 @@ for wIdx = 1:windowLength
                     poolOut.innovationCovBuffer(:, :, 1:windowLength, wIdx), ...
                     poolOut.obsMatrixBuffer(:, :, 1:windowLength, wIdx), ...
                     poolOut.numMeasBuffer(1:windowLength, wIdx), ...
-                    axisIdx);
+                    axisIdx, CST_spfParam.NOMINAL_BIAS(axisIdx));
 
                 if (cpiFault)
                     report.solveFault = true;          % telemetry: a buffered S was unusable

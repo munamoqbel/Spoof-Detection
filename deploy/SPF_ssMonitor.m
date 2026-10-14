@@ -4,12 +4,13 @@
 % form: d_k = Phi*d_(k-1) + (x+ - x_bar), P_C = Phi*P_C*Phi' + Q).
 %
 % INPUTS:  separation [n x 1], coastCovariance [n x n], kfIncrement [n x 1],
-%          kfCovariance [n x n] (P+), propTel
+%          kfCovariance [n x n] (P+), propTel, nominalBias [1 x 3] (m per NED position
+%          state: SS gate k_FA*sigma_SS + B, PL + B)
 % OUTPUTS: separation, coastCovariance (propagated), ssResult (STRUCT_SPF.setSSmonitor)
 %******************************************************************************************
 %#codegen
 function [separation, coastCovariance, ssResult] = SPF_ssMonitor...
-    (separation, coastCovariance, kfIncrement, kfCovariance, propTel)
+    (separation, coastCovariance, kfIncrement, kfCovariance, propTel, nominalBias)
 
 monitoredAxes      = CST_spfParam.MONITORED_AXES;
 kFalseAlert        = CST_spfParam.K_FALSE_ALERT;
@@ -47,9 +48,10 @@ for idx = 1:numAxes
         sigmaCoast = 0.0;
     end
 
-    protectionLevel(idx) = kFalseAlert * sigmaSeparation(idx) + kMissedDetection * sigmaCoast;
+    gate = kFalseAlert * sigmaSeparation(idx) + nominalBias(axisIdx);   % k_FA sigma_SS + B
+    protectionLevel(idx) = gate + kMissedDetection * sigmaCoast;
 
-    if testable && (abs(sepAxis(idx)) > (kFalseAlert * sigmaSeparation(idx)))
+    if testable && (abs(sepAxis(idx)) > gate)
         alarmPerAxis(idx) = true;
         anyAlarm = true;
     end

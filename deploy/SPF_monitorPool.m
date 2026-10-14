@@ -32,7 +32,7 @@ for wIdx = 1:windowLength
         % 2. solution-separation test
         [newSeparation, newCoastCov, ssResult] = SPF_ssMonitor( ...
             poolIn.separation(:, wIdx), poolIn.coastCovariance(:, :, wIdx), ...
-            kfIncrement, kfMeas.postCov, propTel);
+            kfIncrement, kfMeas.postCov, propTel, CST_spfParam.NOMINAL_BIAS);
 
         poolOut.separation(:, wIdx)         = newSeparation;
         poolOut.coastCovariance(:, :, wIdx) = newCoastCov;
@@ -50,7 +50,8 @@ for wIdx = 1:windowLength
 
         for idx = 1:numAxes                                    % SS margin telemetry
             if (ssResult.sigmaSeparation(idx) > 0.0)
-                ratio = abs(ssResult.separation(idx)) / (CST_spfParam.K_FALSE_ALERT * ssResult.sigmaSeparation(idx));
+                ratio = abs(ssResult.separation(idx)) / (CST_spfParam.K_FALSE_ALERT * ssResult.sigmaSeparation(idx) ...
+                    + CST_spfParam.NOMINAL_BIAS(monitoredAxes(idx)));
                 if (ratio > report.ssRatio(idx))
                     report.ssRatio(idx) = ratio;
                 end
@@ -66,7 +67,7 @@ for wIdx = 1:windowLength
                     poolOut.innovationCovBuffer(:, :, 1:windowLength, wIdx), ...
                     poolOut.obsMatrixBuffer(:, :, 1:windowLength, wIdx), ...
                     poolOut.numMeasBuffer(1:windowLength, wIdx), ...
-                    axisIdx);
+                    axisIdx, CST_spfParam.NOMINAL_BIAS(axisIdx));
 
                 if (cpiFault)
                     report.solveFault = true;

@@ -4,12 +4,13 @@
 % Fixed MAX_MEAS layout: rows/cols beyond numMeas are zero padding.
 %
 % INPUTS:  innovationBuffer [MAX_MEAS x N], innovationCovBuffer [MAX_MEAS x MAX_MEAS x N],
-%          obsMatrixBuffer [MAX_MEAS x n x N], numMeasBuffer [N x 1], axisIdx
+%          obsMatrixBuffer [MAX_MEAS x n x N], numMeasBuffer [N x 1], axisIdx,
+%          nominalBias (m: deadband on the position-domain innovation of this axis)
 % OUTPUTS: cpiAlarm, qStatistic, xiHistory [N x 1], solveFault (an S was unusable)
 %******************************************************************************************
 %#codegen
 function [cpiAlarm, qStatistic, xiHistory, solveFault] = SPF_cpiMonitor...
-    (innovationBuffer, innovationCovBuffer, obsMatrixBuffer, numMeasBuffer, axisIdx)
+    (innovationBuffer, innovationCovBuffer, obsMatrixBuffer, numMeasBuffer, axisIdx, nominalBias)
 
 windowLength = CST_spfParam.WINDOW_LENGTH;
 cpiThreshold = CST_spfParam.CPI_THRESHOLD;
@@ -53,7 +54,8 @@ for idx = 1:windowLength
             end
 
             if (sigma2Projection > 0.0) && isfinite(sigma2Projection) && isfinite(gammaProjection)
-                xiNormalised = gammaProjection / sqrt(sigma2Projection);
+                xiNormalised = max(abs(gammaProjection) / sqrt(sigma2Projection) ...
+                    - nominalBias * sqrt(sigma2Projection), 0.0);
             end
         else
             solveFault = true;

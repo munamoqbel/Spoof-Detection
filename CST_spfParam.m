@@ -53,6 +53,18 @@
 % allocation changes or MAX_MEASURES exceeds 60.
 % - MAX_MEAS is CST_gnssHybrid.MAX_MEASURES (the host's own bound): all
 % monitor buffers are sized to it.
+% - NOMINAL_BIAS (nominal bias allowance, metres per NED position state):
+% the part of a GNSS-vs-INS discrepancy the host accepts as normal and
+% does not want latched on: multipath and reacquisition episodes of a few
+% metres that the KF follows while its P does not admit them. The
+% solution-separation gate becomes K_FALSE_ALERT * sigma_SS + B, the
+% protection level (Eq. 51) grows by B, and the CPI counts only the part
+% of the axis innovation beyond B (a deadband of B metres on the
+% position-domain innovation). A spoofer must move the solution beyond B
+% before either test can see it: the host sets B from the largest
+% separation a clean run produced, and accepts that detection comes B
+% metres later. The repository value is 0 (the design as published, the
+% test references); the host sets its own, as with ARM_EPOCHS.
 %
 % REQUIREMENT TRACEABILITY:
 %
@@ -69,6 +81,9 @@ classdef CST_spfParam
         K_FALSE_ALERT = 5.233126417847868;                % SS gate
         K_MISSED_DETECTION = 4.753424308817088;           % PL term
         MONITORED_AXES = [1 2 3];                         % NED position state indices
+        NOMINAL_BIAS = [0.0 0.0 0.0];                     % m per NED position state: tolerated nominal
+                                                          % GNSS excursion (0 = the published design;
+                                                          % the host sets its own, see header)
         COAST_BUDGET_EPOCHS = uint32(1200);               % time belt behind the PL budget: 600 s of
                                                           % COAST + PROBATION raises coastBudgetExceeded
                                                           % even if sigma_C never reaches the limit

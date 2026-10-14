@@ -15,7 +15,7 @@ sweep produce bitwise identical telemetry with either set on the path.
 | `SPF_revalidation.m` | chi-square re-validation in COAST / PROBATION |
 | `SPF_insCoast.m` | INS-only propagation helper |
 | `STRUCT_SPF.m` | struct constructors, window open / close |
-| `CST_spfParam.m` | constants (`ARM_EPOCHS` is the repository value 10; the host runs 120) |
+| `CST_spfParam.m` | constants (`ARM_EPOCHS` is the repository value 10; the host runs 120. `NOMINAL_BIAS` is 0 here; the host sets the nominal GNSS excursion it tolerates per axis, in metres) |
 | `CST_spfMode.m` | mode enumeration |
 
 Not included, the simulation provides its own: `CST_gnssHybrid`

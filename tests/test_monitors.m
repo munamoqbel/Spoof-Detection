@@ -89,7 +89,7 @@ Hw = repmat(H_t, [1 1 N_w]); mw = uint8(m_meas) * ones(N_w, 1, 'uint8');
 n_alarm = 0; q_sum = 0;
 for k = 1:n_mc
     for j = 1:N_w, gw(:,j) = L_s * randn(m_meas,1); end
-    [~, q, ~] = SPF_cpiMonitor(gw, Sw, Hw, mw, idx_z);
+    [~, q, ~] = SPF_cpiMonitor(gw, Sw, Hw, mw, idx_z, 0.0);
     n_alarm = n_alarm + (q > T_fa); q_sum = q_sum + q;
 end
 q_mean = q_sum / n_mc;                       % Gamma(N/2,2) mean = N
@@ -104,7 +104,7 @@ end
 fprintf('Test 6: CPI detection under a bias ...\n');
 bias = 0.02;                                 % m along the monitored axis
 for j = 1:N_w, gw(:,j) = L_s * randn(m_meas,1) + f_t * bias; end
-[a, q, ~] = SPF_cpiMonitor(gw, Sw, Hw, mw, idx_z);
+[a, q, ~] = SPF_cpiMonitor(gw, Sw, Hw, mw, idx_z, 0.0);
 if a
     fprintf('  PASS  q=%.1f > T_N=%.1f\n\n', q, CST_spfParam.CPI_THRESHOLD); pass=pass+1;
 else
@@ -148,7 +148,7 @@ for k = 1:N_run
     if mod(k, N) == 1                         % open a fresh window on this epoch
         dS = zeros(n_states, 1); cP = P;
     else
-        [dS, cP, r] = SPF_ssMonitor(dS, cP, inc, P, propTel);
+        [dS, cP, r] = SPF_ssMonitor(dS, cP, inc, P, propTel, zeros(1, 3));
         rr = r.separation ./ max(r.sigmaSeparation, 1e-12);
         r_all(n_r+1 : n_r+3) = rr; n_r = n_r + 3;
         n_1e3 = n_1e3 + sum(abs(rr) > k_1e3);
@@ -173,7 +173,7 @@ fprintf('Test 8: SS detection under a separation ...\n');
 % k with that epoch's real increment plus 1 m on axis 3
 dS = zeros(n_states, 1); cP = P_prev;
 inc(3) = inc(3) + 1.0;
-[~, ~, r] = SPF_ssMonitor(dS, cP, inc, P, propTel);
+[~, ~, r] = SPF_ssMonitor(dS, cP, inc, P, propTel, zeros(1, 3));
 if r.anyAlarm && r.alarmPerAxis(3) && ~r.alarmPerAxis(1)
     fprintf('  PASS  axis-3 alarm, PL=%.3f m\n\n', r.maxProtectionLevel); pass=pass+1;
 else
@@ -197,6 +197,40 @@ if n_ok >= 0.99 * n_tr && ~ok_off
     fprintf('  PASS  pass rate %.3f, offset q=%.1f rejected\n\n', n_ok/n_tr, q_off); pass=pass+1;
 else
     fprintf('  FAIL  pass rate %.3f, offset ok=%d\n\n', n_ok/n_tr, ok_off); fail=fail+1;
+end
+
+%% Test 10: nominal bias allowance B (CST_spfParam.NOMINAL_BIAS, passed in by the pool)
+% SS: the gate moves from k_FA*sigma_SS to k_FA*sigma_SS + B and the protection
+% level by exactly B; a separation past the plain gate but inside the raised one
+% is no alarm. CPI: the position-domain innovation counts only beyond B, so the
+% 2 cm bias of Test 6 is invisible under B = 5 cm, reduced under B = 1 cm, and
+% xi follows max(|xi0| - B*sqrt(s2), 0) epoch by epoch; B = 0 is Test 6 itself.
+fprintf('Test 10: nominal bias allowance ...\n');
+B = 1.0;
+dS = zeros(n_states, 1); cP = P_prev;
+inc0 = inc; inc0(3) = 0.0;                     % window just opened: the axis-3 separation is inc0(3)
+[~, ~, rRef] = SPF_ssMonitor(dS, cP, inc0, P, propTel, zeros(1, 3));
+thr0 = CST_spfParam.K_FALSE_ALERT * rRef.sigmaSeparation(3);
+incA = inc0; incA(3) = thr0 + 0.5 * B;         % past the plain gate, inside the raised one
+[~, ~, rA0] = SPF_ssMonitor(dS, cP, incA, P, propTel, zeros(1, 3));
+[~, ~, rAB] = SPF_ssMonitor(dS, cP, incA, P, propTel, [0 0 B]);
+incC = inc0; incC(3) = thr0 + 1.5 * B;         % past the raised gate
+[~, ~, rCB] = SPF_ssMonitor(dS, cP, incC, P, propTel, [0 0 B]);
+okSS = rA0.alarmPerAxis(3) && ~rAB.alarmPerAxis(3) && rCB.alarmPerAxis(3) ...
+    && abs((rAB.protectionLevel(3) - rA0.protectionLevel(3)) - B) < 1e-9 ...
+    && abs(rAB.separation(3) - rA0.separation(3)) < 1e-12;
+[a0, q0, xi0] = SPF_cpiMonitor(gw, Sw, Hw, mw, idx_z, 0.0);        % the Test-6 window
+[a5, q5, ~]   = SPF_cpiMonitor(gw, Sw, Hw, mw, idx_z, 0.05);
+[a1, q1, xi1] = SPF_cpiMonitor(gw, Sw, Hw, mw, idx_z, 0.01);
+xiExp = max(abs(xi0) - 0.01 * sqrt(s2gu_t), 0);
+okCPI = a0 && (q0 == q) && ~a5 && (q5 == 0) && a1 && (q1 > 0) && (q1 < q0) ...
+    && max(abs(xi1 - xiExp)) < 1e-6 * max(1, max(abs(xi0)));
+if okSS && okCPI
+    fprintf('  PASS  SS gate %.3f -> %.3f m, PL + %.3f m; CPI q %.1f (B=0), %.1f (B=1 cm), %.1f (B=5 cm)\n\n', ...
+        thr0, thr0 + B, rAB.protectionLevel(3) - rA0.protectionLevel(3), q0, q1, q5); pass=pass+1;
+else
+    fprintf('  FAIL  SS ok=%d (alarms %d %d %d), CPI ok=%d (q %.1f %.1f %.1f)\n\n', okSS, ...
+        rA0.alarmPerAxis(3), rAB.alarmPerAxis(3), rCB.alarmPerAxis(3), okCPI, q0, q1, q5); fail=fail+1;
 end
 
 %% Summary

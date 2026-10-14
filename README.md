@@ -21,7 +21,7 @@ bookkeeping of `KF.states`.
 | `SPF_insCoast.m`, `SPF_revalidation.m` | INS-only propagation (E28/E31), chi-square re-validation |
 | `matrixInv.m` | STAND-IN for the simulation's SVD inverse (`[inv, invalid] = matrixInv(A)`), used by the CPI and re-validation on the zero-padded covariances; replace with the simulation's own file |
 | `STRUCT_SPF.m` | all struct constructors + window open/close |
-| `CST_spfParam.m` | solved monitor constants (single source of truth at runtime) |
+| `CST_spfParam.m` | solved monitor constants (single source of truth at runtime); `NOMINAL_BIAS` is the nominal GNSS excursion the host tolerates per axis, added to the SS gate and the PL and a deadband of the CPI, 0 in the repository |
 | `CST_spfMode.m` | mode enumeration |
 | `CST_gnssHybrid.m` | **stand-in** (`NO_STATES = 60`); the simulation has its own |
 
@@ -147,8 +147,10 @@ axis on every usable epoch, the worst-sky minimum, the window length per axis
 from `solve_N_min`, the common window and the CPI threshold, SS gate and PL
 multiplier at it, printed next to the values in `CST_spfParam`; with the P
 diagonal it also reports the epoch from which the protection level allows
-arming. S carries the host's P and R, so it is rerun after every change of Q
-or R.
+arming. It prints the constant offset the CPI reports within one window,
+`NOMINAL_BIAS` included, which is the detectability statement once the host
+sets that allowance. S carries the host's P and R, so it is rerun after every
+change of Q or R.
 
 ## Printable copies
 

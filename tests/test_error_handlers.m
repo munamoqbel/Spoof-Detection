@@ -41,14 +41,14 @@ for k = 1:N
     innBuf(1:m, k) = H * bias + 0.1 * randn(m, 1);
     sBuf(1:m, 1:m, k) = S;  hBuf(1:m, :, k) = H;
 end
-[alarmSing, qSing, ~, faultSing] = SPF_cpiMonitor(innBuf, sBuf, hBuf, numBuf, 1);
+[alarmSing, qSing, ~, faultSing] = SPF_cpiMonitor(innBuf, sBuf, hBuf, numBuf, 1, 0.0);
 % with the SVD pseudo-inverse a rank-deficient S is not an error: the
 % statistic must simply stay finite (no NaN/Inf) whether or not it alarms
 okSing = isfinite(qSing) && (qSing >= 0);
 fprintf('  singular S (duplicated row, zero noise): q = %.2f finite, alarm = %d, solveFault = %d -> %s\n', ...
     qSing, alarmSing, faultSing, pf(okSing));
 sNan = sBuf; sNan(1, 1, 1) = NaN;                                  % an unusable S must be flagged
-[~, qNan, ~, faultNan] = SPF_cpiMonitor(innBuf, sNan, hBuf, numBuf, 1);
+[~, qNan, ~, faultNan] = SPF_cpiMonitor(innBuf, sNan, hBuf, numBuf, 1, 0.0);
 okNan = faultNan && isfinite(qNan);
 fprintf('  non-finite S: solveFault = %d, q finite = %d -> %s\n', faultNan, isfinite(qNan), pf(okNan));
 okSing = okSing && okNan;
@@ -59,7 +59,7 @@ for k = 1:N
     g = innBuf(1:m, k); f = H(:, 1);
     qRef = qRef + (f' * (S \ g))^2 / (f' * (S \ f));               % explicit Eq. 17/20/29 form
 end
-[alarmPD, qPD, ~, faultPD] = SPF_cpiMonitor(innBuf, sBuf, hBuf, numBuf, 1);
+[alarmPD, qPD, ~, faultPD] = SPF_cpiMonitor(innBuf, sBuf, hBuf, numBuf, 1, 0.0);
 okPD = alarmPD && ~faultPD && abs(qPD - qRef) < 1e-9 * max(1, qRef);
 fprintf('  PD S, 5 m bias: alarm = %d, |q_matrixInv - q_explicit| = %.1e -> %s\n\n', alarmPD, abs(qPD - qRef), pf(okPD));
 ok1 = okSing && okPD;

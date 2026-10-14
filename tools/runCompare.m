@@ -66,7 +66,9 @@ function [res] = runCompare(runA, runB, tOut, tReacq, aidedWin)
 %        it into a reference-point offset (constant) and a latency (speed term).
 %     1. aided accuracy: RMS position, velocity and attitude error, bias error
 %     2. state error at tOut: velocity, tilt, bias, with sigma from pDiag
-%     3. outage trace: the slope over the first 10 s (must match the tOut
+%     3. outage trace: the position sigma the filter carried at the end of
+%        the outage against the drift (pDiag logged along the run), the
+%        slope over the first 10 s (must match the tOut
 %        velocity error, or the truth or the lag is wrong), then the fit
 %        err = a + b x + c x^2 + d x^3 per NED axis, x from tOut; the terms
 %        b T, c T^2, d T^3 at T = tReacq - tOut say whether the drift is
@@ -139,15 +141,17 @@ yawT = r.trueAtt(:, 3);  okY = isfinite(yawT);  yawT(okY) = unwrap(yawT(okY));  
 rA = NaN;
 
 %% quantities logged per 2 Hz update: bias held between updates, P taken at the last update <= tOut
-P = [];
+P = [];  Pkf = [];  tPkf = [];                     % Pkf / tPkf: the diagonal per record when it is logged along the run (section 3)
 if isfield(r, 'pDiag') && ~isempty(r.pDiag), P = pDiagMatrix(r.pDiag); end
 if size(r.biasEst, 1) == 1, r.biasEst = repmat(r.biasEst, N, 1); end          % value at tOut only
-if size(P, 1) == 1, P = repmat(P, N, 1); end                                   % value at tOut only
+pSingle = (size(P, 1) == 1);
+if pSingle, P = repmat(P, N, 1); end                                           % value at tOut only
 nKf = 0;
 if isfield(r, 'tKf') && ~isempty(r.tKf), nKf = numel(r.tKf); end
 if ~isempty(P) && size(P, 1) ~= N && size(P, 1) ~= nKf && any(size(P, 2) == [N, nKf, size(r.biasEst, 1)])
     P = P';                                                                    % given as states x records
 end
+if ~isempty(P) && ~pSingle && size(P, 1) == N, Pkf = P;  tPkf = t; end        % logged per nav sample
 K = max(size(r.biasEst, 1) * (size(r.biasEst, 1) ~= N), size(P, 1) * (size(P, 1) ~= N));
 if K > 0 && (~isfield(r, 'tKf') || isempty(r.tKf))
     r.tKf = t(1) + (t(end) - t(1)) * (0:K-1)' / (K - 1);
@@ -160,6 +164,7 @@ if isfield(r, 'tKf') && ~isempty(r.tKf)
         r.biasEst = interpRows(tKf, r.biasEst, t, 'previous');
     end
     if ~isempty(P) && size(P, 1) == numel(tKf)
+        Pkf = P;  tPkf = tKf;                                                  % logged per 2 Hz epoch
         iKf = find(tKf <= tOut, 1, 'last');
         if isempty(iKf)
             fprintf('   NOTE: no tKf epoch at or before tOut = %.2f (tKf runs %.2f..%.2f): sigmas not available\n', tOut, tKf(1), tKf(end));
@@ -414,7 +419,7 @@ end
 
 %% 2. state error at tOut, 3. outage trace, 4. budget: only with an outage
 iOut = N;  iEnd = N;  T = NaN;  dv = NaN(3, 1);  db = NaN(6, 1);  psi = NaN(3, 1);  sig = NaN(22, 1);
-drift = NaN(1, 3);  slope10 = NaN(1, 3);  dvImplied = NaN(1, 3);  velJump = NaN;  tJump = NaN;  yawJump = NaN;
+drift = NaN(1, 3);  sigEnd = NaN(1, 3);  slope10 = NaN(1, 3);  dvImplied = NaN(1, 3);  velJump = NaN;  tJump = NaN;  yawJump = NaN;
 coef = NaN(3, 4);  velTerm = NaN(3, 1);  biasTerm = velTerm;  tiltTerm = velTerm;  gyroTerm = velTerm;  yawTerm = velTerm;
 if ~hasOut
     fprintf('2.-4. no outage given (tOut = []): the state, trace and budget sections are skipped\n');
@@ -446,6 +451,10 @@ else
     fprintf('   tilt psi  N %+7.3f E %+7.3f D %+7.3f mrad (from the DCMs)\n', psi * 1e3);
     fprintf('   accel bias err %+7.3f %+7.3f %+7.3f mg      sigma(mg) %s\n', db(1:3) / (G * 1e-3), sigStr(sig(10:12) / (G * 1e-3)));
     fprintf('   gyro  bias err %+7.3f %+7.3f %+7.3f deg/h   sigma(deg/h) %s\n', db(4:6) * 180 / pi * 3600, sigStr(sig(13:15) * 180 / pi * 3600));
+    if all(biasTrue(iOut, :) == 0)
+        fprintf('   NOTE: biasTrue is zero: the two bias rows are the estimates themselves, not errors, and the accel bias term of the\n');
+        fprintf('         budget in section 4 treats the whole estimate as error. Judge the coast by the sigma line of section 3 instead.\n');
+    end
     if max(abs(db(1:3))) / (G * 1e-3) < 0.02 && min(abs(db(4:6))) * 180 / pi * 3600 > 100
         fprintf('   NOTE: an accel bias error below 0.02 mg next to a gyro bias error above 100 deg/h is not a plausible pair. Read with the\n');
         fprintf('         two blocks swapped they are %.3f %.3f %.3f mg and %.2f %.2f %.2f deg/h: biasEst (and biasTrue) must hold the\n', ...
@@ -467,6 +476,21 @@ else
     slope10 = (posErr(i10, :) - posErr(iOut, :)) / (t(i10) - t(iOut));
     [jump, iJ] = max(sqrt(sum(diff(posErr(iOut:i10, :), 1, 1).^2, 2)));
     fprintf('3. outage drift observed: N %+8.2f E %+8.2f D %+8.2f m\n', drift);
+    sigEnd = NaN(1, 3);
+    if ~isempty(Pkf)
+        iPe = find(tPkf <= t(iEnd), 1, 'last');                 % last logged P before the first update back
+        if ~isempty(iPe)
+            sigEnd = sqrt(max(Pkf(iPe, 1:3), 0));
+            fprintf('   position sigma the filter carried at the end of the outage (pDiag at t = %.2f): N %.2f E %.2f D %.2f m; |drift| / sigma: N %.1f E %.1f D %.1f\n', ...
+                tPkf(iPe), sigEnd, abs(drift) ./ sigEnd);
+            if max(abs(drift(1:2)) ./ sigEnd(1:2)) > 3
+                fprintf('   the horizontal drift is far outside the sigma the filter carried: in coast P does not track the INS drift (the Q of the\n');
+                fprintf('   bias and attitude states is too small for a coast); the gate''s re-validation and coast budget read that P\n');
+            else
+                fprintf('   the coast P covers the drift\n');
+            end
+        end
+    end
     aErr = Cnav * (-db(1:3)) + G * [psi(2); -psi(1); 0];        % bias + tilt acceleration error of section 2
     dvImplied = slope10 - 0.5 * aErr' * (t(i10) - t(iOut));
     fprintf('   slope over the first %.0f s of the outage: N %+.3f E %+.3f D %+.3f m/s = vel err at tOut + %.0f s x the bias+tilt acceleration\n', ...
@@ -529,7 +553,7 @@ o = struct('name', r.name, 'tau', tau, 'tauP', tauP, 'tauV', tauV, 'tauVp', tauV
     'kP', kP, 'r2P', r2P, 'kV', kV, 'r2V', r2V, 'posOffset', posOffset, 'posLatency', posLatency, 'posOffsetSig', posOffsetSig, 'posLatencySig', posLatencySig, 'velSource', velSource, 'rmsPos', rmsPos, ...
     'rmsVel', rmsVel, 'meanVel', meanVel, 'rmsAtt', rmsAtt, 'leverArm', leverArm, 'tOut', t(iOut), 'T', T, ...
     'posErrOut', posErr(iOut, :), 'dv', dv, 'slope10', slope10', 'dvImplied', dvImplied', 'velJump', velJump, 'tJump', tJump, 'yawJump', yawJump, 'attErr', attErr(iOut, :)', 'psi', psi, 'db', db, 'sig', sig, ...
-    'drift', drift, 'coef', coef, 'velTerm', velTerm, 'biasTerm', biasTerm, 'tiltTerm', tiltTerm, ...
+    'drift', drift, 'sigEnd', sigEnd, 'coef', coef, 'velTerm', velTerm, 'biasTerm', biasTerm, 'tiltTerm', tiltTerm, ...
     'gyroTerm', gyroTerm, 'yawTerm', yawTerm, 'posErrTrace', posErr, 'velErrTrace', velErr, 'attErrTrace', attErr, 'biasErrTrace', biasErr, 't', t);
 end
 

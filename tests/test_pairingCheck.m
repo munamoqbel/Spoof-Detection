@@ -77,6 +77,10 @@ shifts = -0.3:0.01:0.3;
 [costA, shA] = pairingCheck(tKf, pr, satPos, tRef, posRef, shifts, sysId);
 [cS, iS] = min(costS);
 okShift = abs(shS(iS) - tau) < 0.011 && cS < 1.5 && isequal(costS, costA) && isequal(shS, shA);
+txt = evalc('pairingCheck(tKf, loggedData, [], tRef, posRef, shifts);');          % the subset lines all at tau
+subsetLines = regexp(txt, '(system \d|epochs on the \w+ second \(\d+\))\s+([+-]\d\.\d+) s', 'tokens');
+okSubsets = numel(subsetLines) == 4 && all(cellfun(@(c) abs(str2double(c{2}) - tau) < 0.02, subsetLines)) ...
+    && isempty(strfind(txt, 'do not share one latency')); %#ok<STREMP>
 
 %% a log with compacted ranges (slots 1..n) and the positions left in their channel slots: by slot the
 %% residual is huge and the diagnostic names the slots, by order the shift comes back
@@ -93,6 +97,7 @@ end
 [costO, shO] = pairingCheck(tKf, comp, 'order', tRef, posRef, shifts);
 [cO, iO] = min(costO);
 okOrder = min(costC) > 1e5 && abs(shO(iO) - tau) < 0.011 && cO < 1.5;
+okShift = okShift && okSubsets;
 
 %% sysIdLog that disagrees with the slots: a warning, the arrays unchanged
 bad = loggedData;

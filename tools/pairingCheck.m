@@ -90,6 +90,34 @@ if numel(shifts) >= 5 && all(isfinite(cost))
         end
     end
 end
+% the same scan per system and per 2 Hz slot (epochs on the whole second against the half second): one latency
+% gives the same minimum everywhere; a shoulder on the main curve comes from subsets with their own latency
+ids = unique(sysId(isfinite(pr)))';
+slot = mod(round(2 * tEpoch), 2);
+names = {};  s0s = [];  fls = [];  vs = [];
+for id = ids
+    prS = pr;  prS(sysId ~= id) = NaN;
+    [s0, fl, v] = scanFit(tEpoch, prS, satPos, tRef, refEcef, sysId, shifts);
+    names{end+1} = sprintf('system %d', id);  s0s(end+1) = s0;  fls(end+1) = fl;  vs(end+1) = v; %#ok<AGROW>
+end
+for par = [0 1]
+    rows = slot == par;
+    if nnz(rows) < 20, continue; end
+    [s0, fl, v] = scanFit(tEpoch(rows), pr(rows, :), satPos(rows, :, :), tRef, refEcef, sysId(rows, :), shifts);
+    names{end+1} = sprintf('epochs on the %s second (%d)', ifelse(par == 0, 'whole', 'half'), nnz(rows));  s0s(end+1) = s0;  fls(end+1) = fl;  vs(end+1) = v; %#ok<AGROW>
+end
+if ~isempty(s0s)
+    fprintf('the scan per subset, parabola minimum / floor / effective speed:\n');
+    for j = 1:numel(names)
+        fprintf('   %-36s %+.3f s   %.2f m   %.1f m/s\n', names{j}, s0s(j), fls(j), vs(j));
+    end
+    ok = isfinite(s0s);
+    if nnz(ok) >= 2 && max(s0s(ok)) - min(s0s(ok)) > 0.05
+        fprintf('   the subsets do not share one latency: the host pairs them with different delays (per constellation: the messages\n');
+        fprintf('   arrive at different times; per slot: the two epochs of each second are paired differently). Fix each with its own\n');
+        fprintf('   shift, then the main curve becomes one parabola\n');
+    end
+end
 [~, clk, ids] = residualAtShift(tEpoch, pr, satPos, tRef, refEcef, sysId, shifts(iBest));
 if ~isempty(ids)
     fprintf('receiver clock removed per system at the best shift, median over the epochs:');
@@ -108,6 +136,23 @@ end
 end
 
 %------------------------------------------------------------------------
+function [s0, fl, vEff] = scanFit(tEpoch, pr, satPos, tRef, refEcef, sysId, shifts)
+% the cost curve of one subset and its parabola fit: minimum s0, floor fl, effective speed vEff (NaN when
+% the subset is too small or the curve has no curvature)
+s0 = NaN;  fl = NaN;  vEff = NaN;
+if nnz(any(isfinite(pr), 2)) < 20, return; end
+cost = NaN(size(shifts));
+for i = 1:numel(shifts)
+    s = residualAtShift(tEpoch, pr, satPos, tRef, refEcef, sysId, shifts(i));
+    cost(i) = median(s(isfinite(s)));
+end
+if ~all(isfinite(cost)), return; end
+p = polyfit(shifts(:), cost(:).^2, 2);
+if p(1) > 0
+    s0 = -p(2) / (2 * p(1));  vEff = sqrt(p(1));  fl = sqrt(max(p(3) - p(1) * s0^2, 0));
+end
+end
+
 function slotDiagnostic(tEpoch, pr, satPos, tRef, refEcef, sysId)
 % on a few epochs at zero shift: for each system, the receiver clock c and the position slot that each range
 % fits with it, from the offsets D(i, j) = pr_i - |p_j - ref| (the correct pairing shares one c within TOL)

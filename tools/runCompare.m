@@ -75,7 +75,11 @@ function [res] = runCompare(runA, runB, tOut, tReacq, aidedWin)
 %        velocity (t), bias/tilt (t^2) or gyro (t^3)
 %     4. state budget: the same drift predicted from the tOut errors,
 %        including the yaw error acting on the manoeuvres of the outage
-%   and, with two runs, the difference of the tOut state errors in sigmas.
+%   and, with two runs, the difference of the tOut state errors in sigmas,
+%   the drift difference predicted from them, and the aided position and
+%   velocity error rms per aided window with the ratio between the runs
+%   (the same ratio in every window is a filter-wide change, a ratio
+%   concentrated in one or two windows is an episode inside them).
 %
 %   Conventions used in section 4 (if a predicted term has the right size
 %   and the wrong sign, the host uses the opposite convention for that
@@ -93,7 +97,8 @@ function [res] = runCompare(runA, runB, tOut, tReacq, aidedWin)
 %   their fit sigmas posOffsetSig, posLatencySig, velSource, rmsPos, rmsVel, meanVel,
 %   rmsAtt, tOut, T, posErrOut, dv, slope10, attErr, psi, db, sig, drift,
 %   coef, velTerm, biasTerm, tiltTerm, gyroTerm, yawTerm and the traces
-%   posErrTrace, velErrTrace, attErrTrace, biasErrTrace on t. sig is the
+%   posErrTrace, velErrTrace, attErrTrace, biasErrTrace on t, and winA (the
+%   aided window of each nav sample, 0 outside). sig is the
 %   square root of the P diagonal (22 x 1) at the last update <= tOut; it
 %   is NaN, and the sigma columns print n/a, when pDiag is missing or its
 %   records cannot be matched to tKf (a NOTE says so).
@@ -570,7 +575,7 @@ o = struct('name', r.name, 'tau', tau, 'tauP', tauP, 'tauV', tauV, 'tauVp', tauV
     'rmsVel', rmsVel, 'meanVel', meanVel, 'rmsAtt', rmsAtt, 'leverArm', leverArm, 'tOut', t(iOut), 'T', T, ...
     'posErrOut', posErr(iOut, :), 'dv', dv, 'slope10', slope10', 'dvImplied', dvImplied', 'velJump', velJump, 'tJump', tJump, 'yawJump', yawJump, 'attErr', attErr(iOut, :)', 'psi', psi, 'db', db, 'sig', sig, ...
     'drift', drift, 'sigEnd', sigEnd, 'coef', coef, 'velTerm', velTerm, 'biasTerm', biasTerm, 'tiltTerm', tiltTerm, ...
-    'gyroTerm', gyroTerm, 'yawTerm', yawTerm, 'posErrTrace', posErr, 'velErrTrace', velErr, 'attErrTrace', attErr, 'biasErrTrace', biasErr, 't', t);
+    'gyroTerm', gyroTerm, 'yawTerm', yawTerm, 'posErrTrace', posErr, 'velErrTrace', velErr, 'attErrTrace', attErr, 'biasErrTrace', biasErr, 't', t, 'winA', winA);
 end
 
 %------------------------------------------------------------------------
@@ -601,8 +606,29 @@ fprintf('   yaw              %+8.2f  %+8.2f\n', b.yawTerm(1:2) - a.yawTerm(1:2))
 fprintf('   sum              %+8.2f  %+8.2f\n', (b.velTerm(1:2) + b.biasTerm(1:2) + b.tiltTerm(1:2) + b.gyroTerm(1:2) + b.yawTerm(1:2)) ...
     - (a.velTerm(1:2) + a.biasTerm(1:2) + a.tiltTerm(1:2) + a.gyroTerm(1:2) + a.yawTerm(1:2)));
 fprintf('   observed         %+8.2f  %+8.2f\n', b.drift(1:2) - a.drift(1:2));
-fprintf('   aided pos rms    %s: N %5.2f E %5.2f | %s: N %5.2f E %5.2f m\n', nameA, a.rmsPos(1:2), nameB, b.rmsPos(1:2));
-fprintf('   aided vel rms    %s: N %5.3f E %5.3f | %s: N %5.3f E %5.3f m/s\n', nameA, a.rmsVel(1:2), nameB, b.rmsVel(1:2));
+fprintf('   aided pos rms    %s: N %5.2f E %5.2f D %5.2f | %s: N %5.2f E %5.2f D %5.2f m\n', nameA, a.rmsPos(1:3), nameB, b.rmsPos(1:3));
+fprintf('   aided vel rms    %s: N %5.3f E %5.3f D %5.3f | %s: N %5.3f E %5.3f D %5.3f m/s\n', nameA, a.rmsVel(1:3), nameB, b.rmsVel(1:3));
+% per aided window: a ratio that is about the same in every window is a filter-wide change (R, Q, feedback, sync);
+% a ratio concentrated in one or two windows is an episode inside them (multipath, a manoeuvre, a dropout)
+nWin = max([max(a.winA), max(b.winA)]);
+if nWin >= 2
+    fprintf('   per aided window: horizontal pos rms [m], 3-D vel rms [m/s], and the ratio %s / %s\n', nameB, nameA);
+    fprintf('   window      t1 - t2 [s]         %-6s pos     vel   | %-6s pos     vel   | ratio  pos   vel\n', nameA, nameB);
+    for w = 1:nWin
+        mA = a.winA == w & all(isfinite(a.posErrTrace), 2) & all(isfinite(a.velErrTrace), 2);
+        mB = b.winA == w & all(isfinite(b.posErrTrace), 2) & all(isfinite(b.velErrTrace), 2);
+        if any(mA) && any(mB)
+            pA = rmsRows(a.posErrTrace(mA, :), 1:2);  vA = rmsRows(a.velErrTrace(mA, :), 1:3);
+            pB = rmsRows(b.posErrTrace(mB, :), 1:2);  vB = rmsRows(b.velErrTrace(mB, :), 1:3);
+            tw = [min(a.t(mA)), max(a.t(mA))];
+            fprintf('   %2d     %8.1f - %8.1f    %7.2f  %6.3f | %7.2f  %6.3f |      %5.2f %5.2f\n', w, tw, pA, vA, pB, vB, pB / pA, vB / vA);
+        else
+            fprintf('   %2d     (no finite samples in one of the runs)\n', w);
+        end
+    end
+else
+    fprintf('   (one aided window: give several in aidedWin to see whether an error change is filter-wide or episodic)\n');
+end
 fprintf('   A difference of a few sigmas or less on every row is two draws of the same filter; many sigmas on the\n');
 fprintf('   bias or tilt rows means the two filters disagree beyond their own uncertainty, i.e. at least one is inconsistent.\n');
 end

@@ -96,7 +96,10 @@ gives the aided accuracy against the truth, the velocity, tilt and bias error
 at the last aided epoch with their sigmas, fits the outage error trace as
 a + b t + c t^2 + d t^3 to separate velocity, bias/tilt and gyro drift, and
 predicts the drift from the state errors. With two runs it prints their
-difference at the outage start in sigmas. Its time-alignment section first
+difference at the outage start in sigmas, and the aided position and
+velocity error rms per aided window with the ratio between the runs (a
+ratio that is the same in every window is a filter-wide change, one
+concentrated in a window or two is an episode inside them). Its time-alignment section first
 checks the truth arrays against the differenced truth position (a velocity
 logged at another point of the host step, in another frame or missing, and a
 yaw with another convention show there) and the nav velocity against the

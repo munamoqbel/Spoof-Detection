@@ -30,7 +30,11 @@ function [cost, shifts] = pairingCheck(tEpoch, pr, satPos, tRef, posRef, shifts,
 %                          is removed per system (inter-system bias)
 %   A minimum at s = -0.5 s means the observables compared with the pulse
 %   state are one 2 Hz epoch older than the host believes; at 0 they are the
-%   pulse's own epoch. The receiver clock removed per system at the best shift
+%   pulse's own epoch. A parabola fitted to cost^2 gives the minimum between
+%   the grid points with the floor (the pseudorange noise) and the effective
+%   speed; the bottom is flat against the grid within about a fifth of
+%   floor / speed, so pass moving epochs only (index tEpoch and the log by a
+%   speed mask) to sharpen it. The receiver clock removed per system at the best shift
 %   is printed, with a warning when the residual there is far above code noise
 %   (satellite clock or atmosphere still in the ranges, or the wrong satellite
 %   positions) and a note when it is far below it at zero shift (a range built
@@ -70,6 +74,21 @@ fprintf('smallest at %+.2f s (%.2f m): the observables describe the vehicle %.2f
     shifts(iBest), cBest, abs(shifts(iBest)), ifelse(shifts(iBest) < 0, 'before', 'after'));
 if iBest == 1 || iBest == numel(shifts)
     fprintf('WARNING: at the edge of the scan, widen shifts\n');
+end
+% the curve is cost^2 = floor^2 + (vEff (s - s0))^2: the fit gives the minimum between the grid points, the floor and
+% the effective speed, and says when the bottom is flat against the grid
+if numel(shifts) >= 5 && all(isfinite(cost))
+    p = polyfit(shifts(:), cost(:).^2, 2);
+    if p(1) > 0
+        s0   = -p(2) / (2 * p(1));
+        vEff = sqrt(p(1));
+        fl2  = p(3) - p(1) * s0^2;
+        fprintf('parabola fit: minimum at %+.3f s, floor %.2f m, effective speed %.1f m/s (the bottom is flat within +-%.2f s of it)\n', ...
+            s0, sqrt(max(fl2, 0)), vEff, 0.2 * sqrt(max(fl2, 0)) / vEff);
+        if s0 < shifts(1) + 0.1 || s0 > shifts(end) - 0.1
+            fprintf('WARNING: the fitted minimum is near or beyond the scan edge: widen shifts\n');
+        end
+    end
 end
 [~, clk, ids] = residualAtShift(tEpoch, pr, satPos, tRef, refEcef, sysId, shifts(iBest));
 if ~isempty(ids)

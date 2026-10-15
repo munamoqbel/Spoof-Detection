@@ -65,7 +65,11 @@ tEpoch  = tEpoch(:);
 cost = NaN(size(shifts));
 for i = 1:numel(shifts)
     s = residualAtShift(tEpoch, pr, satPos, tRef, refEcef, sysId, shifts(i));
-    cost(i) = median(s(isfinite(s)));
+    cost(i) = medianFinite(s);
+end
+if ~any(isfinite(cost))
+    error('pairingCheck:noEpoch', ['no epoch gives a residual at any shift: an epoch needs 5 finite ranges and a reference ' ...
+        'position at tEpoch + shift; check the time bases of tEpoch and tRef and the used-slot pairing']);
 end
 [cBest, iBest] = min(cost);
 fprintf('residual std over the satellites, median over the epochs, per shift of the reference instant:\n');
@@ -109,7 +113,11 @@ end
 if ~isempty(s0s)
     fprintf('the scan per subset, parabola minimum / floor / effective speed:\n');
     for j = 1:numel(names)
-        fprintf('   %-36s %+.3f s   %.2f m   %.1f m/s\n', names{j}, s0s(j), fls(j), vs(j));
+        if isfinite(s0s(j))
+            fprintf('   %-36s %+.3f s   %.2f m   %.1f m/s\n', names{j}, s0s(j), fls(j), vs(j));
+        else
+            fprintf('   %-36s (no curve: fewer than 20 epochs with 5 finite ranges, or no curvature)\n', names{j});
+        end
     end
     ok = isfinite(s0s);
     if nnz(ok) >= 2 && max(s0s(ok)) - min(s0s(ok)) > 0.05
@@ -121,7 +129,7 @@ end
 [~, clk, ids] = residualAtShift(tEpoch, pr, satPos, tRef, refEcef, sysId, shifts(iBest));
 if ~isempty(ids)
     fprintf('receiver clock removed per system at the best shift, median over the epochs:');
-    for j = 1:numel(ids), fprintf(' system %d %+.0f m', ids(j), median(clk(isfinite(clk(:, j)), j))); end
+    for j = 1:numel(ids), fprintf(' system %d %+.0f m', ids(j), medianFinite(clk(:, j))); end
     fprintf('\n');
 end
 if cBest > 100
@@ -144,7 +152,7 @@ if nnz(any(isfinite(pr), 2)) < 20, return; end
 cost = NaN(size(shifts));
 for i = 1:numel(shifts)
     s = residualAtShift(tEpoch, pr, satPos, tRef, refEcef, sysId, shifts(i));
-    cost(i) = median(s(isfinite(s)));
+    cost(i) = medianFinite(s);
 end
 if ~all(isfinite(cost)), return; end
 p = polyfit(shifts(:), cost(:).^2, 2);
@@ -229,6 +237,12 @@ for k = 1:K
     end
     s(k) = sqrt(mean(r(ok).^2));
 end
+end
+
+function [m] = medianFinite(x)
+% median over the finite entries, NaN when there are none (Octave's median errors on an empty input)
+x = x(isfinite(x));
+if isempty(x), m = NaN; else, m = median(x); end
 end
 
 function [s] = ifelse(c, a, b)

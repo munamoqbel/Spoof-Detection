@@ -1,12 +1,13 @@
-%% test_pairingCheck.m
-% pairingCheck on the host's per-epoch log format (prLog / satPosLog / sysIdLog, one block of
+function test_pairingCheck()
+%TEST_PAIRINGCHECK  pairingCheck on the host's per-epoch log format (prLog / satPosLog / sysIdLog, one block of
 % 15 slots per constellation) through pairingLogUnpack: a vehicle at 30 m/s, GPS and GLONASS in
 % non-contiguous slots, Galileo switched off (all zeros), a receiver clock per system, 1 m code
 % noise, one epoch without GNSS, satValid per slot on one system and scalar on the other. The
 % pseudoranges are measured 0.09 s before the epoch they are tagged with. Checks: the unpacked
 % arrays (slots, NaN padding, ids, positions), the best shift at -0.09 s with a residual at the
 % noise level, the struct call equal to the array call, and the sysIdLog mismatch warning path.
-% Run from the repo root (Octave with the shim).
+% A function, so that running it from the command window leaves the caller's loggedData, tKf and
+% reference untouched. Run from the repo root (Octave with the shim).
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'tools'));
 randn('seed', 3);  rand('seed', 3);
@@ -105,4 +106,5 @@ if okUnpack && okShift && okOrder && okWarn
     fprintf('=== test_pairingCheck PASS ===\n');
 else
     fprintf('=== test_pairingCheck FAIL ===\n');
+end
 end

@@ -49,6 +49,13 @@ K = size(pr, 1);
 if numel(tEpoch) ~= K
     error('pairingCheck:epochs', 'tEpoch has %d entries, the ranges %d epochs', numel(tEpoch), K);
 end
+if size(posRef, 2) ~= 3 || size(posRef, 1) ~= numel(tRef) || max(abs(posRef(:, 1))) > pi / 2 ...
+        || max(abs(posRef(:, 2))) > pi || max(abs(posRef(:, 3))) > 2e4
+    error('pairingCheck:posRef', ['posRef must be the reference position [lat lon h] in radians, radians and metres, one row ' ...
+        'per entry of tRef (%d); got %d x %d with |lat| up to %.3g, |lon| up to %.3g, |h| up to %.3g: a velocity or a ' ...
+        'position in degrees cannot be used'], numel(tRef), size(posRef, 1), size(posRef, 2), ...
+        max(abs(posRef(:, 1))), max(abs(posRef(:, min(2, size(posRef, 2))))), max(abs(posRef(:, end))));
+end
 refEcef = llaToEcef(posRef);
 tEpoch  = tEpoch(:);
 cost = NaN(size(shifts));

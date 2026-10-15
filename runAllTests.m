@@ -10,6 +10,7 @@ function runAllTests()
 %   6. tests/test_matrixInv         contract of the host's SVD inverse (padding, accuracy, flags)
 %   7. run_scheduler_test           100 Hz + 2 Hz architecture (T1-T6)
 %   8. tests/test_designConstants   offline monitor design from recorded spfMeas (tools/designConstants)
+%   9. tests/test_pairingCheck      pairingCheck on the host's per-epoch range log (tools/pairingLogUnpack)
 %
 % Each test is run in its own workspace (they may 'clear'); its console
 % output is captured and searched for its own PASS marker.
@@ -25,7 +26,8 @@ tests = { ...
     'test_error_handlers',   '=== test_error_handlers PASS ===';
     'test_matrixInv',        '=== test_matrixInv PASS ===';
     'run_scheduler_test',    '=== ALL SCHEDULER TESTS PASS ===';
-    'test_designConstants',  '=== test_designConstants PASS ==='};
+    'test_designConstants',  '=== test_designConstants PASS ===';
+    'test_pairingCheck',     '=== test_pairingCheck PASS ==='};
 
 fprintf('==============================================\n');
 fprintf('  Spoof-detection pre-integration tests\n');

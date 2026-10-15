@@ -129,7 +129,11 @@ type tells which of the two 2 Hz epochs is paired wrongly.
 pseudoranges, the satellite positions the host uses in h(x) and the
 reference position, it finds the shift of the reference instant at which the
 ranges fit, so observables one epoch older than the pulse they are paired
-with show a minimum at −0.5 s.
+with show a minimum at −0.5 s. It takes the host's per-epoch log as logged
+(prLog / satPosLog / sysIdLog, one block of slots per constellation) through
+`tools/pairingLogUnpack.m`, and prints the receiver clock it removed per
+system with a warning when the residual says the ranges or the positions are
+not the ones of h(x). `tests/test_pairingCheck.m` covers the log format.
 `tools/dopplerCheck.m` reads the spfMeas records saved per 2 Hz epoch (the
 struct the host already builds for the gate, which carries y, S, H, R and the
 state before and after the update) and says what the range-rate rows do in

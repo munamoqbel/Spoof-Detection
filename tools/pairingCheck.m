@@ -2,8 +2,14 @@ function [cost, shifts] = pairingCheck(tEpoch, pr, satPos, tRef, posRef, shifts,
 %PAIRINGCHECK  Which instant of the reference the pseudoranges of each epoch describe.
 %   [cost, shifts] = pairingCheck(tEpoch, pr, satPos, tRef, posRef)
 %   [cost, shifts] = pairingCheck(tEpoch, loggedData, [], tRef, posRef, shifts)
+%   [cost, shifts] = pairingCheck(tEpoch, loggedData, 'order', tRef, posRef, shifts)
 %     loggedData: the host's per-epoch log (prLog / satPosLog / sysIdLog, one block per
-%     constellation), unpacked by pairingLogUnpack; satPos and sysId then come from it
+%     constellation), unpacked by pairingLogUnpack; satPos and sysId then come from it.
+%     'order' pairs the used ranges with the live position rows by order instead of by
+%     slot (see pairingLogUnpack). When the residual at the best shift is far above code
+%     noise a slot diagnostic says, on a few epochs, which position slot each range fits
+%     with one receiver clock per system: ranges fitting other slots mean the log is
+%     compacted on one side, no fit at all means the positions are not ECEF at the epoch
 %   For each candidate shift s, the reference position at tEpoch + s predicts
 %   the ranges to the satellites. The measured pseudoranges minus those
 %   ranges, with the per-epoch mean (the receiver clock) removed, leave a
@@ -32,7 +38,11 @@ function [cost, shifts] = pairingCheck(tEpoch, pr, satPos, tRef, posRef, shifts,
 %   MATLAB desktop tool, not codegen. Runs under Octave.
 
 unpacked = isstruct(pr) || (iscell(pr) && ~isempty(pr) && isstruct(pr{1}));
-if unpacked, [pr, satPos, sysId] = pairingLogUnpack(pr); end
+if unpacked
+    pairing = 'slot';
+    if ischar(satPos) && ~isempty(satPos), pairing = satPos; end
+    [pr, satPos, sysId] = pairingLogUnpack(pr, pairing);
+end
 if nargin < 6 || isempty(shifts), shifts = -1.5:0.1:0.5; end
 if ~unpacked && (nargin < 7 || isempty(sysId)), sysId = ones(size(pr)); end
 K = size(pr, 1);
@@ -64,6 +74,7 @@ if cBest > 100
     fprintf('WARNING: a residual of %.0f m at the best shift is far above code noise: the satellite clock or the atmosphere are still in\n', cBest);
     fprintf('         the pseudoranges, or the satellite positions are not the ones of h(x) (transmit time, earth rotation), or the\n');
     fprintf('         slots of the ranges and of the positions do not match\n');
+    slotDiagnostic(tEpoch, pr, satPos, tRef, refEcef, sysId);
 elseif abs(shifts(iBest)) < 0.015 && cBest < 0.3
     fprintf('NOTE: a minimum at zero shift with a residual of %.2f m is what a range built from the nav solution gives; a measured\n', cBest);
     fprintf('      pseudorange carries code noise of a metre or more. Check that the logged range is the measurement, not the prediction\n');
@@ -71,6 +82,56 @@ end
 end
 
 %------------------------------------------------------------------------
+function slotDiagnostic(tEpoch, pr, satPos, tRef, refEcef, sysId)
+% on a few epochs at zero shift: for each system, the receiver clock c and the position slot that each range
+% fits with it, from the offsets D(i, j) = pr_i - |p_j - ref| (the correct pairing shares one c within TOL)
+TOL = 50;
+M  = size(pr, 2);
+ep = find(sum(isfinite(pr), 2) >= 4);
+if isempty(ep), return; end
+ep = ep(unique(round(linspace(1, numel(ep), 5))));
+ids = unique(sysId(isfinite(pr)))';
+nFit = 0;  nTot = 0;  moved = 0;
+fprintf('slot diagnostic at zero shift on %d epochs: the position slot each range fits with one receiver clock per system (within %d m)\n', numel(ep), TOL);
+for k = ep'
+    p0 = interp1(tRef(:), refEcef, tEpoch(k), 'linear', NaN);
+    if ~all(isfinite(p0)), continue; end
+    sat = reshape(satPos(k, :, :), M, 3);
+    rho = sqrt(sum((sat - repmat(p0, M, 1)).^2, 2));
+    for id = ids
+        block = find(sysId(k, :) == id);
+        ri = block(isfinite(pr(k, block)));                        % ranges of this system
+        pj = block(rho(block)' > 1e6);                             % position rows that hold a satellite
+        if numel(ri) < 4 || isempty(pj), continue; end
+        D = repmat(pr(k, ri)', 1, numel(pj)) - repmat(rho(pj)', numel(ri), 1);   % [ranges x positions]
+        best = 0;  jBest = ones(numel(ri), 1);  cBest = NaN;
+        for c = D(1, :)
+            [dmin, jmin] = min(abs(D - c), [], 2);
+            n = nnz(dmin < TOL);
+            if n > best, best = n;  jBest = jmin;  cBest = c; end
+        end
+        ok = abs(D(sub2ind(size(D), (1:numel(ri))', jBest)) - cBest) < TOL;
+        rs = ri(ok) - block(1) + 1;  ps = pj(jBest(ok)) - block(1) + 1;        % slots within the system block
+        fprintf('   epoch %d, system %d: %d of %d ranges fit a position (clock %+.0f m); range slots %s -> position slots %s\n', ...
+            k, id, best, numel(ri), cBest, mat2str(rs), mat2str(ps));
+        nFit = nFit + best;  nTot = nTot + numel(ri);  moved = moved + nnz(rs ~= ps);
+    end
+end
+if nTot == 0, return; end
+if nFit >= 0.8 * nTot && moved > 0
+    fprintf('   the ranges fit positions in OTHER slots: one side of the log is compacted or ordered differently. If the used positions\n');
+    fprintf('   are the live rows in order, rerun with pairingCheck(tEpoch, loggedData, ''order'', ...); otherwise log the positions in\n');
+    fprintf('   the slots of the ranges\n');
+elseif nFit >= 0.8 * nTot
+    fprintf('   the slots pair; the residual comes from the values: satellite clock or atmosphere still in the ranges, or positions\n');
+    fprintf('   not at the measurement epoch\n');
+else
+    fprintf('   no slot assignment fits most ranges: the positions are not ECEF at the measurement epoch (inertial frame, ephemeris\n');
+    fprintf('   reference time, another unit), or the ranges are not pseudoranges. Compare satPosLog.position with the satellite\n');
+    fprintf('   position the range-row builder uses for the same epoch\n');
+end
+end
+
 function [s, clk, ids] = residualAtShift(tEpoch, pr, satPos, tRef, refEcef, sysId, shift)
 % per epoch: the residual std over the satellites after the per-system mean (the receiver clock)
 % is removed, with the reference at tEpoch + shift; clk [K x nSys] the means removed, ids the systems

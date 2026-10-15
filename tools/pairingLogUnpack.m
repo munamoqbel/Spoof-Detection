@@ -1,6 +1,11 @@
-function [pr, satPos, sysId] = pairingLogUnpack(loggedData)
+function [pr, satPos, sysId] = pairingLogUnpack(loggedData, pairing)
 %PAIRINGLOGUNPACK  The arrays pairingCheck needs, from the host's per-epoch log of the range rows.
 %   [pr, satPos, sysId] = pairingLogUnpack(loggedData)
+%   [pr, satPos, sysId] = pairingLogUnpack(loggedData, 'order')
+%     pairing 'slot' (default): the range in slot j pairs with the position in slot j
+%     pairing 'order': the i-th used range of a system pairs with the i-th live position row
+%     (norm above 1000 km) of that system, for a log whose ranges are compacted while the
+%     positions stay in channel slots; both land in the range's slot
 %   loggedData [K x 1] struct array (or cell of structs), one record per 2 Hz epoch, with
 %     prLog      one field per constellation, e.g. gpsRange, gloRange, galRange, each a struct
 %                whose geomRange [S x 1] is the corrected pseudorange per satellite slot
@@ -21,8 +26,11 @@ function [pr, satPos, sysId] = pairingLogUnpack(loggedData)
 %     sysId  [K x M]
 %   MATLAB desktop tool, not codegen. Runs under Octave.
 
+if nargin < 2 || isempty(pairing), pairing = 'slot'; end
+byOrder = strcmpi(pairing, 'order');
 if iscell(loggedData), loggedData = [loggedData{:}]; end
 K = numel(loggedData);
+nShort = 0;
 k0 = 1;
 while k0 < K && ~(isstruct(loggedData(k0).prLog) && isstruct(loggedData(k0).satPosLog))
     k0 = k0 + 1;
@@ -57,10 +65,20 @@ for k = 1:K
             used = used & logical(st.satValid(:));
         end
         g(~used) = NaN;
+        if byOrder
+            live = find(sqrt(sum(p.^2, 2)) > 1e6 & all(isfinite(p), 2));   % position rows that hold a satellite
+            iu   = find(used);
+            n    = min(numel(iu), numel(live));
+            if n < numel(iu), nShort = nShort + 1; end
+            q = NaN(slots(s), 3);
+            q(iu(1:n), :) = p(live(1:n), :);
+            g(iu(n+1:end)) = NaN;
+            p = q;
+        end
         pr(k, cols) = g';
         satPos(k, cols, :) = reshape(p, [1 slots(s) 3]);
         sysId(k, cols) = s;
-        nUsed(k, s) = nnz(used);
+        nUsed(k, s) = nnz(isfinite(g));
     end
     if hasId && ~isempty(loggedData(k).sysIdLog)
         ids = double(loggedData(k).sysIdLog(:));
@@ -85,6 +103,11 @@ for s = 1:nSys
     end
 end
 fprintf('\n');
+if byOrder
+    fprintf('pairingLogUnpack: ranges paired with the live position rows by order');
+    if nShort > 0, fprintf('; %d epochs had fewer live positions than ranges (the extra ranges dropped)', nShort); end
+    fprintf('\n');
+end
 chk = all(isfinite(nIdLog), 2);
 bad = find(chk & any(nIdLog ~= nUsed, 2));
 if ~isempty(bad)

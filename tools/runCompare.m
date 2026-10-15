@@ -489,6 +489,22 @@ else
             else
                 fprintf('   the coast P covers the drift\n');
             end
+            % what the tOut uncertainties alone give through the error dynamics with no Q: velocity x T, the larger tilt
+            % through g, the accelerometer bias; the host's own P must reach at least that if Phi carries the coupling
+            sigV = sqrt(max(Pkf(iPe, 4:6), 0));
+            if all(isfinite(sig(1:12)))
+                tilt = max(sig(7), sig(8));
+                implied = sqrt([sig(1)^2 + (sig(4) * T)^2 + (0.5 * G * tilt * T^2)^2 + (0.5 * sig(10) * T^2)^2, ...
+                                sig(2)^2 + (sig(5) * T)^2 + (0.5 * G * tilt * T^2)^2 + (0.5 * sig(11) * T^2)^2, ...
+                                sig(3)^2 + (sig(6) * T)^2 + (0.5 * sig(12) * T^2)^2]);
+                fprintf('   velocity sigma at the end of the outage: N %.3f E %.3f D %.3f m/s. The tOut sigmas alone (velocity x T, tilt through g,\n', sigV);
+                fprintf('   accel bias), carried through the error dynamics with no Q, give a position sigma of N %.1f E %.1f D %.1f m\n', implied);
+                if max(sigEnd(1:2) ./ implied(1:2)) < 0.3
+                    fprintf('   the logged sigma is far below that: the host''s P propagation does not carry its own velocity, tilt and bias uncertainties\n');
+                    fprintf('   into position (coupling missing in Phi, or P not propagated through the outage). No Q makes the coast P honest until\n');
+                    fprintf('   that is fixed, and the gate''s coast covariance is propagated with the same Phi and Q\n');
+                end
+            end
         end
     end
     aErr = Cnav * (-db(1:3)) + G * [psi(2); -psi(1); 0];        % bias + tilt acceleration error of section 2

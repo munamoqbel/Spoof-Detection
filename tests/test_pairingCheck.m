@@ -77,14 +77,31 @@ shifts = -0.3:0.01:0.3;
 [cS, iS] = min(costS);
 okShift = abs(shS(iS) - tau) < 0.011 && cS < 1.5 && isequal(costS, costA) && isequal(shS, shA);
 
+%% a log with compacted ranges (slots 1..n) and the positions left in their channel slots: by slot the
+%% residual is huge and the diagnostic names the slots, by order the shift comes back
+comp = loggedData;
+for k = 2:K
+    for s = 1:2
+        g = comp(k).prLog.(prNames{s}).geomRange;  iu = find(g ~= 0);
+        gc = zeros(S, 1);  gc(1:numel(iu)) = g(iu);
+        comp(k).prLog.(prNames{s}).geomRange = gc;
+        if s == 1, comp(k).satPosLog.(spNames{s}).satValid = 1; end        % no per-slot mask left on this side
+    end
+end
+[costC, ~] = pairingCheck(tKf, comp, [], tRef, posRef, shifts);              % slot pairing: residual in the thousands of km
+[costO, shO] = pairingCheck(tKf, comp, 'order', tRef, posRef, shifts);
+[cO, iO] = min(costO);
+okOrder = min(costC) > 1e5 && abs(shO(iO) - tau) < 0.011 && cO < 1.5;
+
 %% sysIdLog that disagrees with the slots: a warning, the arrays unchanged
 bad = loggedData;
 bad(5).sysIdLog = [ones(7, 1); 2 * ones(7, 1)];
 [prB, satB, idB] = pairingLogUnpack(bad);
 okWarn = isequaln(prB, pr) && isequaln(satB, satPos) && isequaln(idB, sysId);
 
-fprintf('unpack %d, shift %+.2f s (%.2f m) %d, warning path %d\n', okUnpack, shS(iS), cS, okShift, okWarn);
-if okUnpack && okShift && okWarn
+fprintf('unpack %d, shift %+.2f s (%.2f m) %d, compacted log by order %+.2f s (%.2f m) %d, warning path %d\n', ...
+    okUnpack, shS(iS), cS, okShift, shO(iO), cO, okOrder, okWarn);
+if okUnpack && okShift && okOrder && okWarn
     fprintf('=== test_pairingCheck PASS ===\n');
 else
     fprintf('=== test_pairingCheck FAIL ===\n');

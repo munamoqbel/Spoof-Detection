@@ -95,7 +95,8 @@ function [res] = runCompare(runA, runB, tOut, tReacq, aidedWin)
 %   Result: res.run1 (and res.run2) with tau (reference lag), tauP, tauV,
 %   tauA, sV, sA, sNV, kP, r2P, kV, r2V, posOffset [along cross], posLatency and
 %   their fit sigmas posOffsetSig, posLatencySig, velSource, rmsPos, rmsVel, meanVel,
-%   rmsAtt, tOut, T, posErrOut, dv, slope10, attErr, psi, db, sig, drift,
+%   rmsAtt, tOut, T, posErrOut, dv, slope10, attErr, psi, db, sig, drift, sigEnd,
+%   sigGrowthExp (exponent p of the logged sigma growth ~ T^p along the outage, position and velocity),
 %   coef, velTerm, biasTerm, tiltTerm, gyroTerm, yawTerm and the traces
 %   posErrTrace, velErrTrace, attErrTrace, biasErrTrace on t, and winA (the
 %   aided window of each nav sample, 0 outside). sig is the
@@ -424,7 +425,7 @@ end
 
 %% 2. state error at tOut, 3. outage trace, 4. budget: only with an outage
 iOut = N;  iEnd = N;  T = NaN;  dv = NaN(3, 1);  db = NaN(6, 1);  psi = NaN(3, 1);  sig = NaN(22, 1);
-drift = NaN(1, 3);  sigEnd = NaN(1, 3);  slope10 = NaN(1, 3);  dvImplied = NaN(1, 3);  velJump = NaN;  tJump = NaN;  yawJump = NaN;
+drift = NaN(1, 3);  sigEnd = NaN(1, 3);  sigGrowthExp = NaN(1, 6);  slope10 = NaN(1, 3);  dvImplied = NaN(1, 3);  velJump = NaN;  tJump = NaN;  yawJump = NaN;
 coef = NaN(3, 4);  velTerm = NaN(3, 1);  biasTerm = velTerm;  tiltTerm = velTerm;  gyroTerm = velTerm;  yawTerm = velTerm;
 if ~hasOut
     fprintf('2.-4. no outage given (tOut = []): the state, trace and budget sections are skipped\n');
@@ -493,6 +494,39 @@ else
                 fprintf('   bias and attitude states is too small for a coast); the gate''s re-validation and coast budget read that P\n');
             else
                 fprintf('   the coast P covers the drift\n');
+            end
+            % how the logged variance grows along the outage tells how P is propagated there: Q alone gives
+            % P - P(tOut) ~ T (sigma ~ T^0.5); Phi's velocity coupling gives T^3 in position (sigma ~ T^1.5) and its
+            % tilt and bias coupling T^3 in velocity and T^5 in position (sigma ~ T^2.5). The slope is fitted on the
+            % second half of the outage, where the highest active power dominates
+            inGap = tPkf > t(iOut) & tPkf <= t(iEnd);
+            iP0 = find(tPkf <= t(iOut), 1, 'last');
+            if nnz(inGap) >= 8 && ~isempty(iP0)
+                tau  = tPkf(inGap) - tPkf(iP0);
+                dP   = Pkf(inGap, 1:6) - repmat(Pkf(iP0, 1:6), nnz(inGap), 1);
+                half = tau >= 0.5 * tau(end);
+                for c = 1:6
+                    ok = half & dP(:, c) > 0;
+                    if nnz(ok) >= 4
+                        pf = polyfit(log(tau(ok)), log(dP(ok, c)), 1);
+                        sigGrowthExp(c) = 0.5 * pf(1);                 % exponent p of sigma growth ~ T^p
+                    end
+                end
+                fprintf('   growth law of the logged sigma along the outage, P - P(tOut) ~ T^(2p): position p = N %.2f E %.2f D %.2f, velocity p = N %.2f E %.2f D %.2f\n', sigGrowthExp);
+                fprintf('   (Q alone gives p = 0.5; Phi''s velocity coupling gives p = 1.5 in position; its tilt and bias coupling p = 1.5 in velocity and 2.5 in position)\n');
+                pH = max(sigGrowthExp(1:2));
+                if isfinite(pH) && pH < 0.8
+                    fprintf('   VERDICT: during the outage P grows by Q alone, Phi is not applied to it (P propagated only in the measurement step that\n');
+                    fprintf('            the outage never calls, or the coupling blocks dropped from the propagation). Fix the propagation before any Q\n');
+                elseif isfinite(pH) && pH < 2
+                    fprintf('   VERDICT: P carries the velocity coupling but not the tilt and bias coupling during the outage\n');
+                elseif isfinite(pH)
+                    fprintf('   VERDICT: P carries the full coupling during the outage; a small sigma then comes from the tOut sigmas and Q\n');
+                else
+                    fprintf('   (no usable growth: the logged variance does not increase over the second half of the outage)\n');
+                end
+            else
+                fprintf('   (growth law not fitted: fewer than 8 logged P records inside the outage)\n');
             end
             % what the tOut uncertainties alone give through the error dynamics with no Q: velocity x T, the larger tilt
             % through g, the accelerometer bias; the host's own P must reach at least that if Phi carries the coupling
@@ -574,7 +608,7 @@ o = struct('name', r.name, 'tau', tau, 'tauP', tauP, 'tauV', tauV, 'tauVp', tauV
     'kP', kP, 'r2P', r2P, 'kV', kV, 'r2V', r2V, 'posOffset', posOffset, 'posLatency', posLatency, 'posOffsetSig', posOffsetSig, 'posLatencySig', posLatencySig, 'velSource', velSource, 'rmsPos', rmsPos, ...
     'rmsVel', rmsVel, 'meanVel', meanVel, 'rmsAtt', rmsAtt, 'leverArm', leverArm, 'tOut', t(iOut), 'T', T, ...
     'posErrOut', posErr(iOut, :), 'dv', dv, 'slope10', slope10', 'dvImplied', dvImplied', 'velJump', velJump, 'tJump', tJump, 'yawJump', yawJump, 'attErr', attErr(iOut, :)', 'psi', psi, 'db', db, 'sig', sig, ...
-    'drift', drift, 'sigEnd', sigEnd, 'coef', coef, 'velTerm', velTerm, 'biasTerm', biasTerm, 'tiltTerm', tiltTerm, ...
+    'drift', drift, 'sigEnd', sigEnd, 'sigGrowthExp', sigGrowthExp, 'coef', coef, 'velTerm', velTerm, 'biasTerm', biasTerm, 'tiltTerm', tiltTerm, ...
     'gyroTerm', gyroTerm, 'yawTerm', yawTerm, 'posErrTrace', posErr, 'velErrTrace', velErr, 'attErrTrace', attErr, 'biasErrTrace', biasErr, 't', t, 'winA', winA);
 end
 

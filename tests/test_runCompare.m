@@ -297,6 +297,18 @@ prP(:, 8) = NaN;  sysP = [ones(KP, 5) 2 * ones(KP, 3)];  prP(:, 6:7) = prP(:, 6:
 [costP, shP] = pairingCheck(tEp, prP, satP, tTrue, truePos, -1.5:0.1:0.5, sysP);
 [~, iP] = min(costP);
 if abs(shP(iP) + 0.5) < 0.01, fprintf('=== pairingCheck check PASS ===\n'); else, fprintf('=== pairingCheck check FAIL ===\n'); end
+% growth law of the logged sigma along the outage: a variance growing like T (Q alone) must read p = 0.5, like T^3
+% (the velocity coupling of Phi) p = 1.5, like T^5 (the tilt and bias coupling) p = 2.5
+runV = runA;  runV.name = 'V growth Q only';
+tauV = max(runA.t(:) - 100, 0) .* (runA.t(:) < 250);
+runV.pDiag(:, 1:3) = repmat(1 + 0.2 * tauV, 1, 3);
+runV.pDiag(:, 4:6) = repmat(0.05^2 + 1e-5 * tauV.^3, 1, 3);
+runV2 = runV;  runV2.name = 'V2 growth coupled';
+runV2.pDiag(:, 1:3) = repmat(1 + 1e-9 * tauV.^5, 1, 3);
+resV = runCompare(runV, runV2, 100, 250, [10 95; 255 295]);
+okV = all(abs(resV.run1.sigGrowthExp(1:3) - 0.5) < 0.05) && all(abs(resV.run1.sigGrowthExp(4:6) - 1.5) < 0.05) ...
+   && all(abs(resV.run2.sigGrowthExp(1:3) - 2.5) < 0.05) && ~any(isfinite(res.run1.sigGrowthExp));   % constant P: no growth
+if okV, fprintf('=== sigma growth law check PASS ===\n'); else, fprintf('=== sigma growth law check FAIL ===\n'); end
 % a clean run without an outage (tOut = []): sections 0 and 1 only, no state comparison, the whole run aided by default
 resN = runCompare(runA, runB, [], [], [10 95; 255 295]);
 resN0 = runCompare(runA, [], [], []);

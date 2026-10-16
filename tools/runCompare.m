@@ -208,7 +208,9 @@ for w = 1:size(aidedWin, 1)
 end
 gA = winA(inAided);
 gT = winT(inT);
-fprintf('0. time alignment\n');
+fprintf('0. time alignment, nav(t) = truth(t + lag)\n');
+F0 = '   %-38s%-13s%-29s%s\n';                           % check, shift or lag, residual, note
+fprintf(F0, 'check', 'shift / lag', 'residual', 'note');
 
 %% (a) truth arrays against the differenced truth position
 velPos = velFromPos(tT, r.truePos);                           % NED velocity differenced from the truth position
@@ -219,21 +221,18 @@ if isfield(r, 'trueVel') && ~isempty(r.trueVel)
     rV = rmsRows(interpRows(tT, r.trueVel, tT(inT) + sV) - velPos(inT, :), 1:3);
     if rV < 1 && abs(sV) < 1.49
         velSource = 'logged';
-        fprintf('   truth arrays: trueVel(t %+.2f s) = d(truePos)/dt(t), residual %.3f m/s rms', sV, rV);
         if rV > 0.1
-            fprintf('\n   (truePos carries ~%.0f mm of sample-to-sample jitter; trueVel is the smooth source and gives the course and the acceleration)\n', ...
-                rV * 0.02 / sqrt(2) * 1e3);
+            noteV = sprintf('trueVel used; truePos has ~%.0f mm of jitter', rV * 0.02 / sqrt(2) * 1e3);
         else
-            fprintf('\n');
+            noteV = 'trueVel used';
         end
+        fprintf(F0, 'trueVel vs d(truePos)/dt', sprintf('%+6.2f s', sV), sprintf('%7.3f m/s rms', rV), noteV);
     elseif rV < 1
+        fprintf(F0, 'trueVel vs d(truePos)/dt', sprintf('%+6.2f s', sV), sprintf('%7.3f m/s rms', rV), 'WARNING: match only at the scan edge, d(truePos)/dt used');
         sV = 0;
-        fprintf('   WARNING: trueVel matches d(truePos)/dt only at the edge of the scan (%+.2f s): not trusted, the velocity\n', sV);
-        fprintf('            differenced from truePos is used instead\n');
     else
+        fprintf(F0, 'trueVel vs d(truePos)/dt', sprintf('%+6.2f s', sV), sprintf('%7.3f m/s rms', rV), 'WARNING: another frame or unit? d(truePos)/dt used');
         sV = 0;
-        fprintf('   WARNING: trueVel differs from d(truePos)/dt by %.2f m/s rms at its best shift (another frame or unit?);\n', rV);
-        fprintf('            the velocity differenced from truePos is used instead\n');
     end
 end
 if strcmp(velSource, 'logged'), trueVel = interpRows(tT, r.trueVel, tT + sV); else, trueVel = velPos; end
@@ -249,19 +248,18 @@ if any(movT)
     rA  = yawRms(interpRows(tT, r.trueAtt(:, 3), tT(movT) + sA), cogT);
     if abs(sA) >= 1.49 || abs(sA) <= 0.05
         sA = 0;
-        fprintf('   truth arrays: trueAtt yaw = truth course over ground to %.1f mrad rms at zero shift (sideslip, or a convention if large)\n', rA0 * 1e3);
+        fprintf(F0, 'trueAtt yaw vs truth course', '  0.00 s', sprintf('%7.1f mrad rms', rA0 * 1e3), 'no shift: sideslip, or a convention if large');
     elseif rA < 0.005
-        fprintf('   truth arrays: trueAtt yaw(t %+.2f s) = truth course over ground(t), residual %.1f mrad rms: a logging offset, re-aligned\n', sA, rA * 1e3);
+        fprintf(F0, 'trueAtt yaw vs truth course', sprintf('%+6.2f s', sA), sprintf('%7.1f mrad rms', rA * 1e3), 'logging offset, re-aligned');
     else
-        fprintf('   truth arrays: trueAtt yaw(t %+.2f s) = truth course over ground(t) best, %.1f mrad rms left (%.1f at zero shift): yaw and\n', sA, rA * 1e3, rA0 * 1e3);
-        fprintf('   course differ by sideslip-like dynamics, so the shift is not applied (a logging offset would leave a few mrad); the attitude\n');
-        fprintf('   lag below is uncertain by this much\n');
+        fprintf(F0, 'trueAtt yaw vs truth course', sprintf('%+6.2f s', sA), sprintf('%7.1f mrad rms (%.1f at 0)', rA * 1e3, rA0 * 1e3), ...
+            'shift not applied: sideslip-like; the attitude lag is uncertain by this');
         sA = 0;
     end
 end
 trueAtt = interpRows(tT, r.trueAtt, tT + sA);
 if abs(sV) > 0.05 || abs(sA) > 0.05
-    fprintf('   (the shifted truth arrays are re-aligned to the truth position before anything below)\n');
+    fprintf('   (shifted truth arrays re-aligned to the truth position before anything below)\n');
 end
 
 %% (b) nav arrays against the differenced nav position
@@ -274,11 +272,13 @@ rNA = NaN;
 if any(movN)
     rNA = yawRmsTrim(r.navAtt(movN, 3), atan2(velNav(movN, 2), velNav(movN, 1)), 0.1);
 end
-fprintf('   nav arrays:   navVel(t %+.2f s) = d(navPos)/dt(t), residual %.3f m/s std (2 Hz jumps excluded); navAtt yaw minus the nav course %.1f mrad rms\n', ...
-    sNV, rNV, rNA * 1e3);
 if abs(sNV) > 0.05
-    fprintf('   WARNING: a mechanised solution has navVel = d(navPos)/dt; a shift means the two nav arrays were logged at different points of the host step\n');
+    noteNV = 'WARNING: navVel and navPos logged at different points of the host step';
+else
+    noteNV = '2 Hz jumps excluded';
 end
+fprintf(F0, 'navVel vs d(navPos)/dt', sprintf('%+6.2f s', sNV), sprintf('%7.3f m/s std', rNV), noteNV);
+fprintf(F0, 'navAtt yaw vs nav course', '    -', sprintf('%7.1f mrad rms', rNA * 1e3), '');
 
 %% (c) lag of the nav solution behind the truth, per quantity
 navPosA = r.navPos(inAided, :);
@@ -299,28 +299,24 @@ if any(mov)
     aAtP = yawCost(tauP);
 end
 haveA = any(mov) && abs(tauA) < 1.49 && ~(min(rA, rA0) > 0.3);    % an attitude lag from a yaw consistent with the course
-fprintf('   lag of the nav solution behind the truth (nav(t) = truth(t + lag)): position %+.2f s, velocity %+.2f s, attitude %+.2f s\n', tauP, tauV, tauA);
-fprintf('   (aided error std at its own lag / at zero lag: position %.2f / %.2f m, velocity %.3f / %.3f m/s, yaw %.1f / %.1f mrad)\n', ...
-    pBest, p0, vBest, v0, aBest * 1e3, a0 * 1e3);
+fprintf(F0, 'nav position lag behind the truth', sprintf('%+6.2f s', tauP), sprintf('%6.2f / %6.2f m', pBest, p0), 'error std at its own lag / at zero lag');
+fprintf(F0, 'nav velocity lag', sprintf('%+6.2f s', tauV), sprintf('%6.3f / %6.3f m/s', vBest, v0), '');
 if strcmp(velSource, 'logged')
-    fprintf('   nav velocity error std against trueVel %.3f m/s (lag %+.2f s), against d(truePos)/dt %.3f m/s (lag %+.2f s)\n', vBest, tauV, vpBest, tauVp);
+    fprintf(F0, 'nav velocity lag vs d(truePos)/dt', sprintf('%+6.2f s', tauVp), sprintf('%6.3f m/s', vpBest), 'for comparison');
 end
+fprintf(F0, 'nav attitude lag', sprintf('%+6.2f s', tauA), sprintf('%6.1f / %6.1f mrad', aBest * 1e3, a0 * 1e3), '');
 if ~haveA
     tau = tauP;
-    fprintf('   reference instant for the errors below: the position lag (no usable attitude lag: no moving samples, truth yaw off the\n');
-    fprintf('   course, or at the scan edge)\n');
+    fprintf('   reference instant: the position lag (no usable attitude lag: no moving samples, truth yaw off the course, or at the scan edge)\n');
 elseif abs(tauA - tauP) <= 0.1
     tau = tauA;
-    fprintf('   position and attitude lags agree: the logged truth is %+.2f s off the nav time base and the nav position does not trail\n', tauA);
-    fprintf('   the truth; the attitude lag is the reference instant for the errors below\n');
+    fprintf('   reference instant: the attitude lag; position and attitude lags agree, the logged truth is %+.2f s off the nav time base\n', tauA);
 elseif aBest < 0.9 * aAtP
     tau = tauA;
-    fprintf('   reference instant for the errors below: the attitude lag. A gyro-integrated attitude cannot trail the truth, so its lag is the\n');
-    fprintf('   time-base offset of the logged truth; what the position and velocity trail beyond it is error of the nav solution.\n');
+    fprintf('   reference instant: the attitude lag (a gyro attitude cannot trail the truth); what position and velocity trail beyond it is nav error\n');
 else
     tau = tauP;
-    fprintf('   WARNING: the yaw error does not prefer its own lag over the position lag (std %.1f vs %.1f mrad): position lag used as the\n', aBest * 1e3, aAtP * 1e3);
-    fprintf('            reference instant for the errors below\n');
+    fprintf('   WARNING: the yaw error does not prefer its own lag over the position lag (std %.1f vs %.1f mrad): position lag used as the reference\n', aBest * 1e3, aAtP * 1e3);
 end
 edgeName = {'position lag', 'velocity lag', 'attitude lag', 'trueVel shift', 'navVel shift'};
 edgeVal  = [tauP, tauV, tauA, sV, sNV];
@@ -335,8 +331,8 @@ vT  = interpRows(tT, velRef, tqK);
 aT  = interpRows(tT, diffRows(tT, velRef, 5), tqK);              % truth acceleration, 0.1 s stencil
 [kP, r2P] = fitK(eP(:, 1:2), vT(:, 1:2), gA);
 [kV, r2V] = fitK(eV(:, 1:2), aT(:, 1:2), gA);
-fprintf('   at the %s: pos err = %+.3f s x truth velocity (%.0f%% of the horizontal error variance), vel err = %+.3f s x truth acceleration (%.0f%%)\n', ...
-    kName, kP, 100 * r2P, kV, 100 * r2V);
+fprintf(F0, 'pos err = k x truth velocity', sprintf('%+6.3f s', kP), sprintf('%3.0f%% of horizontal variance', 100 * r2P), ['at the ' kName]);
+fprintf(F0, 'vel err = k x truth acceleration', sprintf('%+6.3f s', kV), sprintf('%3.0f%% of the variance', 100 * r2V), '');
 % the same position error split into a reference-point offset and a latency, fitted together with a constant per aided
 % window: e = R(course) [along; cross] + latency x truth velocity + mean(window). The offset is between the truth reference
 % point and the nav point (it turns with the heading, so the window mean does not absorb it), the latency is of the position rows
@@ -358,16 +354,14 @@ if nnz(movK) > 10
     posOffset = x(1:2)';  posLatency = x(3);
     posOffsetSig = sqrt(diag(cv(1:2, 1:2)))';  posLatencySig = sqrt(cv(3, 3));
     sp = sort(spdK(movK));  spdRange = [sp(max(1, round(0.05 * numel(sp)))), sp(round(0.95 * numel(sp)))];
-    fprintf('   position error = offset in the body frame + latency x velocity: along-track %+.2f (+-%.2f) m, cross-track %+.2f (+-%.2f) m,\n', ...
-        posOffset(1), posOffsetSig(1), posOffset(2), posOffsetSig(2));
-    fprintf('   latency %+.3f (+-%.3f) s (speed %.0f-%.0f m/s). The offset is between the truth reference point and the nav point, the\n', ...
-        posLatency, posLatencySig, spdRange);
-    fprintf('   latency is of the position rows; +- is the fit uncertainty, large when the heading or the speed hardly varies\n');
+    fprintf(F0, 'latency of the position rows', sprintf('%+6.3f s', posLatency), sprintf('+-%.3f s', posLatencySig), ...
+        sprintf('fitted with a body-frame offset per window; speed %.0f-%.0f m/s', spdRange));
+    fprintf(F0, 'along-track offset', sprintf('%+6.2f m', posOffset(1)), sprintf('+-%.2f m', posOffsetSig(1)), 'nav point minus truth reference point');
+    fprintf(F0, 'cross-track offset', sprintf('%+6.2f m', posOffset(2)), sprintf('+-%.2f m', posOffsetSig(2)), '+- large when heading or speed hardly vary');
 end
 if haveA && (abs(tauP - tauA) > 0.05 || abs(tauV - tauA) > 0.05)
-    fprintf('   NOTE: relative to the attitude lag the nav position trails by %+.2f s and the velocity by %+.2f s. With consistent truth and\n', tauA - tauP, tauA - tauV);
-    fprintf('         nav arrays (above) that is not a logging artefact: the GNSS measurements are applied late relative to the IMU\n');
-    fprintf('         (pseudoranges ~%.2f s, Doppler ~%.2f s), or the truth used to build them is taken earlier than the nav epoch.\n', tauA - tauP, tauA - tauV);
+    fprintf('   NOTE: against the attitude lag the position trails by %+.2f s and the velocity by %+.2f s: GNSS applied late relative to the IMU\n', tauA - tauP, tauA - tauV);
+    fprintf('         (pseudoranges ~%.2f s, Doppler ~%.2f s), or the truth behind the measurements taken earlier than the nav epoch\n', tauA - tauP, tauA - tauV);
 end
 
 %% error traces at the reference instant
@@ -399,9 +393,13 @@ meanPos = mean(posErr(ok, :), 1);
 meanVel = mean(velErr(ok, :), 1);
 okA = ok & all(isfinite(attErr), 2);
 rmsAtt = sqrt(mean(attErr(okA, :).^2, 1));
-fprintf('1. aided windows: pos rms N %.2f E %.2f D %.2f m (mean N %.2f E %.2f D %.2f)\n', rmsPos, meanPos);
-fprintf('   vel rms N %.3f E %.3f D %.3f m/s (mean N %+.3f E %+.3f D %+.3f), att rms roll %.2f pitch %.2f yaw %.2f mrad\n', ...
-    rmsVel, meanVel, rmsAtt * 1e3);
+fprintf('1. aided windows, error against the truth at the reference instant\n');
+fprintf('                            N          E          D\n');
+fprintf('   pos rms    m    %10.2f %10.2f %10.2f\n', rmsPos);
+fprintf('   pos mean   m    %+10.2f %+10.2f %+10.2f\n', meanPos);
+fprintf('   vel rms    m/s  %10.3f %10.3f %10.3f\n', rmsVel);
+fprintf('   vel mean   m/s  %+10.3f %+10.3f %+10.3f\n', meanVel);
+fprintf('   att rms    mrad   roll %.2f   pitch %.2f   yaw %.2f\n', rmsAtt * 1e3);
 % lever arm: the velocity of a point r (body, x forward, y right) off the reference point differs by yaw rate x r,
 % i.e. +psidot*r_x laterally and -psidot*r_y longitudinally; fit the aided velocity error on the nav yaw rate
 yawN   = unwrap(r.navAtt(:, 3));
@@ -413,14 +411,15 @@ okL = ok & isfinite(psiDot) & isfinite(eLong) & isfinite(eLat);
 [rx, r2x] = fitK(eLat(okL), psiDot(okL), winA(okL));
 [ry, r2y] = fitK(eLong(okL), -psiDot(okL), winA(okL));
 leverArm = [rx, ry];
-fprintf('   lever-arm signature of the velocity error: r_x %+.2f m (%.0f%% of the lateral variance), r_y %+.2f m (%.0f%%); large shares with\n', ...
-    rx, 100 * r2x, ry, 100 * r2y);
-fprintf('   metre-sized arms mean the GNSS antenna sits that far from the reference point and h(x) carries no lever arm\n');
+fprintf('   lever arm in the velocity error: r_x %+.2f m (%.0f%% of the lateral variance), r_y %+.2f m (%.0f%%)\n', rx, 100 * r2x, ry, 100 * r2y);
+if (abs(rx) > 0.5 && r2x > 0.3) || (abs(ry) > 0.5 && r2y > 0.3)
+    fprintf('   NOTE: a metre-sized arm with a large share: the antenna sits that far from the reference point and h(x) carries no lever arm\n');
+end
 lastWin = inAided & t <= tOut & t >= tOut - 60;
 if any(lastWin)
     bm = mean(biasErr(lastWin, :), 1);
-    fprintf('   bias error, mean over the last 60 s of aiding before t = %.2f: accel %+.3f %+.3f %+.3f mg, gyro %+.3f %+.3f %+.3f deg/h\n', ...
-        tOut, bm(1:3) / (G * 1e-3), bm(4:6) * 180 / pi * 3600);
+    fprintf('   bias err, mean of the last 60 s before tOut:   accel %+.3f %+.3f %+.3f mg   gyro %+.3f %+.3f %+.3f deg/h\n', ...
+        bm(1:3) / (G * 1e-3), bm(4:6) * 180 / pi * 3600);
 end
 
 %% 2. state error at tOut, 3. outage trace, 4. budget: only with an outage
@@ -450,13 +449,15 @@ else
     if ~any(isfinite(sig))
         fprintf('   (no sigmas: pDiag missing or not matched to the epochs, see the NOTEs above)\n');
     end
-    fprintf('2. state error at t = %.2f (truth lag applied), outage T = %.1f s to t = %.2f\n', t(iOut), T, t(iEnd));
-    fprintf('   pos err   N %+8.2f E %+8.2f D %+8.2f m\n', posErr(iOut, :));
-    fprintf('   vel err   N %+8.3f E %+8.3f D %+8.3f m/s     sigma %s\n', dv, sigStr(sig(4:6)));
-    fprintf('   euler err roll %+7.3f pitch %+7.3f yaw %+7.3f mrad   sigma(mrad) %s\n', attErr(iOut, :) * 1e3, sigStr(sig(7:9) * 1e3));
-    fprintf('   tilt psi  N %+7.3f E %+7.3f D %+7.3f mrad (from the DCMs)\n', psi * 1e3);
-    fprintf('   accel bias err %+7.3f %+7.3f %+7.3f mg      sigma(mg) %s\n', db(1:3) / (G * 1e-3), sigStr(sig(10:12) / (G * 1e-3)));
-    fprintf('   gyro  bias err %+7.3f %+7.3f %+7.3f deg/h   sigma(deg/h) %s\n', db(4:6) * 180 / pi * 3600, sigStr(sig(13:15) * 180 / pi * 3600));
+    F2 = '   %-16s %-6s %+10.3f %+10.3f %+10.3f   |  %s\n';
+    fprintf('2. state error at tOut = %.2f s, truth lag applied; outage T = %.1f s, to %.2f s\n', t(iOut), T, t(iEnd));
+    fprintf('   quantity         unit        N / X      E / Y      D / Z   |  sigma      N / X      E / Y      D / Z\n');
+    fprintf('   %-16s %-6s %+10.2f %+10.2f %+10.2f   |\n', 'position', 'm', posErr(iOut, :));
+    fprintf(F2, 'velocity', 'm/s', dv, sigRow(sig(4:6), '%10.3f'));
+    fprintf(F2, 'tilt psi', 'mrad', psi * 1e3, sigRow(sig(7:9) * 1e3, '%10.3f'));
+    fprintf('   %-16s %-6s roll %+8.3f   pitch %+8.3f   yaw %+8.3f\n', 'euler', 'mrad', attErr(iOut, :) * 1e3);
+    fprintf(F2, 'accel bias err', 'mg', db(1:3) / (G * 1e-3), sigRow(sig(10:12) / (G * 1e-3), '%10.3f'));
+    fprintf(F2, 'gyro bias err', 'deg/h', db(4:6) * 180 / pi * 3600, sigRow(sig(13:15) * 180 / pi * 3600, '%10.3f'));
     if all(biasTrue(iOut, :) == 0)
         fprintf('   NOTE: biasTrue is zero: the two bias rows are the estimates themselves, not errors, and the accel bias term of the\n');
         fprintf('         budget in section 4 treats the whole estimate as error. Judge the coast by the sigma line of section 3 instead.\n');
@@ -481,19 +482,24 @@ else
     i10 = min(find(t <= t(iOut) + 10, 1, 'last'), iEnd);
     slope10 = (posErr(i10, :) - posErr(iOut, :)) / (t(i10) - t(iOut));
     [jump, iJ] = max(sqrt(sum(diff(posErr(iOut:i10, :), 1, 1).^2, 2)));
-    fprintf('3. outage drift observed: N %+8.2f E %+8.2f D %+8.2f m\n', drift);
-    sigEnd = NaN(1, 3);
+    F3 = '   %-21s %-5s %10s %10s %10s   %s\n';
+    fprintf('3. outage, INS only for T = %.1f s\n', T);
+    fprintf(F3, '', '', 'N', 'E', 'D', '');
+    row3(F3, 'drift observed', 'm', drift, '%+.2f', '');
+    sigEnd = NaN(1, 3);  sigV = NaN(1, 3);  implied = NaN(1, 3);  tPe = NaN;  nGap = 0;
     if ~isempty(Pkf)
         iPe = find(tPkf <= t(iEnd), 1, 'last');                 % last logged P before the first update back
         if ~isempty(iPe)
+            tPe = tPkf(iPe);
             sigEnd = sqrt(max(Pkf(iPe, 1:3), 0));
-            fprintf('   position sigma the filter carried at the end of the outage (pDiag at t = %.2f): N %.2f E %.2f D %.2f m; |drift| / sigma: N %.1f E %.1f D %.1f\n', ...
-                tPkf(iPe), sigEnd, abs(drift) ./ sigEnd);
-            if max(abs(drift(1:2)) ./ sigEnd(1:2)) > 3
-                fprintf('   the horizontal drift is far outside the sigma the filter carried: in coast P does not track the INS drift (the Q of the\n');
-                fprintf('   bias and attitude states is too small for a coast); the gate''s re-validation and coast budget read that P\n');
-            else
-                fprintf('   the coast P covers the drift\n');
+            sigV   = sqrt(max(Pkf(iPe, 4:6), 0));
+            % what the tOut uncertainties alone give through the error dynamics with no Q: velocity x T, the larger tilt
+            % through g, the accelerometer bias; the host's own P must reach at least that if Phi carries the coupling
+            if all(isfinite(sig(1:12)))
+                tilt = max(sig(7), sig(8));
+                implied = sqrt([sig(1)^2 + (sig(4) * T)^2 + (0.5 * G * tilt * T^2)^2 + (0.5 * sig(10) * T^2)^2, ...
+                                sig(2)^2 + (sig(5) * T)^2 + (0.5 * G * tilt * T^2)^2 + (0.5 * sig(11) * T^2)^2, ...
+                                sig(3)^2 + (sig(6) * T)^2 + (0.5 * sig(12) * T^2)^2]);
             end
             % how the logged variance grows along the outage tells how P is propagated there: Q alone gives
             % P - P(tOut) ~ T (sigma ~ T^0.5); Phi's velocity coupling gives T^3 in position (sigma ~ T^1.5) and its
@@ -501,9 +507,10 @@ else
             % second half of the outage, where the highest active power dominates
             inGap = tPkf > t(iOut) & tPkf <= t(iEnd);
             iP0 = find(tPkf <= t(iOut), 1, 'last');
-            if nnz(inGap) >= 8 && ~isempty(iP0)
+            nGap = nnz(inGap);
+            if nGap >= 8 && ~isempty(iP0)
                 tauG  = tPkf(inGap) - tPkf(iP0);                       % time into the outage of each logged P record
-                dPG   = Pkf(inGap, 1:6) - repmat(Pkf(iP0, 1:6), nnz(inGap), 1);
+                dPG   = Pkf(inGap, 1:6) - repmat(Pkf(iP0, 1:6), nGap, 1);
                 halfG = tauG >= 0.5 * tauG(end);
                 for cG = 1:6
                     okG = halfG & dPG(:, cG) > 0;
@@ -512,46 +519,49 @@ else
                         sigGrowthExp(cG) = 0.5 * pfG(1);               % exponent p of sigma growth ~ T^p
                     end
                 end
-                fprintf('   growth law of the logged sigma along the outage, P - P(tOut) ~ T^(2p): position p = N %.2f E %.2f D %.2f, velocity p = N %.2f E %.2f D %.2f\n', sigGrowthExp);
-                fprintf('   (Q alone gives p = 0.5; Phi''s velocity coupling gives p = 1.5 in position; its tilt and bias coupling p = 1.5 in velocity and 2.5 in position)\n');
-                pH = max(sigGrowthExp(1:2));
-                if isfinite(pH) && pH < 0.8
-                    fprintf('   VERDICT: during the outage P grows by Q alone, Phi is not applied to it (P propagated only in the measurement step that\n');
-                    fprintf('            the outage never calls, or the coupling blocks dropped from the propagation). Fix the propagation before any Q\n');
-                elseif isfinite(pH) && pH < 2
-                    fprintf('   VERDICT: P carries the velocity coupling but not the tilt and bias coupling during the outage\n');
-                elseif isfinite(pH)
-                    fprintf('   VERDICT: P carries the full coupling during the outage; a small sigma then comes from the tOut sigmas and Q\n');
-                else
-                    fprintf('   (no usable growth: the logged variance does not increase over the second half of the outage)\n');
-                end
-            else
-                fprintf('   (growth law not fitted: fewer than 8 logged P records inside the outage)\n');
-            end
-            % what the tOut uncertainties alone give through the error dynamics with no Q: velocity x T, the larger tilt
-            % through g, the accelerometer bias; the host's own P must reach at least that if Phi carries the coupling
-            sigV = sqrt(max(Pkf(iPe, 4:6), 0));
-            if all(isfinite(sig(1:12)))
-                tilt = max(sig(7), sig(8));
-                implied = sqrt([sig(1)^2 + (sig(4) * T)^2 + (0.5 * G * tilt * T^2)^2 + (0.5 * sig(10) * T^2)^2, ...
-                                sig(2)^2 + (sig(5) * T)^2 + (0.5 * G * tilt * T^2)^2 + (0.5 * sig(11) * T^2)^2, ...
-                                sig(3)^2 + (sig(6) * T)^2 + (0.5 * sig(12) * T^2)^2]);
-                fprintf('   velocity sigma at the end of the outage: N %.3f E %.3f D %.3f m/s. The tOut sigmas alone (velocity x T, tilt through g,\n', sigV);
-                fprintf('   accel bias), carried through the error dynamics with no Q, give a position sigma of N %.1f E %.1f D %.1f m\n', implied);
-                if max(sigEnd(1:2) ./ implied(1:2)) < 0.3
-                    fprintf('   the logged sigma is far below that: the host''s P propagation does not carry its own velocity, tilt and bias uncertainties\n');
-                    fprintf('   into position (coupling missing in Phi, or P not propagated through the outage). No Q makes the coast P honest until\n');
-                    fprintf('   that is fixed, and the gate''s coast covariance is propagated with the same Phi and Q\n');
-                end
             end
         end
     end
+    if isfinite(tPe)
+        row3(F3, 'logged sigma, end', 'm', sigEnd, '%.2f', sprintf('pDiag at t = %.2f', tPe));
+        row3(F3, '|drift| / sigma', '', abs(drift) ./ sigEnd, '%.1f', '');
+        if all(isfinite(implied))
+            row3(F3, 'implied sigma, no Q', 'm', implied, '%.1f', 'the tOut sigmas through the error dynamics');
+        end
+        row3(F3, 'velocity sigma, end', 'm/s', sigV, '%.3f', '');
+        if nGap >= 8
+            row3(F3, 'growth law p, pos', '', sigGrowthExp(1:3), '%.2f', 'P - P(tOut) ~ T^(2p): 0.5 Q alone, 1.5 velocity coupling, 2.5 tilt and bias coupling');
+            row3(F3, 'growth law p, vel', '', sigGrowthExp(4:6), '%.2f', '0.5 Q alone, 1.5 tilt and bias coupling');
+        else
+            fprintf('   (growth law not fitted: fewer than 8 logged P records inside the outage)\n');
+        end
+        if max(abs(drift(1:2)) ./ sigEnd(1:2)) > 3
+            fprintf('   VERDICT: the horizontal drift is far outside the coast sigma: the gate''s re-validation and coast budget read a P that does not track the INS\n');
+        else
+            fprintf('   the coast P covers the drift\n');
+        end
+        if all(isfinite(implied)) && max(sigEnd(1:2) ./ implied(1:2)) < 0.3
+            fprintf('   VERDICT: the logged sigma is far below the implied one: P does not carry its own velocity, tilt and bias uncertainties into position\n');
+        end
+        pH = max(sigGrowthExp(1:2));
+        if nGap >= 8 && isfinite(pH) && pH < 0.8
+            fprintf('   VERDICT: during the outage P grows by Q alone, Phi is not applied to it (propagated only in the measurement step, or the\n');
+            fprintf('            cross terms dropped between ticks). Fix the propagation before any Q\n');
+        elseif nGap >= 8 && isfinite(pH) && pH < 2
+            fprintf('   VERDICT: P carries the velocity coupling but not the tilt and bias coupling during the outage\n');
+        elseif nGap >= 8 && isfinite(pH)
+            fprintf('   VERDICT: P carries the full coupling during the outage; a small sigma then comes from the tOut sigmas and Q\n');
+        elseif nGap >= 8
+            fprintf('   (no usable growth: the logged variance does not increase over the second half of the outage)\n');
+        end
+    else
+        fprintf('   (no P logged along the run: the coast sigma rows need pDiag per nav sample or per epoch)\n');
+    end
     aErr = Cnav * (-db(1:3)) + G * [psi(2); -psi(1); 0];        % bias + tilt acceleration error of section 2
     dvImplied = slope10 - 0.5 * aErr' * (t(i10) - t(iOut));
-    fprintf('   slope over the first %.0f s of the outage: N %+.3f E %+.3f D %+.3f m/s = vel err at tOut + %.0f s x the bias+tilt acceleration\n', ...
-        t(i10) - t(iOut), slope10, 0.5 * (t(i10) - t(iOut)));
-    fprintf('   implied vel err at tOut: N %+.3f E %+.3f D %+.3f m/s; a gap of more than ~0.1 m/s to section 2 means the truth velocity or its lag is wrong\n', ...
-        dvImplied);
+    row3(F3, sprintf('slope, first %.0f s', t(i10) - t(iOut)), 'm/s', slope10, '%+.3f', 'of the position error');
+    row3(F3, 'implied vel err, tOut', 'm/s', dvImplied, '%+.3f', ...
+        sprintf('slope - %.0f s x bias+tilt acceleration; a gap > 0.1 m/s to section 2 means the truth velocity or its lag is wrong', 0.5 * (t(i10) - t(iOut))));
     if jump > 0.5
         fprintf('   WARNING: the position error jumps by %.2f m at t = %.2f inside those %.0f s (a solution switch?); the slope above includes it\n', ...
             jump, t(iOut + iJ), t(i10) - t(iOut));
@@ -566,7 +576,7 @@ else
     if yawJump > 0.005
         fprintf('   WARNING: the yaw error jumps by %.1f mrad at t = %.2f (a solution switch)\n', yawJump * 1e3, t(iOut + iYJ));
     end
-    fprintf('   fit err = a + b x + c x^2 + d x^3 over %d samples, contributions at T = %.0f s:\n', nnz(sel), T);
+    fprintf('   fit err = a + b x + c x^2 + d x^3 over %d samples, terms at T = %.0f s (b should agree with the vel err of section 2)\n', nnz(sel), T);
     fprintf('   axis      b T (vel)    c T^2 (bias/tilt)    d T^3 (gyro)    fit rms   b [m/s]\n');
     coef = zeros(3, 4);
     axName = 'NED';
@@ -577,7 +587,6 @@ else
         fprintf('   %s     %+9.2f     %+9.2f            %+9.2f       %6.2f    %+.3f\n', ...
             axName(ax), p(3) * T, p(2) * T^2, p(1) * T^3, fitRms, p(3));
     end
-    fprintf('   (b should agree with the vel err of section 2; a large gap means the lag or the logged solution is wrong)\n');
 
     %% 4. budget from the tOut state
     velTerm  = dv * T;
@@ -590,16 +599,17 @@ else
     u        = dpTrue - v0 * T;                                 % displacement from the integrated specific force
     yawTerm  = (dC - eye(3)) * u;                               % exact; [psi_D u_E, -psi_D u_N, 0] to first order
     total    = velTerm + biasTerm + tiltTerm + gyroTerm + yawTerm;
-    fprintf('4. budget from the tOut state (m):   N         E         D\n');
-    fprintf('   velocity  dv T           %+8.2f  %+8.2f  %+8.2f\n', velTerm);
-    fprintf('   accel bias 1/2 C db T^2  %+8.2f  %+8.2f  %+8.2f\n', biasTerm);
-    fprintf('   tilt   (dC-I) g T^2/2    %+8.2f  %+8.2f  %+8.2f\n', tiltTerm);
-    fprintf('   gyro bias g psidot T^3/6 %+8.2f  %+8.2f  %+8.2f\n', gyroTerm);
-    fprintf('   yaw   (dC-I)(dp - v0 T)  %+8.2f  %+8.2f  %+8.2f   (manoeuvre displacement |dp - v0 T| = %.0f m)\n', yawTerm, norm(u(1:2)));
-    fprintf('   sum                      %+8.2f  %+8.2f  %+8.2f\n', total);
-    fprintf('   observed                 %+8.2f  %+8.2f  %+8.2f\n', drift);
+    F4 = '   %-28s %+10.2f %+10.2f %+10.2f   %s\n';
+    fprintf('4. budget from the tOut state, m            N          E          D\n');
+    fprintf(F4, 'velocity   dv T', velTerm, '');
+    fprintf(F4, 'accel bias 1/2 C db T^2', biasTerm, '');
+    fprintf(F4, 'tilt       (dC-I) g T^2/2', tiltTerm, '');
+    fprintf(F4, 'gyro bias  g psidot T^3/6', gyroTerm, '');
+    fprintf(F4, 'yaw        (dC-I)(dp - v0 T)', yawTerm, sprintf('manoeuvre displacement |dp - v0 T| = %.0f m', norm(u(1:2))));
+    fprintf(F4, 'sum', total, '');
+    fprintf(F4, 'observed', drift, '');
     bt = biasTrue(iOut, 1:3);
-    fprintf('   scale: true accel bias uncompensated over T = %.0f m, applied with the wrong sign = %.0f m\n', ...
+    fprintf('   scale: the true accel bias uncompensated over T gives %.0f m, applied with the wrong sign %.0f m\n', ...
         0.5 * norm(bt) * T^2, norm(bt) * T^2);
 
 end
@@ -822,6 +832,24 @@ cr = cos(e(1)); sr = sin(e(1)); cp = cos(e(2)); sp = sin(e(2)); cy = cos(e(3)); 
 C = [cy*cp, cy*sp*sr - sy*cr, cy*sp*cr + sy*sr;
      sy*cp, sy*sp*sr + cy*cr, sy*sp*cr - cy*sr;
      -sp,   cp*sr,            cp*cr];
+end
+
+function [s] = sigRow(v, fmt)
+% three sigmas as fixed-width fields, or n/a when they are not logged
+if all(isfinite(v))
+    s = sprintf([fmt ' ' fmt ' ' fmt], v);
+else
+    s = '       n/a';
+end
+end
+
+function row3(fmtRow, label, unit, v, fmt, note)
+% one row of the fixed-width tables: a label, a unit, three numbers (NaN prints as n/a) and a note
+c = cell(1, 3);
+for i = 1:3
+    if isfinite(v(i)), c{i} = sprintf(fmt, v(i)); else, c{i} = 'n/a'; end
+end
+fprintf(fmtRow, label, unit, c{:}, note);
 end
 
 function [s] = sigStr(v)

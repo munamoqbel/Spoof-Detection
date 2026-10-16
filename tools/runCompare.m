@@ -502,14 +502,14 @@ else
             inGap = tPkf > t(iOut) & tPkf <= t(iEnd);
             iP0 = find(tPkf <= t(iOut), 1, 'last');
             if nnz(inGap) >= 8 && ~isempty(iP0)
-                tau  = tPkf(inGap) - tPkf(iP0);
-                dP   = Pkf(inGap, 1:6) - repmat(Pkf(iP0, 1:6), nnz(inGap), 1);
-                half = tau >= 0.5 * tau(end);
-                for c = 1:6
-                    ok = half & dP(:, c) > 0;
-                    if nnz(ok) >= 4
-                        pf = polyfit(log(tau(ok)), log(dP(ok, c)), 1);
-                        sigGrowthExp(c) = 0.5 * pf(1);                 % exponent p of sigma growth ~ T^p
+                tauG  = tPkf(inGap) - tPkf(iP0);                       % time into the outage of each logged P record
+                dPG   = Pkf(inGap, 1:6) - repmat(Pkf(iP0, 1:6), nnz(inGap), 1);
+                halfG = tauG >= 0.5 * tauG(end);
+                for cG = 1:6
+                    okG = halfG & dPG(:, cG) > 0;
+                    if nnz(okG) >= 4
+                        pfG = polyfit(log(tauG(okG)), log(dPG(okG, cG)), 1);
+                        sigGrowthExp(cG) = 0.5 * pfG(1);               % exponent p of sigma growth ~ T^p
                     end
                 end
                 fprintf('   growth law of the logged sigma along the outage, P - P(tOut) ~ T^(2p): position p = N %.2f E %.2f D %.2f, velocity p = N %.2f E %.2f D %.2f\n', sigGrowthExp);

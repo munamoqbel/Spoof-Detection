@@ -1,0 +1,225 @@
+function [res] = covPropCheck(spfMeasLog, tKf, tOut, tReacq, run, pDiag)
+%COVPROPCHECK  Does the host's P keep its cross terms from one 2 Hz epoch to the next?
+%   res = covPropCheck(spfMeasLog, tKf, tOut, tReacq)
+%   res = covPropCheck(spfMeasLog, tKf, tOut, tReacq, run)         run: the runCompare struct (t, navAtt, navVel) for
+%                                                                   the attitude and acceleration per epoch; without it
+%                                                                   the vehicle is taken level with f = -g
+%   res = covPropCheck(spfMeasLog, tKf, tOut, tReacq, run, pDiag)  pDiag [K x n]: the diagonal given to runCompare,
+%                                                                   checked against diag(postCov)
+%
+%   The per-epoch spfMeas (STRUCT_SPF.setKfMeas) holds postCov, the host's P+ after the update, and the rows the host
+%   applied (obsMatrix, measNoiseCov, numMeas). For every epoch the previous P+ is propagated over the interval with
+%   Phi = expm(F dt) of the 15 INS error states (position <- velocity, velocity <- tilt and accelerometer bias,
+%   tilt <- gyro bias; identity for the other states), without Q, the epoch's rows are applied as a standard update,
+%   and the result is compared with the logged P+ of the epoch block by block (Frobenius norms, so the sign
+%   conventions of the tilt and bias states do not matter). Over one epoch Q adds a few percent to the diagonals and
+%   nothing of note to the cross terms, so the cross-term blocks are the test:
+%     ratio near 1   the block survives the host's 2 Hz path (100 Hz propagation, updateKF, setKF)
+%     ratio near 0   the propagation rebuilds the block and the stored P+ has lost it: removed in updateKF or setKF
+%   A second chain propagates the P+ of tOut through the whole outage with the same Phi and rows, to show what a P that
+%   keeps its cross terms carries at each epoch next to the logged one.
+%
+%   State order assumed: position 1:3, velocity 4:6, attitude 7:9, accelerometer bias 10:12, gyro bias 13:15 (NED,
+%   metres, m/s, rad); set run.pGyroFirst = true when the host orders the gyro biases before the accelerometer biases.
+%   tOut / tReacq: last aided epoch and first epoch back (s), [] for a run without an outage.
+%
+%   Result: res.t, res.ratio (K x 4: pos-vel, vel-tilt, vel-accel bias, tilt-gyro bias, logged / predicted),
+%   res.sigLogged / res.sigOneStep / res.sigChain (K x 4: sigma of position N, E and velocity N, E), res.inOutage,
+%   res.medianAided / res.medianOutage (1 x 4), res.hphRatio (S - R against H P- H', median over the aided epochs),
+%   res.pDiagMatch (true / false / NaN when pDiag is not given).
+
+if iscell(spfMeasLog), spfMeasLog = [spfMeasLog{:}]; end
+K = numel(spfMeasLog);
+if nargin < 2 || isempty(tKf), tKf = 0.5 * (0:K-1)'; end
+tKf = tKf(:);
+if numel(tKf) ~= K
+    error('covPropCheck:tKf', 'tKf has %d entries, the log %d epochs', numel(tKf), K);
+end
+if nargin < 3, tOut = []; end
+if nargin < 4, tReacq = []; end
+if nargin < 5, run = []; end
+if nargin < 6, pDiag = []; end
+G = 9.80665;
+n = size(spfMeasLog(1).postCov, 1);
+if n < 15 || size(spfMeasLog(1).postCov, 2) ~= n
+    error('covPropCheck:postCov', 'postCov must be n x n with n >= 15; got %d x %d', size(spfMeasLog(1).postCov));
+end
+iPos = 1:3;  iVel = 4:6;  iAtt = 7:9;  iBa = 10:12;  iBg = 13:15;
+if ~isempty(run) && isfield(run, 'pGyroFirst') && run.pGyroFirst, iBa = 13:15;  iBg = 10:12; end
+haveNav = ~isempty(run) && isfield(run, 'navAtt') && isfield(run, 't') && isfield(run, 'navVel');
+hasOut  = ~isempty(tOut) && ~isempty(tReacq);
+if hasOut, inOutage = tKf > tOut & tKf < tReacq; else, inOutage = false(K, 1); end
+blocks = {iPos(1:2), iVel(1:2); iVel(1:2), iAtt(1:2); iVel(1:2), iBa; iAtt, iBg};
+blockName = {'pos-vel', 'vel-tilt', 'vel-accel bias', 'tilt-gyro bias'};
+
+ratio = NaN(K, 4);  sigLogged = NaN(K, 4);  sigOneStep = NaN(K, 4);  sigChain = NaN(K, 4);  hphRatio = NaN(K, 1);
+Pc = [];  kOut = [];
+if hasOut, kOut = find(tKf <= tOut, 1, 'last'); end
+if ~isempty(kOut), Pc = spfMeasLog(kOut).postCov; end
+for k = 1:K
+    L = spfMeasLog(k).postCov;
+    sigLogged(k, :) = sqrt(max([L(1,1), L(2,2), L(4,4), L(5,5)], 0));
+    if k == 1, continue; end
+    dt = tKf(k) - tKf(k-1);
+    Phi = intervalPhi(n, dt, tKf(k-1), run, haveNav, G, iPos, iVel, iAtt, iBa, iBg);
+    Pm = Phi * spfMeasLog(k-1).postCov * Phi';
+    [Pp, hr] = applyRows(Pm, spfMeasLog(k));
+    if ~inOutage(k), hphRatio(k) = hr; end
+    sigOneStep(k, :) = sqrt(max([Pp(1,1), Pp(2,2), Pp(4,4), Pp(5,5)], 0));
+    for b = 1:4
+        pb = norm(Pp(blocks{b, 1}, blocks{b, 2}), 'fro');
+        lb = norm(L(blocks{b, 1}, blocks{b, 2}), 'fro');
+        if pb > 1e-300, ratio(k, b) = lb / pb; end
+    end
+    if inOutage(k) && ~isempty(Pc)
+        Pc = Phi * Pc * Phi';
+        Pc = applyRows(Pc, spfMeasLog(k));
+        sigChain(k, :) = sqrt(max([Pc(1,1), Pc(2,2), Pc(4,4), Pc(5,5)], 0));
+    end
+end
+aided = ~inOutage;  aided(1) = false;
+medianAided  = medianRows(ratio(aided, :));
+medianOutage = medianRows(ratio(inOutage, :));
+
+if haveNav, navTxt = 'C and f from the nav solution'; else, navTxt = 'level vehicle, f = -g (no run given)'; end
+fprintf('covPropCheck: %d epochs, %d states, Phi over each interval from %s, no Q\n', K, n, navTxt);
+if hasOut
+    fprintf('   outage: %d epochs from tOut = %.2f s to tReacq = %.2f s; %d aided epochs\n', nnz(inOutage), tOut, tReacq, nnz(aided));
+else
+    fprintf('   no outage given: all %d epochs counted as aided\n', nnz(aided));
+end
+fprintf('   cross block of P+, logged / predicted from the previous P+ (Frobenius norm), median over the epochs:\n');
+fprintf('   block              aided    outage   reading\n');
+reading = cell(1, 4);
+for b = 1:4
+    reading{b} = readRatio(medianAided(b), medianOutage(b));
+    fprintf('   %-16s %8s %8s   %s\n', blockName{b}, fmtRatio(medianAided(b)), fmtRatio(medianOutage(b)), reading{b});
+end
+if any(isfinite(hphRatio))
+    fprintf('   S - R against H P- H'' with P- the propagated previous P+, median over the aided rows: %.2f (1 = the host updates\n', ...
+        medianRows(hphRatio(isfinite(hphRatio))));
+    fprintf('   the propagated previous P+; well below 1 = the P- the host used is smaller than that)\n');
+end
+if hasOut && nnz(inOutage) >= 2
+    fprintf('   outage epochs: sigma logged / one-step predicted / chain from tOut (chain = a P that keeps every cross term)\n');
+    fprintf('   tau [s]      pos N sigma [m]              vel N sigma [m/s]            vel-tilt   vel-ba    tilt-bg   (logged / predicted)\n');
+    tauSel = [0.5 1 2 5 10 25 50 100 150 200 300 400 600];
+    ko = find(inOutage);
+    tauO = tKf(ko) - tKf(kOut);
+    shown = [];
+    for ts = [tauSel, tauO(end)]
+        [~, j] = min(abs(tauO - ts));
+        if ts > tauO(end) + 1 || any(shown == j), continue; end
+        shown(end+1) = j; %#ok<AGROW>
+        kk = ko(j);
+        fprintf('   %7.1f   %7.2f / %7.2f / %8.2f    %7.3f / %7.3f / %7.3f     %s   %s   %s\n', tauO(j), ...
+            sigLogged(kk, 1), sigOneStep(kk, 1), sigChain(kk, 1), sigLogged(kk, 3), sigOneStep(kk, 3), sigChain(kk, 3), ...
+            fmtRatio(ratio(kk, 2)), fmtRatio(ratio(kk, 3)), fmtRatio(ratio(kk, 4)));
+    end
+end
+lost = medianOutage <= 0.2 | (~hasOut & medianAided <= 0.2);
+kept = medianOutage >= 0.7 | (~hasOut & medianAided >= 0.7);
+if any(lost(2:4))
+    fprintf('   VERDICT: the %s block(s) are rebuilt by the propagation and gone from the stored P+ at every epoch: the host''s 2 Hz\n', strjoin(blockName(lost), ', '));
+    fprintf('            path (updateKF or setKF) removes them. Nothing in Q or Phi can repair that; find the line that writes P there\n');
+elseif all(kept)
+    fprintf('   VERDICT: every cross block survives the 2 Hz path. If runCompare still reads a coast sigma far below the implied one,\n');
+    fprintf('            the P it was given is not postCov (see the pDiag line) or the loss is inside the 100 Hz propagation\n');
+else
+    fprintf('   VERDICT: cross blocks partly kept (ratios between 0.2 and 0.7): the host shrinks them each epoch rather than zeroing them\n');
+end
+pDiagMatch = NaN;
+if ~isempty(pDiag)
+    nd = min(n, size(pDiag, 2));
+    if size(pDiag, 1) ~= K
+        fprintf('   pDiag has %d rows, the log %d epochs: not compared\n', size(pDiag, 1), K);
+    else
+        rel = zeros(K, 1);
+        for k = 1:K
+            d = diag(spfMeasLog(k).postCov)';
+            rel(k) = max(abs(pDiag(k, 1:nd) - d(1:nd)) ./ max(abs(d(1:nd)), 1e-12));
+        end
+        [relMax, kMax] = max(rel);
+        pDiagMatch = relMax < 1e-6;
+        if pDiagMatch
+            fprintf('   pDiag given to runCompare is diag(postCov): its growth law describes this P+\n');
+        else
+            fprintf('   pDiag given to runCompare is NOT diag(postCov): largest relative difference %.3g at epoch %d (t = %.2f s). Its growth\n', relMax, kMax, tKf(kMax));
+            fprintf('   law describes another object; redo runCompare with pDiag = the diagonal of postCov\n');
+        end
+    end
+end
+res = struct('t', tKf, 'ratio', ratio, 'sigLogged', sigLogged, 'sigOneStep', sigOneStep, 'sigChain', sigChain, ...
+    'inOutage', inOutage, 'medianAided', medianAided, 'medianOutage', medianOutage, 'hphRatio', hphRatio, 'pDiagMatch', pDiagMatch);
+end
+
+%------------------------------------------------------------------------
+function [Phi] = intervalPhi(n, dt, t0, run, haveNav, G, iPos, iVel, iAtt, iBa, iBg)
+% Phi = expm(F dt) of the INS error states; C and f at the start of the interval from the nav solution when given
+C = eye(3);  f = [0; 0; -G];
+if haveNav
+    tt = run.t(:);
+    e  = interp1(tt, run.navAtt, t0, 'linear', 'extrap');
+    C  = dcmFromEuler(e);
+    i0 = find(tt <= t0, 1, 'last');  i0 = max(min(i0, numel(tt) - 5), 6);
+    a  = (run.navVel(i0 + 5, :) - run.navVel(i0 - 5, :))' / (tt(i0 + 5) - tt(i0 - 5));
+    f  = a - [0; 0; G];
+end
+F = zeros(n);
+F(iPos, iVel) = eye(3);
+F(iVel, iAtt) = [0, -f(3), f(2); f(3), 0, -f(1); -f(2), f(1), 0];
+F(iVel, iBa)  = C;
+F(iAtt, iBg)  = C;
+Phi = expm(F * dt);
+end
+
+function [Pp, hr] = applyRows(Pm, s)
+% the epoch's rows applied to a propagated P as a standard update; hr = median over the rows of
+% (S_logged - R) / (H Pm H')
+Pp = Pm;  hr = NaN;
+m = double(s.numMeas);
+if m <= 0, return; end
+H = s.obsMatrix(1:m, :);
+R = s.measNoiseCov(1:m, 1:m);
+hph = H * Pm * H';
+S = hph + R;
+Kg = (Pm * H') / S;
+Pp = Pm - Kg * H * Pm;
+Pp = (Pp + Pp') / 2;
+if isfield(s, 'innovationCov') && ~isempty(s.innovationCov)
+    d = diag(hph);
+    ok = d > 1e-12;
+    if any(ok)
+        hr = median((diag(s.innovationCov(1:m, 1:m)) - diag(R)) ./ max(d, 1e-12));
+    end
+end
+end
+
+function [m] = medianRows(x)
+if isempty(x), m = NaN(1, size(x, 2)); return; end
+m = NaN(1, size(x, 2));
+for c = 1:size(x, 2)
+    v = x(isfinite(x(:, c)), c);
+    if ~isempty(v), m(c) = median(v); end
+end
+end
+
+function [s] = fmtRatio(r)
+if isfinite(r), s = sprintf('%.2f', r); else, s = 'n/a'; end
+end
+
+function [s] = readRatio(a, o)
+r = o;  if ~isfinite(r), r = a; end
+if ~isfinite(r), s = 'n/a';
+elseif r >= 0.7, s = 'kept';
+elseif r <= 0.2, s = 'removed each epoch';
+else, s = 'partly kept'; end
+end
+
+function [C] = dcmFromEuler(e)
+% body -> nav, ZYX: C = Rz(yaw) Ry(pitch) Rx(roll)
+cr = cos(e(1)); sr = sin(e(1)); cp = cos(e(2)); sp = sin(e(2)); cy = cos(e(3)); sy = sin(e(3));
+C = [cy*cp, cy*sp*sr - sy*cr, cy*sp*cr + sy*sr;
+     sy*cp, sy*sp*sr + cy*cr, sy*sp*cr - cy*sr;
+     -sp,   cp*sr,            cp*cr];
+end

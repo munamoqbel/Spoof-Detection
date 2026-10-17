@@ -11,6 +11,7 @@ function runAllTests()
 %   7. run_scheduler_test           100 Hz + 2 Hz architecture (T1-T6)
 %   8. tests/test_designConstants   offline monitor design from recorded spfMeas (tools/designConstants)
 %   9. tests/test_pairingCheck      pairingCheck on the host's per-epoch range log (tools/pairingLogUnpack)
+%  10. tests/test_covPropCheck     cross terms of the host's P+ from one epoch to the next (tools/covPropCheck)
 %
 % Each test is run in its own workspace (they may 'clear'); its console
 % output is captured and searched for its own PASS marker.
@@ -27,7 +28,8 @@ tests = { ...
     'test_matrixInv',        '=== test_matrixInv PASS ===';
     'run_scheduler_test',    '=== ALL SCHEDULER TESTS PASS ===';
     'test_designConstants',  '=== test_designConstants PASS ===';
-    'test_pairingCheck',     '=== test_pairingCheck PASS ==='};
+    'test_pairingCheck',     '=== test_pairingCheck PASS ===';
+    'test_covPropCheck',     '=== test_covPropCheck PASS ==='};
 
 fprintf('==============================================\n');
 fprintf('  Spoof-detection pre-integration tests\n');

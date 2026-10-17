@@ -148,6 +148,16 @@ rows. Verdict lines name an R far above the state uncertainty (rows switched
 off in effect), a range rate built from the nav solution itself, and an
 opposite-sign or wrong-frame derivative. `tests/test_dopplerCheck.m` covers
 the five cases.
+`tools/covPropCheck.m` reads the same spfMeas records and asks whether the
+host's P keeps its cross terms from one 2 Hz epoch to the next: the previous
+P+ is propagated over the interval with the INS error dynamics (no Q), the
+epoch's own rows are applied, and the result is compared with the logged P+
+block by block (pos-vel, vel-tilt, vel-accel bias, tilt-gyro bias). A block
+that the propagation rebuilds and the stored P+ has lost is removed somewhere
+in the host's 2 Hz path, which no Q can repair; a chain from tOut shows what
+a P with every cross term would carry through the outage next to the logged
+one, and the pDiag given to runCompare is checked to be diag(postCov).
+
 `tools/designConstants.m` is the offline design step (quickstart step 2) on
 recorded data: from the same spfMeas records it takes Eq. 20 per monitored
 axis on every usable epoch, the worst-sky minimum, the window length per axis

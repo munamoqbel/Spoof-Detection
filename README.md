@@ -156,7 +156,12 @@ block by block (pos-vel, vel-tilt, vel-accel bias, tilt-gyro bias). A block
 that the propagation rebuilds and the stored P+ has lost is removed somewhere
 in the host's 2 Hz path, which no Q can repair; a chain from tOut shows what
 a P with every cross term would carry through the outage next to the logged
-one, and the pDiag given to runCompare is checked to be diag(postCov).
+one, and the pDiag given to runCompare is checked to be diag(postCov). Given
+the propTel the gate received per epoch as well, it reads the interval the
+accumulator covers from accumPhi(1,4) (one epoch when the reset follows the
+gate call, zero when it precedes it, more when a reset is missed), compares
+the coupling blocks of accumPhi with the error dynamics, and repeats the
+one-step prediction with the host's own accumPhi and accumQ.
 
 `tools/designConstants.m` is the offline design step (quickstart step 2) on
 recorded data: from the same spfMeas records it takes Eq. 20 per monitored

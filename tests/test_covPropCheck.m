@@ -36,8 +36,19 @@ for k = 1:K
     end
 end
 pdA = cell2mat(cellfun(@(s) diag(s.postCov)', logA, 'UniformOutput', false));
+% propTel logs: right (one interval, reset after use), reset before use (identity), reset missed (two intervals)
+telOk = cell(K, 1);  telEarly = cell(K, 1);  telMissed = cell(K, 1);
+for k = 1:K
+    telOk{k}     = struct('accumPhi', Phi, 'accumQ', zeros(n));
+    telEarly{k}  = struct('accumPhi', eye(n), 'accumQ', zeros(n));
+    telMissed{k} = struct('accumPhi', Phi * Phi, 'accumQ', zeros(n));
+end
 fprintf('--- A: consistent host ---\n');
-resA = covPropCheck(logA, tKf, tOut, tReacq, [], pdA);
+resA = covPropCheck(logA, tKf, tOut, tReacq, [], pdA, telOk);
+fprintf('--- A with the accumulator reset before the gate reads it ---\n');
+resE = covPropCheck(logA, tKf, tOut, tReacq, [], [], telEarly);
+fprintf('--- A with a missed reset ---\n');
+resM = covPropCheck(logA, tKf, tOut, tReacq, [], [], telMissed);
 fprintf('--- B: cross terms dropped after every update ---\n');
 resB = covPropCheck(logB, tKf, tOut, tReacq, [], 1.5 * pdA);
 fprintf('--- A without an outage ---\n');
@@ -48,10 +59,14 @@ okA = all(abs(resA.medianAided - 1) < 1e-6) && all(abs(resA.medianOutage - 1) < 
 okB = all(resB.medianOutage([1 4]) > 0.7) && all(resB.medianOutage(2:3) < 0.2) && resB.pDiagMatch == false ...
    && resB.sigChain(160, 1) > 2 * resB.sigLogged(160, 1);           % the fault leaves pos-vel and tilt-gyro bias intact
 okN = all(abs(resN.medianAided - 1) < 1e-6) && ~any(resN.inOutage) && isnan(resN.pDiagMatch);
-if okA && okB && okN
+okT = abs(median(resA.accInterval(2:end)) - 0.5) < 1e-9 && all(abs(resA.accCoupling(2, :) - 1) < 1e-9) ...
+   && all(all(abs(resA.ratioHost(2:end, :) - 1) < 1e-6)) ...
+   && abs(median(resE.accInterval(2:end))) < 1e-12 && abs(median(resM.accInterval(2:end)) - 1.0) < 1e-9 ...
+   && ~any(isfinite(resN.accInterval));
+if okA && okB && okN && okT
     fprintf('=== test_covPropCheck PASS ===\n');
 else
-    fprintf('okA %d okB %d okN %d\n', okA, okB, okN);
+    fprintf('okA %d okB %d okN %d okT %d\n', okA, okB, okN, okT);
     fprintf('=== test_covPropCheck FAIL ===\n');
 end
 end

@@ -1,4 +1,4 @@
-function [res] = covPropCheck(spfMeasLog, tKf, tOut, tReacq, run, pDiag)
+function [res] = covPropCheck(spfMeasLog, tKf, tOut, tReacq, run, pDiag, propTelLog)
 %COVPROPCHECK  Does the host's P keep its cross terms from one 2 Hz epoch to the next?
 %   res = covPropCheck(spfMeasLog, tKf, tOut, tReacq)
 %   res = covPropCheck(spfMeasLog, tKf, tOut, tReacq, run)         run: the runCompare struct (t, navAtt, navVel) for
@@ -6,6 +6,10 @@ function [res] = covPropCheck(spfMeasLog, tKf, tOut, tReacq, run, pDiag)
 %                                                                   the vehicle is taken level with f = -g
 %   res = covPropCheck(spfMeasLog, tKf, tOut, tReacq, run, pDiag)  pDiag [K x n]: the diagonal given to runCompare,
 %                                                                   checked against diag(postCov)
+%   res = covPropCheck(..., pDiag, propTelLog)   propTelLog: struct array or cell of the propTel the gate received per
+%                                                epoch (STRUCT_SPF.setPropTel: accumPhi, accumQ over the interval that
+%                                                ends at the epoch). Checks the accumulation and its reset, and repeats
+%                                                the one-step prediction with the host's own accumPhi and accumQ
 %
 %   The per-epoch spfMeas (STRUCT_SPF.setKfMeas) holds postCov, the host's P+ after the update, and the rows the host
 %   applied (obsMatrix, measNoiseCov, numMeas). For every epoch the previous P+ is propagated over the interval with
@@ -26,7 +30,14 @@ function [res] = covPropCheck(spfMeasLog, tKf, tOut, tReacq, run, pDiag)
 %   Result: res.t, res.ratio (K x 4: pos-vel, vel-tilt, vel-accel bias, tilt-gyro bias, logged / predicted),
 %   res.sigLogged / res.sigOneStep / res.sigChain (K x 4: sigma of position N, E and velocity N, E), res.inOutage,
 %   res.medianAided / res.medianOutage (1 x 4), res.hphRatio (S - R against H P- H', median over the aided epochs),
-%   res.pDiagMatch (true / false / NaN when pDiag is not given).
+%   res.pDiagMatch (true / false / NaN when pDiag is not given), and with propTelLog: res.accInterval (K x 1, the
+%   interval accumPhi(1,4) holds), res.accCoupling (K x 3, vel-tilt, vel-accel bias, tilt-gyro bias blocks of accumPhi
+%   relative to the error dynamics) and res.ratioHost (K x 4, the cross blocks of P+ against the prediction with the
+%   host's accumPhi and accumQ).
+%
+%   accumPhi(1,4) is the position-from-velocity entry, i.e. the time the accumulation covers: equal to the epoch
+%   interval when the accumulator is reset right after the gate read it, 0 when it is reset before, larger when a
+%   reset is missed.
 
 if iscell(spfMeasLog), spfMeasLog = [spfMeasLog{:}]; end
 K = numel(spfMeasLog);
@@ -39,6 +50,8 @@ if nargin < 3, tOut = []; end
 if nargin < 4, tReacq = []; end
 if nargin < 5, run = []; end
 if nargin < 6, pDiag = []; end
+if nargin < 7, propTelLog = []; end
+if iscell(propTelLog), propTelLog = [propTelLog{:}]; end
 G = 9.80665;
 n = size(spfMeasLog(1).postCov, 1);
 if n < 15 || size(spfMeasLog(1).postCov, 2) ~= n
@@ -149,8 +162,69 @@ if ~isempty(pDiag)
         end
     end
 end
+accInterval = NaN(K, 1);  accCoupling = NaN(K, 3);  ratioHost = NaN(K, 4);  sigHost = NaN(K, 4);
+if ~isempty(propTelLog)
+    if numel(propTelLog) ~= K
+        fprintf('   propTelLog has %d entries, the log %d epochs: not used\n', numel(propTelLog), K);
+    else
+        for k = 2:K
+            PhiH = propTelLog(k).accumPhi;  QH = propTelLog(k).accumQ;
+            if isempty(PhiH) || size(PhiH, 1) < 15, continue; end
+            dt = tKf(k) - tKf(k-1);
+            PhiE = intervalPhi(n, dt, tKf(k-1), run, haveNav, G, iPos, iVel, iAtt, iBa, iBg);
+            accInterval(k) = PhiH(iPos(1), iVel(1));
+            accCoupling(k, :) = [norm(PhiH(iVel, iAtt), 'fro') / max(norm(PhiE(iVel, iAtt), 'fro'), 1e-300), ...
+                                 norm(PhiH(iVel, iBa),  'fro') / max(norm(PhiE(iVel, iBa),  'fro'), 1e-300), ...
+                                 norm(PhiH(iAtt, iBg),  'fro') / max(norm(PhiE(iAtt, iBg),  'fro'), 1e-300)];
+            if isempty(QH) || ~isequal(size(QH), size(PhiH)), QH = zeros(size(PhiH)); end
+            Pm = PhiH * spfMeasLog(k-1).postCov * PhiH' + QH;
+            Pp = applyRows(Pm, spfMeasLog(k));
+            L  = spfMeasLog(k).postCov;
+            sigHost(k, :) = sqrt(max([Pp(1,1), Pp(2,2), Pp(4,4), Pp(5,5)], 0));
+            for b = 1:4
+                pb = norm(Pp(blocks{b, 1}, blocks{b, 2}), 'fro');
+                lb = norm(L(blocks{b, 1}, blocks{b, 2}), 'fro');
+                if pb > 1e-300, ratioHost(k, b) = lb / pb; end
+            end
+        end
+        dtE = [NaN; diff(tKf)];
+        okI = isfinite(accInterval) & isfinite(dtE);
+        fprintf('   host accumPhi (propTel per epoch):\n');
+        if any(okI)
+            rI = accInterval(okI) ./ dtE(okI);
+            off = okI & abs(accInterval ./ dtE - 1) > 0.05;
+            fprintf('   interval it covers, accumPhi(1,4) / epoch interval: median %.3f, min %.3f, max %.3f; %d of %d epochs off by more than 5%%', ...
+                median(rI), min(rI), max(rI), nnz(off), nnz(okI));
+            if any(off), fprintf(' (first at epoch %d, t = %.2f s)', find(off, 1), tKf(find(off, 1))); end
+            fprintf('\n');
+            if median(rI) < 0.05
+                fprintf('   VERDICT: the accumulator is reset before the gate reads it (accumPhi = I at the call): the gate propagates nothing\n');
+            elseif median(rI) > 1.5
+                fprintf('   VERDICT: the accumulator is not reset after the gate reads it: it covers %.1f epochs instead of one\n', median(rI));
+            elseif abs(median(rI) - 1) > 0.05
+                fprintf('   VERDICT: the accumulator covers %.0f%% of the epoch interval: the reset is one or more ticks off the gate call\n', 100 * median(rI));
+            else
+                fprintf('   the accumulator covers one epoch interval: reset right after the gate reads it\n');
+            end
+            cm = medianRows(accCoupling(okI, :));
+            fprintf('   coupling blocks of accumPhi relative to the error dynamics (1 = same size): vel-tilt %.2f, vel-accel bias %.2f, tilt-gyro bias %.2f\n', cm);
+        else
+            fprintf('   (no usable accumPhi in propTelLog)\n');
+        end
+        okH = any(isfinite(ratioHost), 2);
+        if any(okH)
+            mh = medianRows(ratioHost(okH, :));
+            fprintf('   P+ against the prediction with the host''s accumPhi and accumQ, logged / predicted, median: pos-vel %s, vel-tilt %s, vel-accel bias %s, tilt-gyro bias %s\n', ...
+                fmtRatio(mh(1)), fmtRatio(mh(2)), fmtRatio(mh(3)), fmtRatio(mh(4)));
+            sh = sigLogged(okH, :) ./ sigHost(okH, :);
+            fprintf('   position and velocity sigma, logged / predicted with accumQ, median: pos N %.3f E %.3f, vel N %.3f E %.3f (1 = the 100 Hz P follows the accumulators)\n', ...
+                median(sh(isfinite(sh(:, 1)), 1)), median(sh(isfinite(sh(:, 2)), 2)), median(sh(isfinite(sh(:, 3)), 3)), median(sh(isfinite(sh(:, 4)), 4)));
+        end
+    end
+end
 res = struct('t', tKf, 'ratio', ratio, 'sigLogged', sigLogged, 'sigOneStep', sigOneStep, 'sigChain', sigChain, ...
-    'inOutage', inOutage, 'medianAided', medianAided, 'medianOutage', medianOutage, 'hphRatio', hphRatio, 'pDiagMatch', pDiagMatch);
+    'inOutage', inOutage, 'medianAided', medianAided, 'medianOutage', medianOutage, 'hphRatio', hphRatio, 'pDiagMatch', pDiagMatch, ...
+    'accInterval', accInterval, 'accCoupling', accCoupling, 'ratioHost', ratioHost);
 end
 
 %------------------------------------------------------------------------

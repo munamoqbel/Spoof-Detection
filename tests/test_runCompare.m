@@ -305,9 +305,13 @@ runV.pDiag(:, 1:3) = repmat(1 + 0.2 * tauV, 1, 3);
 runV.pDiag(:, 4:6) = repmat(0.05^2 + 1e-5 * tauV.^3, 1, 3);
 runV2 = runV;  runV2.name = 'V2 growth coupled';
 runV2.pDiag(:, 1:3) = repmat(1 + 1e-9 * tauV.^5, 1, 3);
+postUpd = runA.t(:) >= 249.95 & runA.t(:) < 250;                 % the first update back logged before tReacq
+runV2.pDiag(postUpd, 1:6) = repmat([1 1 1, 0.05^2 * [1 1 1]], nnz(postUpd), 1);
 resV = runCompare(runV, runV2, 100, 250, [10 95; 255 295]);
+tauEnd = max(runA.t(runA.t < 249.95)) - 100;
 okV = all(abs(resV.run1.sigGrowthExp(1:3) - 0.5) < 0.05) && all(abs(resV.run1.sigGrowthExp(4:6) - 1.5) < 0.05) ...
-   && all(abs(resV.run2.sigGrowthExp(1:3) - 2.5) < 0.05) && ~any(isfinite(res.run1.sigGrowthExp));   % constant P: no growth
+   && all(abs(resV.run2.sigGrowthExp(1:3) - 2.5) < 0.05) && ~any(isfinite(res.run1.sigGrowthExp)) ...   % constant P: no growth
+   && abs(resV.run2.sigEnd(1) - sqrt(1 + 1e-9 * tauEnd^5)) < 1e-6;                                   % end of coast before the update back
 if okV, fprintf('=== sigma growth law check PASS ===\n'); else, fprintf('=== sigma growth law check FAIL ===\n'); end
 % a clean run without an outage (tOut = []): sections 0 and 1 only, no state comparison, the whole run aided by default
 resN = runCompare(runA, runB, [], [], [10 95; 255 295]);

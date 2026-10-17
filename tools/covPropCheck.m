@@ -148,7 +148,9 @@ if hasOut
         fprintf('   epoch        t [s]    tau [s]   sigma before -> after [m]   one-step with the epoch''s rows   numMeas   reading\n');
         for j = 1:min(size(drops, 1), 8)
             d = drops(j, :);
-            if abs(d(6) - d(5)) <= 0.2 * max(d(4) - d(5), 1e-9)
+            if abs(d(6) - d(5)) <= 0.2 * max(d(4) - d(5), 1e-9) && d(7) >= 4 && d(1) == max(find(inOutage))
+                rd = sprintf('the %d rows of the epoch explain the drop and it is the last outage epoch: this is the first GNSS epoch back; give tReacq at or before t = %.2f', d(7), d(2));
+            elseif abs(d(6) - d(5)) <= 0.2 * max(d(4) - d(5), 1e-9)
                 rd = sprintf('the %d row(s) of the epoch explain the drop: a measurement update inside the outage', d(7));
             else
                 rd = 'the rows do not explain it: P was replaced outside the update (a host reset or re-initialisation)';
@@ -302,6 +304,9 @@ end
 function [D] = pDiagRows(pDiag, K, n)
 % the P diagonal per epoch as [K x n] from the forms runCompare accepts: [K x n], [n x K], or a cell holding per
 % epoch the diagonal or the full P
+if iscell(pDiag) && all(cellfun(@numel, pDiag(:)) == 1) && numel(pDiag) > max(size(pDiag))
+    pDiag = cell2mat(pDiag);                                  % a K x n (or n x K) cell of scalars
+end
 if iscell(pDiag)
     D = NaN(numel(pDiag), n);
     for k = 1:numel(pDiag)

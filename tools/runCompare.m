@@ -489,6 +489,19 @@ else
     sigEnd = NaN(1, 3);  sigV = NaN(1, 3);  implied = NaN(1, 3);  tPe = NaN;  nGap = 0;
     if ~isempty(Pkf)
         iPe = find(tPkf <= t(iEnd), 1, 'last');                 % last logged P before the first update back
+        % a logged P that falls by more than 30% inside the outage is the first update back (or a reset): the
+        % record before the fall is the end of the coast, the records after it are not
+        iG = find(tPkf > t(iOut) & tPkf <= t(iEnd));
+        if numel(iG) >= 2
+            hG = sqrt(max(Pkf(iG, 1), 0) + max(Pkf(iG, 2), 0));
+            jDrop = find(hG(2:end) < 0.7 * hG(1:end-1), 1, 'last') + 1;
+            if ~isempty(jDrop)
+                iPe = iG(jDrop - 1);
+                fprintf('   (the logged sigma falls from %.1f to %.1f m at t = %.2f: the first update back, or a reset; the record before it,\n', ...
+                    hG(jDrop - 1), hG(jDrop), tPkf(iG(jDrop)));
+                fprintf('    t = %.2f, is taken as the end of the coast. Give tReacq at or before that update''s time tag)\n', tPkf(iPe));
+            end
+        end
         if ~isempty(iPe)
             tPe = tPkf(iPe);
             sigEnd = sqrt(max(Pkf(iPe, 1:3), 0));
@@ -505,7 +518,7 @@ else
             % P - P(tOut) ~ T (sigma ~ T^0.5); Phi's velocity coupling gives T^3 in position (sigma ~ T^1.5) and its
             % tilt and bias coupling T^3 in velocity and T^5 in position (sigma ~ T^2.5). The slope is fitted on the
             % second half of the outage, where the highest active power dominates
-            inGap = tPkf > t(iOut) & tPkf <= t(iEnd);
+            inGap = tPkf > t(iOut) & tPkf <= tPe;
             iP0 = find(tPkf <= t(iOut), 1, 'last');
             nGap = nnz(inGap);
             if nGap >= 8 && ~isempty(iP0)

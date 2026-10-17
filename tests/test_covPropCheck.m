@@ -77,7 +77,7 @@ for k = 1:K
         'numMeas', m, 'priorState', zeros(n, 1), 'postState', zeros(n, 1), 'postCov', P);
     PR = P;
 end
-pdCell = cellfun(@(s) s.postCov, logR, 'UniformOutput', false);
+pdCell = num2cell(cell2mat(cellfun(@(s) diag(s.postCov)', logR, 'UniformOutput', false)));   % K x n cell of scalars
 fprintf('--- A with a reset and a measurement update inside the outage ---\n');
 resR = covPropCheck(logR, tKf, tOut, tReacq, [], pdCell);
 okA = all(abs(resA.medianAided - 1) < 1e-6) && all(abs(resA.medianOutage - 1) < 1e-6) && resA.pDiagMatch == true ...
@@ -90,7 +90,15 @@ okT = abs(median(resA.accInterval(2:end)) - 0.5) < 1e-9 && all(abs(resA.accCoupl
    && all(all(abs(resA.ratioHost(2:end, :) - 1) < 1e-6)) ...
    && abs(median(resE.accInterval(2:end))) < 1e-12 && abs(median(resM.accInterval(2:end)) - 1.0) < 1e-9 ...
    && ~any(isfinite(resN.accInterval));
+% the first GNSS epoch back logged inside the outage: six rows at the last outage epoch
+logQ = logA;  kLast = find(tKf < tReacq, 1, 'last');
+PmQ = Phi * logQ{kLast - 1}.postCov * Phi';  SQ = H6 * PmQ * H6' + 0.25 * eye(6);  KQ = (PmQ * H6') / SQ;  PQ = PmQ - KQ * H6 * PmQ;
+logQ{kLast} = struct('innovation', zeros(6, 1), 'innovationCov', SQ, 'obsMatrix', H6, 'measNoiseCov', 0.25 * eye(6), ...
+    'numMeas', 6, 'priorState', zeros(n, 1), 'postState', zeros(n, 1), 'postCov', (PQ + PQ') / 2);
+fprintf('--- A with the first GNSS epoch back logged inside the outage ---\n');
+resQ = covPropCheck(logQ, tKf, tOut, tReacq);
 okR = size(resR.drops, 1) == 2 && resR.drops(1, 1) == 140 && resR.drops(2, 1) == 150 && resR.drops(1, 7) == 1 && resR.drops(2, 7) == 6 ...
+   && size(resQ.drops, 1) == 1 && resQ.drops(1, 1) == kLast && resQ.drops(1, 7) == 6 ...
    && abs(resR.drops(2, 6) - resR.drops(2, 5)) < 1e-6 && abs(resR.drops(1, 6) - resR.drops(1, 5)) > 0.5 && resR.pDiagMatch == true ...
    && isempty(resA.drops);
 if okA && okB && okN && okT && okR

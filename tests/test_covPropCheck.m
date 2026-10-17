@@ -53,6 +53,33 @@ fprintf('--- B: cross terms dropped after every update ---\n');
 resB = covPropCheck(logB, tKf, tOut, tReacq, [], 1.5 * pdA);
 fprintf('--- A without an outage ---\n');
 resN = covPropCheck(logA, tKf, [], []);
+% drops inside the outage: at epoch 140 the host replaces P+ by a small matrix (a reset) and the log continues from
+% it; at epoch 150 six range rows are applied instead of the barometer row (a measurement update inside the outage);
+% pDiag given as a cell of full P
+logR = cell(K, 1);  PR = diag(sig0.^2);
+H6 = zeros(6, n);  u = randn(6, 3);  u = u ./ repmat(sqrt(sum(u.^2, 2)), 1, 3);  H6(:, 1:3) = u;  H6(:, 16) = 1;
+for k = 1:K
+    inGap = tKf(k) > tOut & tKf(k) < tReacq;
+    if k == 150
+        H = H6;  R = 0.25 * eye(6);                                   % six precise ranges: a visible drop
+    elseif inGap
+        H = zeros(1, n);  H(3) = 1;  R = 25;
+    else
+        H = logA{k}.obsMatrix;  R = logA{k}.measNoiseCov;
+    end
+    P = PR;
+    if k > 1, P = Phi * P * Phi'; end
+    S = H * P * H' + R;  Kg = (P * H') / S;
+    P = P - Kg * H * P;  P = (P + P') / 2;
+    if k == 140, P = diag((0.3 * sig0).^2); end                    % the reset
+    m = size(H, 1);
+    logR{k} = struct('innovation', zeros(m, 1), 'innovationCov', S, 'obsMatrix', H, 'measNoiseCov', R, ...
+        'numMeas', m, 'priorState', zeros(n, 1), 'postState', zeros(n, 1), 'postCov', P);
+    PR = P;
+end
+pdCell = cellfun(@(s) s.postCov, logR, 'UniformOutput', false);
+fprintf('--- A with a reset and a measurement update inside the outage ---\n');
+resR = covPropCheck(logR, tKf, tOut, tReacq, [], pdCell);
 okA = all(abs(resA.medianAided - 1) < 1e-6) && all(abs(resA.medianOutage - 1) < 1e-6) && resA.pDiagMatch == true ...
    && max(abs(resA.sigChain(resA.inOutage, :) - resA.sigLogged(resA.inOutage, :))) < 1e-9 ...
    && abs(resA.hphRatio(2) - 1) < 1e-9;
@@ -63,10 +90,13 @@ okT = abs(median(resA.accInterval(2:end)) - 0.5) < 1e-9 && all(abs(resA.accCoupl
    && all(all(abs(resA.ratioHost(2:end, :) - 1) < 1e-6)) ...
    && abs(median(resE.accInterval(2:end))) < 1e-12 && abs(median(resM.accInterval(2:end)) - 1.0) < 1e-9 ...
    && ~any(isfinite(resN.accInterval));
-if okA && okB && okN && okT
+okR = size(resR.drops, 1) == 2 && resR.drops(1, 1) == 140 && resR.drops(2, 1) == 150 && resR.drops(1, 7) == 1 && resR.drops(2, 7) == 6 ...
+   && abs(resR.drops(2, 6) - resR.drops(2, 5)) < 1e-6 && abs(resR.drops(1, 6) - resR.drops(1, 5)) > 0.5 && resR.pDiagMatch == true ...
+   && isempty(resA.drops);
+if okA && okB && okN && okT && okR
     fprintf('=== test_covPropCheck PASS ===\n');
 else
-    fprintf('okA %d okB %d okN %d okT %d\n', okA, okB, okN, okT);
+    fprintf('okA %d okB %d okN %d okT %d okR %d\n', okA, okB, okN, okT, okR);
     fprintf('=== test_covPropCheck FAIL ===\n');
 end
 end

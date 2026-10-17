@@ -33,7 +33,10 @@ function [res] = covPropCheck(spfMeasLog, tKf, tOut, tReacq, run, pDiag, propTel
 %   res.pDiagMatch (true / false / NaN when pDiag is not given), and with propTelLog: res.accInterval (K x 1, the
 %   interval accumPhi(1,4) holds), res.accCoupling (K x 3, vel-tilt, vel-accel bias, tilt-gyro bias blocks of accumPhi
 %   relative to the error dynamics) and res.ratioHost (K x 4, the cross blocks of P+ against the prediction with the
-%   host's accumPhi and accumQ).
+%   host's accumPhi and accumQ). res.drops lists the epochs inside the outage where the logged horizontal sigma falls
+%   by more than 30% from one epoch to the next: [epoch t tau sigmaBefore sigmaAfter sigmaOneStep numMeas]; when the
+%   one-step prediction with the epoch's own rows reproduces the drop it is a measurement update inside the outage,
+%   otherwise P was replaced outside the update (a host reset).
 %
 %   accumPhi(1,4) is the position-from-velocity entry, i.e. the time the accumulation covers: equal to the epoch
 %   interval when the accumulator is reset right after the gate read it, 0 when it is reset before, larger when a
@@ -130,19 +133,46 @@ if hasOut && nnz(inOutage) >= 2
             fmtRatio(ratio(kk, 2)), fmtRatio(ratio(kk, 3)), fmtRatio(ratio(kk, 4)));
     end
 end
+drops = [];
+if hasOut
+    hor = sqrt(sigLogged(:, 1).^2 + sigLogged(:, 2).^2);
+    horPred = sqrt(sigOneStep(:, 1).^2 + sigOneStep(:, 2).^2);
+    for k = find(inOutage)'
+        if k < 2 || ~isfinite(hor(k)) || ~isfinite(hor(k-1)), continue; end
+        if hor(k) < 0.7 * hor(k-1)
+            drops(end+1, :) = [k, tKf(k), tKf(k) - tKf(kOut), hor(k-1), hor(k), horPred(k), double(spfMeasLog(k).numMeas)]; %#ok<AGROW>
+        end
+    end
+    if ~isempty(drops)
+        fprintf('   the logged horizontal sigma drops inside the outage (by more than 30%% from one epoch to the next):\n');
+        fprintf('   epoch        t [s]    tau [s]   sigma before -> after [m]   one-step with the epoch''s rows   numMeas   reading\n');
+        for j = 1:min(size(drops, 1), 8)
+            d = drops(j, :);
+            if abs(d(6) - d(5)) <= 0.2 * max(d(4) - d(5), 1e-9)
+                rd = sprintf('the %d row(s) of the epoch explain the drop: a measurement update inside the outage', d(7));
+            else
+                rd = 'the rows do not explain it: P was replaced outside the update (a host reset or re-initialisation)';
+            end
+            fprintf('   %5d   %10.2f  %8.1f   %10.2f -> %-8.2f   %10.2f                      %4d     %s\n', d(1), d(2), d(3), d(4), d(5), d(6), d(7), rd);
+        end
+        if size(drops, 1) > 8, fprintf('   (%d more)\n', size(drops, 1) - 8); end
+        fprintf('   the coast sigma runCompare reads at the end of the outage is the value after the last drop, not what the propagation built\n');
+    end
+end
 lost = medianOutage <= 0.2 | (~hasOut & medianAided <= 0.2);
 kept = medianOutage >= 0.7 | (~hasOut & medianAided >= 0.7);
 if any(lost(2:4))
     fprintf('   VERDICT: the %s block(s) are rebuilt by the propagation and gone from the stored P+ at every epoch: the host''s 2 Hz\n', strjoin(blockName(lost), ', '));
     fprintf('            path (updateKF or setKF) removes them. Nothing in Q or Phi can repair that; find the line that writes P there\n');
 elseif all(kept)
-    fprintf('   VERDICT: every cross block survives the 2 Hz path. If runCompare still reads a coast sigma far below the implied one,\n');
-    fprintf('            the P it was given is not postCov (see the pDiag line) or the loss is inside the 100 Hz propagation\n');
+    fprintf('   VERDICT: every cross block survives the 2 Hz path and the logged P+ follows its own propagation. A coast sigma far below\n');
+    fprintf('            the implied one then comes from a drop listed above, or from a pDiag that is not postCov (see the pDiag line)\n');
 else
     fprintf('   VERDICT: cross blocks partly kept (ratios between 0.2 and 0.7): the host shrinks them each epoch rather than zeroing them\n');
 end
 pDiagMatch = NaN;
 if ~isempty(pDiag)
+    pDiag = pDiagRows(pDiag, K, n);
     nd = min(n, size(pDiag, 2));
     if size(pDiag, 1) ~= K
         fprintf('   pDiag has %d rows, the log %d epochs: not compared\n', size(pDiag, 1), K);
@@ -224,7 +254,7 @@ if ~isempty(propTelLog)
 end
 res = struct('t', tKf, 'ratio', ratio, 'sigLogged', sigLogged, 'sigOneStep', sigOneStep, 'sigChain', sigChain, ...
     'inOutage', inOutage, 'medianAided', medianAided, 'medianOutage', medianOutage, 'hphRatio', hphRatio, 'pDiagMatch', pDiagMatch, ...
-    'accInterval', accInterval, 'accCoupling', accCoupling, 'ratioHost', ratioHost);
+    'accInterval', accInterval, 'accCoupling', accCoupling, 'ratioHost', ratioHost, 'drops', drops);
 end
 
 %------------------------------------------------------------------------
@@ -266,6 +296,26 @@ if isfield(s, 'innovationCov') && ~isempty(s.innovationCov)
     if any(ok)
         hr = median((diag(s.innovationCov(1:m, 1:m)) - diag(R)) ./ max(d, 1e-12));
     end
+end
+end
+
+function [D] = pDiagRows(pDiag, K, n)
+% the P diagonal per epoch as [K x n] from the forms runCompare accepts: [K x n], [n x K], or a cell holding per
+% epoch the diagonal or the full P
+if iscell(pDiag)
+    D = NaN(numel(pDiag), n);
+    for k = 1:numel(pDiag)
+        v = pDiag{k};
+        if isempty(v), continue; end
+        if size(v, 1) == size(v, 2) && size(v, 1) > 1, v = diag(v); end
+        v = v(:)';
+        m = min(n, numel(v));
+        D(k, 1:m) = v(1:m);
+    end
+elseif size(pDiag, 1) ~= K && size(pDiag, 2) == K
+    D = pDiag';
+else
+    D = pDiag;
 end
 end
 

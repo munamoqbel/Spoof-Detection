@@ -6,10 +6,13 @@ function [res] = covPropCheck(spfMeasLog, tKf, tOut, tReacq, run, pDiag, propTel
 %                                                                   the vehicle is taken level with f = -g
 %   res = covPropCheck(spfMeasLog, tKf, tOut, tReacq, run, pDiag)  pDiag [K x n]: the diagonal given to runCompare,
 %                                                                   checked against diag(postCov)
-%   res = covPropCheck(..., pDiag, propTelLog)   propTelLog: struct array or cell of the propTel the gate received per
-%                                                epoch (STRUCT_SPF.setPropTel: accumPhi, accumQ over the interval that
-%                                                ends at the epoch). Checks the accumulation and its reset, and repeats
-%                                                the one-step prediction with the host's own accumPhi and accumQ
+%   res = covPropCheck(..., pDiag, propTelLog)   propTelLog: the propTel the gate received per epoch
+%                                                (STRUCT_SPF.setPropTel: accumPhi, accumQ over the interval that ends
+%                                                at the epoch) as a struct array or cell of per-epoch structs, or as
+%                                                one struct whose accumPhi and accumQ hold the epochs along the third
+%                                                dimension ([n x n x K]) or in a cell. Checks the accumulation and its
+%                                                reset, and repeats the one-step prediction with the host's own
+%                                                accumPhi and accumQ
 %
 %   The per-epoch spfMeas (STRUCT_SPF.setKfMeas) holds postCov, the host's P+ after the update, and the rows the host
 %   applied (obsMatrix, measNoiseCov, numMeas). For every epoch the previous P+ is propagated over the interval with
@@ -54,7 +57,7 @@ if nargin < 4, tReacq = []; end
 if nargin < 5, run = []; end
 if nargin < 6, pDiag = []; end
 if nargin < 7, propTelLog = []; end
-if iscell(propTelLog), propTelLog = [propTelLog{:}]; end
+propTelLog = propTelRows(propTelLog);
 G = 9.80665;
 n = size(spfMeasLog(1).postCov, 1);
 if n < 15 || size(spfMeasLog(1).postCov, 2) ~= n
@@ -297,6 +300,36 @@ if isfield(s, 'innovationCov') && ~isempty(s.innovationCov)
     ok = d > 1e-12;
     if any(ok)
         hr = median((diag(s.innovationCov(1:m, 1:m)) - diag(R)) ./ max(d, 1e-12));
+    end
+end
+end
+
+function [L] = propTelRows(propTelLog)
+% propTel per epoch as a struct array, from a struct array or cell of per-epoch structs, or from one struct whose
+% accumPhi / accumQ hold the epochs along the third dimension or in a cell
+if iscell(propTelLog), propTelLog = [propTelLog{:}]; end
+L = propTelLog;
+if isempty(propTelLog) || ~isstruct(propTelLog) || numel(propTelLog) ~= 1 || ~isfield(propTelLog, 'accumPhi'), return; end
+A = propTelLog.accumPhi;
+Qa = [];
+if isfield(propTelLog, 'accumQ'), Qa = propTelLog.accumQ; end
+if iscell(A)
+    Kp = numel(A);
+    L = repmat(struct('accumPhi', [], 'accumQ', []), Kp, 1);
+    for k = 1:Kp
+        L(k).accumPhi = A{k};
+        if iscell(Qa) && numel(Qa) >= k, L(k).accumQ = Qa{k}; end
+    end
+elseif ndims(A) == 3 && size(A, 3) > 1
+    if size(A, 1) ~= size(A, 2) && size(A, 2) == size(A, 3)
+        A = permute(A, [2 3 1]);                               % epochs first: [K x n x n]
+        if ~isempty(Qa) && ndims(Qa) == 3, Qa = permute(Qa, [2 3 1]); end
+    end
+    Kp = size(A, 3);
+    L = repmat(struct('accumPhi', [], 'accumQ', []), Kp, 1);
+    for k = 1:Kp
+        L(k).accumPhi = A(:, :, k);
+        if ~isempty(Qa) && ndims(Qa) == 3 && size(Qa, 3) >= k, L(k).accumQ = Qa(:, :, k); end
     end
 end
 end

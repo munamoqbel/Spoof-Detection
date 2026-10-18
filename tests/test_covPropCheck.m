@@ -45,6 +45,11 @@ for k = 1:K
 end
 fprintf('--- A: consistent host ---\n');
 resA = covPropCheck(logA, tKf, tOut, tReacq, [], pdA, telOk);
+telStack = struct('accumPhi', repmat(Phi, [1 1 K]), 'accumQ', zeros(n, n, K));           % one struct, epochs stacked
+telCells = struct('accumPhi', {repmat({Phi}, K, 1)}, 'accumQ', {repmat({zeros(n)}, K, 1)}); % one struct, cells per epoch
+fprintf('--- A with propTel as one stacked structure ---\n');
+resS = covPropCheck(logA, tKf, tOut, tReacq, [], [], telStack);
+resC = covPropCheck(logA, tKf, tOut, tReacq, [], [], telCells);
 fprintf('--- A with the accumulator reset before the gate reads it ---\n');
 resE = covPropCheck(logA, tKf, tOut, tReacq, [], [], telEarly);
 fprintf('--- A with a missed reset ---\n');
@@ -81,7 +86,7 @@ pdCell = num2cell(cell2mat(cellfun(@(s) diag(s.postCov)', logR, 'UniformOutput',
 fprintf('--- A with a reset and a measurement update inside the outage ---\n');
 resR = covPropCheck(logR, tKf, tOut, tReacq, [], pdCell);
 okA = all(abs(resA.medianAided - 1) < 1e-6) && all(abs(resA.medianOutage - 1) < 1e-6) && resA.pDiagMatch == true ...
-   && max(abs(resA.sigChain(resA.inOutage, :) - resA.sigLogged(resA.inOutage, :))) < 1e-9 ...
+   && max(max(abs(resA.sigChain(resA.inOutage, :) - resA.sigLogged(resA.inOutage, :)))) < 1e-9 ...
    && abs(resA.hphRatio(2) - 1) < 1e-9;
 okB = all(resB.medianOutage([1 4]) > 0.7) && all(resB.medianOutage(2:3) < 0.2) && resB.pDiagMatch == false ...
    && resB.sigChain(160, 1) > 2 * resB.sigLogged(160, 1);           % the fault leaves pos-vel and tilt-gyro bias intact
@@ -89,7 +94,8 @@ okN = all(abs(resN.medianAided - 1) < 1e-6) && ~any(resN.inOutage) && isnan(resN
 okT = abs(median(resA.accInterval(2:end)) - 0.5) < 1e-9 && all(abs(resA.accCoupling(2, :) - 1) < 1e-9) ...
    && all(all(abs(resA.ratioHost(2:end, :) - 1) < 1e-6)) ...
    && abs(median(resE.accInterval(2:end))) < 1e-12 && abs(median(resM.accInterval(2:end)) - 1.0) < 1e-9 ...
-   && ~any(isfinite(resN.accInterval));
+   && ~any(isfinite(resN.accInterval)) ...
+   && max(abs(resS.accInterval(2:end) - resA.accInterval(2:end))) < 1e-12 && max(abs(resC.accInterval(2:end) - resA.accInterval(2:end))) < 1e-12;
 % the first GNSS epoch back logged inside the outage: six rows at the last outage epoch
 logQ = logA;  kLast = find(tKf < tReacq, 1, 'last');
 PmQ = Phi * logQ{kLast - 1}.postCov * Phi';  SQ = H6 * PmQ * H6' + 0.25 * eye(6);  KQ = (PmQ * H6') / SQ;  PQ = PmQ - KQ * H6 * PmQ;

@@ -165,14 +165,21 @@ one-step prediction with the host's own accumPhi and accumQ.
 
 `tools/designConstants.m` is the offline design step (quickstart step 2) on
 recorded data: from the same spfMeas records it takes Eq. 20 per monitored
-axis on every usable epoch, the worst-sky minimum, the window length per axis
-from `solve_N_min`, the common window and the CPI threshold, SS gate and PL
-multiplier at it, printed next to the values in `CST_spfParam`; with the P
-diagonal it also reports the epoch from which the protection level allows
-arming. It prints the constant offset the CPI reports within one window,
-`NOMINAL_BIAS` included, which is the detectability statement once the host
-sets that allowance. S carries the host's P and R, so it is rerun after every
-change of Q or R.
+axis on every usable epoch, keeps as the design sky the 5th percentile over
+the epochs the gate would be armed on (enough rows and a protection level
+inside `ARM_PL_MAX`, from the P diagonal; the whole-run minimum sits on the
+first epoch after an outage and is printed for information only), solves the
+window length per axis where the missed-detection requirement is reachable,
+and prints the CPI threshold, SS gate and PL multiplier at the window used
+next to the values in `CST_spfParam`. When the requirement is out of reach,
+as it is for a code-based filter against a 0.1 m spoofer, the current window
+is kept, the constants come out equal to the published ones, and the tool
+prints what the data does set: the constant offset per axis the CPI sees
+within one window on the median sky, at the threshold and at the
+missed-detection probability, `NOMINAL_BIAS` included (given as an argument
+or read from the `CST_spfParam` on the path). With the P diagonal it also
+reports the epoch from which the protection level allows arming. S carries
+the host's P and R, so it is rerun after every change of Q or R.
 
 ## Printable copies
 

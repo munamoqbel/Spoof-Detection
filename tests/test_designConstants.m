@@ -1,8 +1,9 @@
 %% test_designConstants.m
-% tools/designConstants on synthetic spfMeas records: s2 per axis against the direct Eq. 20, the window
-% length against solve_N_min called directly, the constants at the common N, a cell input, the arming epoch
-% from a P diagonal whose protection level settles, and the unreachable case (code-noise prior) reporting
-% the spoofer error it would take. Run from the repo root (Octave with the shim).
+% tools/designConstants on synthetic spfMeas records: s2 per axis against the direct Eq. 20, the design sky
+% (5th percentile of the armed epochs), the window length against solve_N_min on that sky, the constants at
+% the common N, a cell input, the arming epoch from a P diagonal whose protection level settles, the
+% NOMINAL_BIAS argument, and the unreachable case (code-noise prior) keeping the current window and
+% reporting the spoofer error it would take. Run from the repo root (Octave with the shim).
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'tools'));
 randn('seed', 5);  rand('seed', 5);
@@ -36,36 +37,59 @@ function [log, s2ref] = makeLog(K, nSat, n, mMax, sigPos, sigR, sigP)
     s2ref(7, :) = NaN;
 end
 
+function [v] = pct5(x)
+    v = NaN(1, size(x, 2));
+    for c = 1:size(x, 2)
+        s = sort(x(isfinite(x(:, c)), c));  v(c) = s(max(1, ceil(0.05 * numel(s))));
+    end
+end
+
 % A. a centimetre prior with carrier-level rows: the requirement is reachable
 [logA, s2A] = makeLog(K, nSat, n, mMax, 0.01, 0.02, 0.02);
-nRef = zeros(1, 3);
-for a = 1:3
-    [nRef(a), ~, ~, ~, ~] = solve_N_min(min(s2A(:, a)), sigmaT, pFaPlus, pFaMinus, prm.P_MD_plus, prm.P_MD_minus);
-end
-nC = max(nRef) + 1;
 sigPosTrace = 2 + 58 * exp(-(0:K-1)' / 15);                    % position sigma 60 m down to 2 m
 pDiag = [repmat(sigPosTrace.^2, 1, 3), 1e-4 * ones(K, n - 3)];
 kMd = norminv(1 - prm.P_MD_minus);
 inside = double(kMd * sigPosTrace < CST_spfParam.ARM_PL_MAX);
 w = double(CST_spfParam.ARM_EPOCHS);
 armRef = find(conv(inside, ones(w, 1), 'valid') == w, 1);
-desA  = designConstants(logA, sigmaT, pDiag);                   % cell input
-desA2 = designConstants([logA{:}], sigmaT);                     % struct-array input, no P
+desA  = designConstants(logA, sigmaT, pDiag);                   % cell input, P given
+desA2 = designConstants([logA{:}], sigmaT);                     % struct-array input, no P: all usable epochs armed
+usedRef = all(isfinite(s2A), 2);
+armedRef = usedRef & inside == 1;
+s2desRef = pct5(s2A(armedRef, :));
+nRef = zeros(1, 3);
+for a = 1:3
+    [nRef(a), ~, ~, ~, ~] = solve_N_min(s2desRef(a), sigmaT, pFaPlus, pFaMinus, prm.P_MD_plus, prm.P_MD_minus);
+end
+nC = max(nRef) + 1;
+s2desRef2 = pct5(s2A(usedRef, :));
+nRef2 = zeros(1, 3);
+for a = 1:3
+    [nRef2(a), ~, ~, ~, ~] = solve_N_min(s2desRef2(a), sigmaT, pFaPlus, pFaMinus, prm.P_MD_plus, prm.P_MD_minus);
+end
 okA = all(abs(desA.s2min - min(s2A, [], 1)) < 1e-9 * max(1, max(s2A(:)))) && all(isnan(desA.s2(7, :))) ...
-   && all(desA.nAxis == nRef) && desA.N == nC ...
+   && isequal(desA.armed(:), armedRef(:)) && all(abs(desA.s2des - s2desRef) < 1e-12) ...
+   && all(desA.nAxis == nRef) && desA.N == nC && desA.nUse == nC ...
    && abs(desA.tN - gaminv(1 - pFaPlus, nC / 2, 2)) < 1e-9 ...
    && abs(desA.kFa - norminv(1 - (pFaMinus / nC) / 2)) < 1e-9 && abs(desA.kMd - kMd) < 1e-9 ...
-   && all(desA.pmdAtN <= desA.pmdAxis + 1e-15) && desA.armEpoch == armRef && isnan(desA2.armEpoch) && desA2.N == nC ...
+   && all(desA.pmdAtN <= desA.pmdAxis + 1e-15) && desA.armEpoch == armRef && isnan(desA2.armEpoch) ...
+   && all(desA2.nAxis == nRef2) && desA2.N == max(nRef2) + 1 ...
    && all(desA.nominalBias == double(CST_spfParam.NOMINAL_BIAS)) ...
-   && all(abs(desA.cpiOffsetMin - (desA.nominalBias + sqrt(desA.tN / desA.N) ./ sqrt(desA.s2med))) < 1e-9);
+   && all(abs(desA.cpiOffsetMin - (desA.nominalBias + sqrt(desA.tN / desA.N) ./ sqrt(desA.s2med))) < 1e-9) ...
+   && all(desA.cpiOffsetMd > desA.cpiOffsetMin);
 
-% B. a metre-level prior with code rows: not reachable, the spoofer error it would take is reported
+% B. a metre-level prior with code rows: not reachable, the current window is kept and the spoofer error it
+%    would take is reported; NOMINAL_BIAS given as an argument
 [logB, s2B] = makeLog(K, nSat, n, mMax, 3.0, 2.5, 4.0);
-desB = designConstants(logB, sigmaT);
+desB = designConstants(logB, sigmaT, [], [5 5 5]);
 sTreq = desB.sigmaTreq(1, 2);
-pmdAtReq = compute_PMD_eq38(240, desB.s2min(1), sTreq, pFaPlus);
-okB = all(isnan(desB.nAxis)) && isnan(desB.N) && all(isfinite(desB.sigmaTreq(:))) && all(desB.sigmaTreq(:, 1) >= desB.sigmaTreq(:, 2)) ...
+pmdAtReq = compute_PMD_eq38(240, desB.s2des(1), sTreq, pFaPlus);
+okB = all(isnan(desB.nAxis)) && isnan(desB.N) && desB.nUse == desB.current.N ...
+   && all(isfinite(desB.sigmaTreq(:))) && all(desB.sigmaTreq(:, 1) >= desB.sigmaTreq(:, 2)) ...
    && abs(pmdAtReq - prm.P_MD_plus) < 0.02 * prm.P_MD_plus && abs(desB.kMd - kMd) < 1e-9 ...
-   && all(abs(desB.cpiOffsetMin - (desB.nominalBias + sqrt(desB.current.tN / desB.current.N) ./ sqrt(desB.s2med))) < 1e-9);
+   && abs(desB.tN - gaminv(1 - pFaPlus, desB.current.N / 2, 2)) < 1e-9 ...
+   && all(desB.nominalBias == 5) ...
+   && all(abs(desB.cpiOffsetMin - (5 + sqrt(desB.tN / desB.nUse) ./ sqrt(desB.s2med))) < 1e-9) ...
+   && all(desB.cpiOffsetMd > desB.cpiOffsetMin);
 
 if okA && okB, fprintf('=== test_designConstants PASS ===\n'); else, fprintf('=== test_designConstants FAIL (A %d, B %d) ===\n', okA, okB); end

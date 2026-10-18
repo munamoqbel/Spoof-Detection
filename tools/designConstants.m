@@ -13,10 +13,10 @@ function [des] = designConstants(spfMeasLog, sigmaT, pDiag, nominalBias)
 %   at least REVAL_MIN_MEAS rows:
 %       s2(k) = f' S^-1 f,  f = H(:, a)                                   (Eq. 20 of Kujur 2024)
 %   1/sqrt(s2) is the filter's prior uncertainty along the axis as the rows of that epoch see it. The design
-%   sky is the 5th percentile of s2 over the armed epochs: enough rows and a protection level K_MD sigma_pos
-%   inside ARM_PL_MAX (with pDiag; all usable epochs without it). The minimum over the whole run is printed
-%   for information only: it sits on the first epoch after an outage, where P is legitimately large and the
-%   gate is disarmed.
+%   sky is the 5th percentile of s2 over the armed epochs: from the first arming on, which the gate reaches
+%   after ARM_EPOCHS consecutive epochs with enough rows and a protection level K_MD sigma_pos inside
+%   ARM_PL_MAX, and keeps (with pDiag; all usable epochs without it). The minimum over the whole run is
+%   printed for information only: it sits on the first epoch after an outage, where P is legitimately large.
 %   Omega = s2 sigmaT^2 is the spoofer's tracking jitter against that uncertainty. The missed-detection
 %   requirement P_MD+ (kujur_params, split across the axes) is reachable only when Omega is of order one:
 %   with a prior of metres, as a code-based filter has, a 0.1 m spoofer is invisible to the CPI at any window
@@ -39,7 +39,8 @@ function [des] = designConstants(spfMeasLog, sigmaT, pDiag, nominalBias)
 %   s2des (design sky), s2med (median armed sky), nAxis, pmdAxis, sigmaTreq [nAxes x 2] (at the current window
 %   and at MAX_WINDOW, when not reachable), N (designed common window, NaN when not reachable), nUse, tN, kFa,
 %   kMd (the window used and the constants at it), pmdAtN, sigmaT, nominalBias, cpiOffsetMin (d50),
-%   cpiOffsetMd (dMD), armEpoch, current (the CST_spfParam values).
+%   cpiOffsetMd (dMD), rampFloor (B / (N dt): the ramp rate below which the separation test cannot fire within one
+%   window, before the coast uncertainty is counted), armEpoch, current (the CST_spfParam values).
 
 MAX_WINDOW = 240;                                            % epochs (2 min at 2 Hz): longer is not a monitor
 DESIGN_PCT = 5;                                              % percentile of the armed epochs taken as the design sky
@@ -94,9 +95,19 @@ if ~isempty(pDiag)
         fprintf('   pDiag has %d rows, the log %d epochs: not used\n', size(D, 1), K);
     end
 end
-armNote = '';
+% the gate arms after ARM_EPOCHS consecutive qualifying epochs (enough rows, protection level inside
+% ARM_PL_MAX) and stays armed: the armed epochs are those from the first arming on
+armNote = '';  armEpoch = NaN;  wArm = double(CST_spfParam.ARM_EPOCHS);
 if any(isfinite(pl))
-    armed = used & pl < CST_spfParam.ARM_PL_MAX;
+    qualifying = double(used & pl < CST_spfParam.ARM_PL_MAX);
+    runLen = conv(qualifying, ones(wArm, 1), 'valid');       % qualifying epochs in a window of wArm
+    kFirst = find(runLen == wArm, 1);
+    if ~isempty(kFirst), armEpoch = kFirst; end
+    if isfinite(armEpoch)
+        armed = used & (1:K)' >= armEpoch + wArm - 1;
+    else
+        armed = used;  armNote = ' (the protection level never qualifies for ARM_EPOCHS epochs: all usable epochs taken)';
+    end
     if nnz(armed) < 10
         armed = used;  armNote = ' (fewer than 10 armed epochs: all usable epochs taken)';
     end
@@ -109,8 +120,8 @@ kUsed = find(used);  kArmed = find(armed);
 s2des = pctRows(s2(armed, :), DESIGN_PCT);
 s2med = median(s2(armed, :), 1);
 
-fprintf('designConstants: %d epochs, %d usable (>= %d rows, finite S), %d armed (K_MD sigma_pos inside ARM_PL_MAX %.0f m)%s\n', ...
-    K, nnz(used), minRows, nnz(armed), CST_spfParam.ARM_PL_MAX, armNote);
+fprintf('designConstants: %d epochs, %d usable (>= %d rows, finite S), %d armed (from the first arming on: %d qualifying epochs with K_MD sigma_pos inside ARM_PL_MAX %.0f m)%s\n', ...
+    K, nnz(used), minRows, nnz(armed), wArm, CST_spfParam.ARM_PL_MAX, armNote);
 fprintf('   sigma_t %.2f m; budgets P_FA+ %.1e  P_FA- %.1e  P_MD+ %.1e  P_MD- %.1e, split over %d axes; NOMINAL_BIAS %s m (%s)\n', ...
     sigmaT, prm.P_FA_plus, prm.P_FA_minus, prm.P_MD_plus, prm.P_MD_minus, nAx, mat2str(nominalBias(axes)), biasSrc);
 fprintf('1. prior uncertainty along the monitored axes, 1/sqrt(s2) [m], s2 = f'' S^-1 f (Eq. 20)\n');
@@ -166,18 +177,15 @@ fprintf('   axis    B     d50 (q reaches T_N)   dMD (missed with P_MD+, normal a
 for a = 1:nAx
     fprintf('   %-4d  %5.2f   %10.2f            %10.2f\n', a, bAxis(a), cpiOffsetMin(a), cpiOffsetMd(a));
 end
-if any(bAxis > 0)
-    fprintf('   the separation test fires beyond B + k_FA sigma_SS; the CPI counts only the axis innovation beyond B\n');
-end
+dtEpoch = 1 / kujur_params().fs;
+rampFloor = bAxis / (nUse * dtEpoch);
+fprintf('   the separation test fires when the solution moves by more than B + k_FA sigma_SS within one window: a ramp must exceed\n');
+fprintf('   B / (N dt) = %s m/s per axis before the coast uncertainty over the window is even counted; the CPI counts only the\n', strtrim(sprintf('%.2f ', rampFloor)));
+fprintf('   axis innovation beyond B, which a ramp the filter follows never reaches\n');
 
 %% arming: first epoch from which the protection level stays inside ARM_PL_MAX for ARM_EPOCHS epochs
-armEpoch = NaN;
+w = wArm;
 if any(isfinite(pl))
-    inside = double(pl(:) < CST_spfParam.ARM_PL_MAX);
-    w = double(CST_spfParam.ARM_EPOCHS);
-    runLen = conv(inside, ones(w, 1), 'valid');              % qualifying epochs in a window of w
-    k = find(runLen == w, 1);
-    if ~isempty(k), armEpoch = k; end
     if isfinite(armEpoch)
         fprintf('5. arming: K_MD sigma_pos inside ARM_PL_MAX (%.0f m) from epoch %d (%.1f s at 2 Hz); the monitors arm at epoch %d with\n', ...
             CST_spfParam.ARM_PL_MAX, armEpoch, armEpoch / 2, armEpoch + w - 1);
@@ -201,13 +209,14 @@ else
         sigmaT, strtrim(sprintf('%.1f ', 1 ./ sqrt(s2des))), sigmaT);
     fprintf('         jitter). The window stays at %d and T_N, k_FA, k_MD depend on the budgets only: nothing to change in\n', nUse);
     fprintf('         CST_spfParam. The CPI catches constant offsets from about %s m per axis within one window (B included);\n', strtrim(sprintf('%.1f ', cpiOffsetMin)));
-    fprintf('         the separation test takes the rest over the anchor horizon\n');
+    fprintf('         the separation test catches steps and ramps that move the solution by more than B + k_FA sigma_SS within one\n');
+    fprintf('         window of %d epochs, i.e. ramps faster than about %s m/s\n', nUse, strtrim(sprintf('%.1f ', rampFloor)));
 end
 
 des = struct('axes', axes, 's2', s2, 'used', used, 'armed', armed, 's2min', s2min, 's2minEpoch', s2minEpoch, ...
     's2minArmed', s2minArmed, 's2des', s2des, 's2med', s2med, 'nAxis', nAxis, 'pmdAxis', pmdAxis, ...
     'sigmaTreq', sigmaTreq, 'N', N, 'nUse', nUse, 'tN', tN, 'kFa', kFa, 'kMd', kMd, 'pmdAtN', pmdAtN, 'sigmaT', sigmaT, ...
-    'nominalBias', bAxis, 'cpiOffsetMin', cpiOffsetMin, 'cpiOffsetMd', cpiOffsetMd, 'armEpoch', armEpoch, 'current', cur);
+    'nominalBias', bAxis, 'cpiOffsetMin', cpiOffsetMin, 'cpiOffsetMd', cpiOffsetMd, 'rampFloor', rampFloor, 'armEpoch', armEpoch, 'current', cur);
 end
 
 %------------------------------------------------------------------------

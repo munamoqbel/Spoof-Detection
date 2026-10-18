@@ -55,7 +55,7 @@ armRef = find(conv(inside, ones(w, 1), 'valid') == w, 1);
 desA  = designConstants(logA, sigmaT, pDiag);                   % cell input, P given
 desA2 = designConstants([logA{:}], sigmaT);                     % struct-array input, no P: all usable epochs armed
 usedRef = all(isfinite(s2A), 2);
-armedRef = usedRef & inside == 1;
+armedRef = usedRef & (1:K)' >= armRef + w - 1;                   % sticky from the first arming on
 s2desRef = pct5(s2A(armedRef, :));
 nRef = zeros(1, 3);
 for a = 1:3
@@ -76,7 +76,7 @@ okA = all(abs(desA.s2min - min(s2A, [], 1)) < 1e-9 * max(1, max(s2A(:)))) && all
    && all(desA2.nAxis == nRef2) && desA2.N == max(nRef2) + 1 ...
    && all(desA.nominalBias == double(CST_spfParam.NOMINAL_BIAS)) ...
    && all(abs(desA.cpiOffsetMin - (desA.nominalBias + sqrt(desA.tN / desA.N) ./ sqrt(desA.s2med))) < 1e-9) ...
-   && all(desA.cpiOffsetMd > desA.cpiOffsetMin);
+   && all(desA.cpiOffsetMd > desA.cpiOffsetMin) && all(desA.rampFloor == 0);
 
 % B. a metre-level prior with code rows: not reachable, the current window is kept and the spoofer error it
 %    would take is reported; NOMINAL_BIAS given as an argument
@@ -90,6 +90,6 @@ okB = all(isnan(desB.nAxis)) && isnan(desB.N) && desB.nUse == desB.current.N ...
    && abs(desB.tN - gaminv(1 - pFaPlus, desB.current.N / 2, 2)) < 1e-9 ...
    && all(desB.nominalBias == 5) ...
    && all(abs(desB.cpiOffsetMin - (5 + sqrt(desB.tN / desB.nUse) ./ sqrt(desB.s2med))) < 1e-9) ...
-   && all(desB.cpiOffsetMd > desB.cpiOffsetMin);
+   && all(desB.cpiOffsetMd > desB.cpiOffsetMin) && all(abs(desB.rampFloor - 5 / (desB.nUse * 0.5)) < 1e-12);
 
 if okA && okB, fprintf('=== test_designConstants PASS ===\n'); else, fprintf('=== test_designConstants FAIL (A %d, B %d) ===\n', okA, okB); end

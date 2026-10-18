@@ -67,13 +67,13 @@ iPos = 1:3;  iVel = 4:6;  iAtt = 7:9;  iBa = 10:12;  iBg = 13:15;
 if ~isempty(run) && isfield(run, 'pGyroFirst') && run.pGyroFirst, iBa = 13:15;  iBg = 10:12; end
 haveNav = ~isempty(run) && isfield(run, 'navAtt') && isfield(run, 't') && isfield(run, 'navVel');
 hasOut  = ~isempty(tOut) && ~isempty(tReacq);
-if hasOut, inOutage = tKf > tOut & tKf < tReacq; else, inOutage = false(K, 1); end
+if hasOut, inOutage = tKf > tOut + 1e-3 & tKf < tReacq - 1e-3; else, inOutage = false(K, 1); end   % tReacq given as the first epoch back excludes it
 blocks = {iPos(1:2), iVel(1:2); iVel(1:2), iAtt(1:2); iVel(1:2), iBa; iAtt, iBg};
 blockName = {'pos-vel', 'vel-tilt', 'vel-accel bias', 'tilt-gyro bias'};
 
 ratio = NaN(K, 4);  sigLogged = NaN(K, 4);  sigOneStep = NaN(K, 4);  sigChain = NaN(K, 4);  hphRatio = NaN(K, 1);
 Pc = [];  kOut = [];
-if hasOut, kOut = find(tKf <= tOut, 1, 'last'); end
+if hasOut, kOut = find(tKf <= tOut + 1e-3, 1, 'last'); end
 if ~isempty(kOut), Pc = spfMeasLog(kOut).postCov; end
 for k = 1:K
     L = spfMeasLog(k).postCov;

@@ -8,9 +8,11 @@ function [res] = covPropCheck(spfMeasLog, tKf, tOut, tReacq, run, pDiag, propTel
 %                                                                   checked against diag(postCov)
 %   res = covPropCheck(..., pDiag, propTelLog)   propTelLog: the propTel the gate received per epoch
 %                                                (STRUCT_SPF.setPropTel: accumPhi, accumQ over the interval that ends
-%                                                at the epoch) as a struct array or cell of per-epoch structs, or as
-%                                                one struct whose accumPhi and accumQ hold the epochs along the third
-%                                                dimension ([n x n x K]) or in a cell. Checks the accumulation and its
+%                                                at the epoch) as a struct array or cell of per-epoch structs, as the
+%                                                host's per-epoch log itself when it carries a propTel field (the
+%                                                tool takes [log.propTel]), or as one struct whose accumPhi and accumQ
+%                                                hold the epochs along the third dimension ([n x n x K]) or in a
+%                                                cell. Checks the accumulation and its
 %                                                reset, and repeats the one-step prediction with the host's own
 %                                                accumPhi and accumQ
 %
@@ -308,6 +310,9 @@ function [L] = propTelRows(propTelLog)
 % propTel per epoch as a struct array, from a struct array or cell of per-epoch structs, or from one struct whose
 % accumPhi / accumQ hold the epochs along the third dimension or in a cell
 if iscell(propTelLog), propTelLog = [propTelLog{:}]; end
+if isstruct(propTelLog) && isfield(propTelLog, 'propTel') && ~isfield(propTelLog, 'accumPhi')
+    propTelLog = [propTelLog.propTel];                       % the host's per-epoch log with a propTel field
+end
 L = propTelLog;
 if isempty(propTelLog) || ~isstruct(propTelLog) || numel(propTelLog) ~= 1 || ~isfield(propTelLog, 'accumPhi'), return; end
 A = propTelLog.accumPhi;

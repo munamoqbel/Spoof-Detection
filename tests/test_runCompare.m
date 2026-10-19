@@ -313,6 +313,19 @@ okV = all(abs(resV.run1.sigGrowthExp(1:3) - 0.5) < 0.05) && all(abs(resV.run1.si
    && all(abs(resV.run2.sigGrowthExp(1:3) - 2.5) < 0.05) && ~any(isfinite(res.run1.sigGrowthExp)) ...   % constant P: no growth
    && abs(resV.run2.sigEnd(1) - sqrt(1 + 1e-9 * tauEnd^5)) < 1e-6;                                   % end of coast before the update back
 if okV, fprintf('=== sigma growth law check PASS ===\n'); else, fprintf('=== sigma growth law check FAIL ===\n'); end
+% a stationary run: no lag, latency, lever arm or yaw course can be fitted; the errors are taken at zero lag
+runS = runA;  runS.name = 'S stationary';
+MS = numel(runS.tTrue);  NS = numel(runS.t);
+runS.truePos = repmat(runA.truePos(1, :), MS, 1);
+runS.trueVel = zeros(MS, 3);
+runS.trueAtt = repmat(runA.trueAtt(1, :), MS, 1);
+runS.navPos  = repmat(runA.truePos(1, :), NS, 1) + [0.3e-7 * randn(NS, 2), 0.3 * randn(NS, 1)];   % 0.2 m of noise (lat, lon in rad)
+runS.navVel  = 0.02 * randn(NS, 3);
+runS.navAtt  = repmat(runA.trueAtt(1, :), NS, 1) + 1e-3 * randn(NS, 3);
+resS = runCompare(runS, [], [], [], [10 95; 255 295]);
+okS = resS.run1.stationary && resS.run1.tau == 0 && resS.run1.tauP == 0 && resS.run1.tauV == 0 && all(isnan(resS.run1.leverArm)) ...
+   && all(isfinite(resS.run1.rmsPos)) && all(resS.run1.rmsPos < 1) && ~res.run1.stationary;
+if okS, fprintf('=== stationary run check PASS ===\n'); else, fprintf('=== stationary run check FAIL ===\n'); end
 % a clean run without an outage (tOut = []): sections 0 and 1 only, no state comparison, the whole run aided by default
 resN = runCompare(runA, runB, [], [], [10 95; 255 295]);
 resN0 = runCompare(runA, [], [], []);

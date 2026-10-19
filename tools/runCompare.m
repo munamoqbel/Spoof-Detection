@@ -214,9 +214,23 @@ fprintf(F0, 'check', 'shift / lag', 'residual', 'note');
 
 %% (a) truth arrays against the differenced truth position
 velPos = velFromPos(tT, r.truePos);                           % NED velocity differenced from the truth position
+spdPos = hypot(velPos(:, 1), velPos(:, 2));
+stationary = mean(spdPos(inT & isfinite(spdPos)) > 3) < 0.02;  % no motion in the aided windows: no lag, latency or lever arm
+if stationary
+    fprintf('   stationary run (the truth moves at less than 3 m/s in the aided windows): lags, latency, lever arm and the yaw\n');
+    fprintf('   course are not estimable and are not fitted; the errors below are taken at zero lag\n');
+end
 velSource = 'position';
 sV = 0;  rV = NaN;
-if isfield(r, 'trueVel') && ~isempty(r.trueVel)
+if isfield(r, 'trueVel') && ~isempty(r.trueVel) && stationary
+    rV = rmsRows(r.trueVel(inT, :) - velPos(inT, :), 1:3);
+    if rV < 1
+        velSource = 'logged';
+        fprintf(F0, 'trueVel vs d(truePos)/dt', '  0.00 s', sprintf('%7.3f m/s rms', rV), 'trueVel used (no scan: stationary)');
+    else
+        fprintf(F0, 'trueVel vs d(truePos)/dt', '  0.00 s', sprintf('%7.3f m/s rms', rV), 'WARNING: another frame or unit? d(truePos)/dt used');
+    end
+elseif isfield(r, 'trueVel') && ~isempty(r.trueVel)
     [sV, ~, ~] = lagScan(tauGrid, @(s) stdRows(interpRows(tT, r.trueVel, tT(inT) + s) - velPos(inT, :), 1:3, 0, gT));
     rV = rmsRows(interpRows(tT, r.trueVel, tT(inT) + sV) - velPos(inT, :), 1:3);
     if rV < 1 && abs(sV) < 1.49
@@ -264,7 +278,11 @@ end
 
 %% (b) nav arrays against the differenced nav position
 velNav = velFromPos(t, r.navPos);                             % d(navPos)/dt on the nav time base
-[sNV, ~, ~] = lagScan(tauGrid, @(s) stdRows(interpRows(t, r.navVel, tA + s) - velNav(inAided, :), 1:2, 0.1, gA));
+if stationary
+    sNV = 0;
+else
+    [sNV, ~, ~] = lagScan(tauGrid, @(s) stdRows(interpRows(t, r.navVel, tA + s) - velNav(inAided, :), 1:2, 0.1, gA));
+end
 rNV = stdRows(interpRows(t, r.navVel, tA + sNV) - velNav(inAided, :), 1:2, 0.1, gA);
 spdN = hypot(velNav(:, 1), velNav(:, 2));
 movN = inAided & spdN > 3 & all(isfinite(velNav), 2);
@@ -282,14 +300,20 @@ fprintf(F0, 'navAtt yaw vs nav course', '    -', sprintf('%7.1f mrad rms', rNA *
 
 %% (c) lag of the nav solution behind the truth, per quantity
 navPosA = r.navPos(inAided, :);
-[tauP, pBest, p0] = lagScan(tauGrid, @(s) stdRows(nedDelta(navPosA, interpRows(tT, r.truePos, tA + s)), 1:2, 0, gA));
-[tauV, vBest, v0] = lagScan(tauGrid, @(s) stdRows(r.navVel(inAided, :) - interpRows(tT, trueVel, tA + s), 1:2, 0, gA));
+if stationary
+    tauP = 0;  p0 = stdRows(nedDelta(navPosA, interpRows(tT, r.truePos, tA)), 1:2, 0, gA);  pBest = p0;
+    tauV = 0;  v0 = stdRows(r.navVel(inAided, :) - interpRows(tT, trueVel, tA), 1:2, 0, gA);  vBest = v0;
+else
+    [tauP, pBest, p0] = lagScan(tauGrid, @(s) stdRows(nedDelta(navPosA, interpRows(tT, r.truePos, tA + s)), 1:2, 0, gA));
+    [tauV, vBest, v0] = lagScan(tauGrid, @(s) stdRows(r.navVel(inAided, :) - interpRows(tT, trueVel, tA + s), 1:2, 0, gA));
+end
 tauVp = NaN;  vpBest = NaN;
-if strcmp(velSource, 'logged')                                % the nav against the other velocity truth, for comparison
+if strcmp(velSource, 'logged') && ~stationary                % the nav against the other velocity truth, for comparison
     [tauVp, vpBest, ~] = lagScan(tauGrid, @(s) stdRows(r.navVel(inAided, :) - interpRows(tT, velPos, tA + s), 1:2, 0, gA));
 end
 vqP = interpRows(tT, velRef, tA + tauP);
 mov = all(isfinite(vqP), 2) & hypot(vqP(:, 1), vqP(:, 2)) > 3;      % moving aided samples: turns make the yaw lag visible
+if stationary, mov(:) = false; end
 tauA = tauP;  aBest = NaN;  a0 = NaN;  aAtP = NaN;
 if any(mov)
     yawNav = r.navAtt(inAided, 3);  yawNav = yawNav(mov);
@@ -305,7 +329,10 @@ if strcmp(velSource, 'logged')
     fprintf(F0, 'nav velocity lag vs d(truePos)/dt', sprintf('%+6.2f s', tauVp), sprintf('%6.3f m/s', vpBest), 'for comparison');
 end
 fprintf(F0, 'nav attitude lag', sprintf('%+6.2f s', tauA), sprintf('%6.1f / %6.1f mrad', aBest * 1e3, a0 * 1e3), '');
-if ~haveA
+if stationary
+    tau = 0;
+    fprintf('   reference instant: zero lag (stationary run)\n');
+elseif ~haveA
     tau = tauP;
     fprintf('   reference instant: the position lag (no usable attitude lag: no moving samples, truth yaw off the course, or at the scan edge)\n');
 elseif abs(tauA - tauP) <= 0.1
@@ -408,13 +435,16 @@ cy = cos(r.navAtt(:, 3));  sy = sin(r.navAtt(:, 3));
 eLong  =  cy .* velErr(:, 1) + sy .* velErr(:, 2);
 eLat   = -sy .* velErr(:, 1) + cy .* velErr(:, 2);
 okL = ok & isfinite(psiDot) & isfinite(eLong) & isfinite(eLat);
-[rx, r2x] = fitK(eLat(okL), psiDot(okL), winA(okL));
-[ry, r2y] = fitK(eLong(okL), -psiDot(okL), winA(okL));
-leverArm = [rx, ry];
-fprintf('   lever arm in the velocity error: r_x %+.2f m (%.0f%% of the lateral variance), r_y %+.2f m (%.0f%%)\n', rx, 100 * r2x, ry, 100 * r2y);
-if (abs(rx) > 0.5 && r2x > 0.3) || (abs(ry) > 0.5 && r2y > 0.3)
-    fprintf('   NOTE: a metre-sized arm with a large share: the antenna sits that far from the reference point and h(x) carries no lever arm\n');
+rx = NaN;  r2x = NaN;  ry = NaN;  r2y = NaN;
+if ~stationary
+    [rx, r2x] = fitK(eLat(okL), psiDot(okL), winA(okL));
+    [ry, r2y] = fitK(eLong(okL), -psiDot(okL), winA(okL));
+    fprintf('   lever arm in the velocity error: r_x %+.2f m (%.0f%% of the lateral variance), r_y %+.2f m (%.0f%%)\n', rx, 100 * r2x, ry, 100 * r2y);
+    if (abs(rx) > 0.5 && r2x > 0.3) || (abs(ry) > 0.5 && r2y > 0.3)
+        fprintf('   NOTE: a metre-sized arm with a large share: the antenna sits that far from the reference point and h(x) carries no lever arm\n');
+    end
 end
+leverArm = [rx, ry];
 lastWin = inAided & t <= tOut & t >= tOut - 60;
 if any(lastWin)
     bm = mean(biasErr(lastWin, :), 1);
@@ -627,7 +657,7 @@ else
 
 end
 
-o = struct('name', r.name, 'tau', tau, 'tauP', tauP, 'tauV', tauV, 'tauVp', tauVp, 'tauA', tauA, 'sV', sV, 'sA', sA, 'sNV', sNV, ...
+o = struct('name', r.name, 'stationary', stationary, 'tau', tau, 'tauP', tauP, 'tauV', tauV, 'tauVp', tauVp, 'tauA', tauA, 'sV', sV, 'sA', sA, 'sNV', sNV, ...
     'kP', kP, 'r2P', r2P, 'kV', kV, 'r2V', r2V, 'posOffset', posOffset, 'posLatency', posLatency, 'posOffsetSig', posOffsetSig, 'posLatencySig', posLatencySig, 'velSource', velSource, 'rmsPos', rmsPos, ...
     'rmsVel', rmsVel, 'meanVel', meanVel, 'rmsAtt', rmsAtt, 'leverArm', leverArm, 'tOut', t(iOut), 'T', T, ...
     'posErrOut', posErr(iOut, :), 'dv', dv, 'slope10', slope10', 'dvImplied', dvImplied', 'velJump', velJump, 'tJump', tJump, 'yawJump', yawJump, 'attErr', attErr(iOut, :)', 'psi', psi, 'db', db, 'sig', sig, ...

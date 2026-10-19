@@ -143,7 +143,9 @@ N = numel(t);
 hasOut = ~isempty(tOut);
 if ~hasOut, tOut = t(end); tReacq = t(end); end               % no outage: the whole run is aided, the state is read at its end
 if isempty(aidedWin), aidedWin = [t(1), t(end)]; end
-yawT = r.trueAtt(:, 3);  okY = isfinite(yawT);  yawT(okY) = unwrap(yawT(okY));  r.trueAtt(:, 3) = yawT;   % continuous across +-pi for interpolation
+yawT = r.trueAtt(:, 3);  okY = isfinite(yawT);
+if any(okY), yawT(okY) = unwrap(yawT(okY)); end                % continuous across +-pi for interpolation (Octave's unwrap rejects [])
+r.trueAtt(:, 3) = yawT;
 rA = NaN;
 
 %% quantities logged per 2 Hz update: bias held between updates, P taken at the last update <= tOut

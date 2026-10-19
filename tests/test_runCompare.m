@@ -316,12 +316,13 @@ if okV, fprintf('=== sigma growth law check PASS ===\n'); else, fprintf('=== sig
 % a stationary run: no lag, latency, lever arm or yaw course can be fitted; the errors are taken at zero lag
 runS = runA;  runS.name = 'S stationary';
 MS = numel(runS.tTrue);  NS = numel(runS.t);
-runS.truePos = repmat(runA.truePos(1, :), MS, 1);
+iF = find(all(isfinite(runA.trueAtt), 2) & all(isfinite(runA.truePos), 2), 1);   % a finite row (the shifted truth has NaN edges)
+runS.truePos = repmat(runA.truePos(iF, :), MS, 1);
 runS.trueVel = zeros(MS, 3);
-runS.trueAtt = repmat(runA.trueAtt(1, :), MS, 1);
-runS.navPos  = repmat(runA.truePos(1, :), NS, 1) + [0.3e-7 * randn(NS, 2), 0.3 * randn(NS, 1)];   % 0.2 m of noise (lat, lon in rad)
+runS.trueAtt = repmat(runA.trueAtt(iF, :), MS, 1);
+runS.navPos  = repmat(runA.truePos(iF, :), NS, 1) + [0.3e-7 * randn(NS, 2), 0.3 * randn(NS, 1)];   % 0.2 m of noise (lat, lon in rad)
 runS.navVel  = 0.02 * randn(NS, 3);
-runS.navAtt  = repmat(runA.trueAtt(1, :), NS, 1) + 1e-3 * randn(NS, 3);
+runS.navAtt  = repmat(runA.trueAtt(iF, :), NS, 1) + 1e-3 * randn(NS, 3);
 resS = runCompare(runS, [], [], [], [10 95; 255 295]);
 okS = resS.run1.stationary && resS.run1.tau == 0 && resS.run1.tauP == 0 && resS.run1.tauV == 0 && all(isnan(resS.run1.leverArm)) ...
    && all(isfinite(resS.run1.rmsPos)) && all(resS.run1.rmsPos < 1) && ~res.run1.stationary;

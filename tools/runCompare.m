@@ -592,10 +592,9 @@ else
         if nGap >= 8 && isfinite(pH) && pH < 0.8
             fprintf('   VERDICT: during the outage P grows by Q alone, Phi is not applied to it (propagated only in the measurement step, or the\n');
             fprintf('            cross terms dropped between ticks). Fix the propagation before any Q\n');
-        elseif nGap >= 8 && isfinite(pH) && pH < 2
-            fprintf('   VERDICT: P carries the velocity coupling but not the tilt and bias coupling during the outage\n');
         elseif nGap >= 8 && isfinite(pH)
-            fprintf('   VERDICT: P carries the full coupling during the outage; a small sigma then comes from the tOut sigmas and Q\n');
+            fprintf('   P grows with the error dynamics during the outage (p = %.2f; Q makes the slope sit between the pure laws). Whether\n', pH);
+            fprintf('   every cross term is kept is covPropCheck''s block test, not this slope\n');
         elseif nGap >= 8
             fprintf('   (no usable growth: the logged variance does not increase over the second half of the outage)\n');
         end

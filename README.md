@@ -163,6 +163,15 @@ gate call, zero when it precedes it, more when a reset is missed), compares
 the coupling blocks of accumPhi with the error dynamics, and repeats the
 one-step prediction with the host's own accumPhi and accumQ.
 
+`tools/spoofProfile.m` reads the spfMeas records of a spoofed run and says
+what the spoof did to the measurements when its profile is not known: per
+epoch it splits the range rows where a gap in their innovations is wider
+than the group spread, takes the group farther from zero as the offset
+group, and prints onset, end, size and rows of the offset and its course in
+time; with the system of each row it names the spoofed constellation. The
+offset is read whole while the gate coasts and as a lower bound while the
+filter follows a slow spoof.
+
 `tools/designConstants.m` is the offline design step (quickstart step 2) on
 recorded data: from the same spfMeas records it takes Eq. 20 per monitored
 axis on every usable epoch, keeps as the design sky the 5th percentile over

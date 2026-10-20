@@ -49,6 +49,7 @@ M = sum(slots);
 pr = NaN(K, M);  satPos = NaN(K, M, 3);  sysId = NaN(K, M);
 nUsed = zeros(K, nSys);  nIdLog = NaN(K, nSys);
 hasId = isfield(loggedData, 'sysIdLog');
+idVals = [];
 for k = 1:K
     if ~(isstruct(loggedData(k).prLog) && isstruct(loggedData(k).satPosLog)), continue; end
     for s = 1:nSys
@@ -82,6 +83,7 @@ for k = 1:K
     end
     if hasId && ~isempty(loggedData(k).sysIdLog)
         ids = double(loggedData(k).sysIdLog(:));
+        idVals = union(idVals, unique(ids(isfinite(ids))));
         for s = 1:nSys, nIdLog(k, s) = nnz(ids == s); end
     end
 end
@@ -112,7 +114,8 @@ chk = all(isfinite(nIdLog), 2);
 bad = find(chk & any(nIdLog ~= nUsed, 2));
 if ~isempty(bad)
     fprintf('pairingLogUnpack: WARNING %d of %d epochs with sysIdLog count the rows per system differently from the used slots\n', numel(bad), nnz(chk));
-    fprintf('   (first at epoch %d: sysIdLog %s, slots %s): the host and the log disagree on which satellites are used\n', ...
+    fprintf('   (first at epoch %d: sysIdLog %s, slots %s): the host and the log disagree on which satellites are used, or\n', ...
         bad(1), mat2str(nIdLog(bad(1), :)), mat2str(nUsed(bad(1), :)));
+    fprintf('   sysIdLog does not code the systems as 1..%d in the order of the prLog fields: it holds the values %s\n', nSys, mat2str(idVals(:)'));
 end
 end

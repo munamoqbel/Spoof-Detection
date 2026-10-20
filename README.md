@@ -170,9 +170,14 @@ than the group spread, takes the group farther from zero as the offset
 group, and prints onset, end, size and rows of the offset and its course in
 time; with the system of each row it names the spoofed constellation. The
 offset is read whole while the gate coasts and as a lower bound while the
-filter follows a slow spoof. With the pairing logs of the spoofed run and of
-its clean twin it also differences the ranges slot by slot, which is the
-injection itself with no filter in the way: onset, end and size per system.
+filter follows a slow spoof. The split needs rows of both kinds in one
+record, so the tool also prints the mean innovation per system epoch by
+epoch over the stretch where some system is off, with the host's row set
+next to it, and with the pairing log and the reference position it reads
+the profile with no filter in the way: each range minus the geometric
+range from the reference leaves the receiver clock, read where two systems
+agree and interpolated elsewhere, the inter-system biases as run medians,
+and the offset per system, with its onset, end, size and course.
 
 `tools/designConstants.m` is the offline design step (quickstart step 2) on
 recorded data: from the same spfMeas records it takes Eq. 20 per monitored

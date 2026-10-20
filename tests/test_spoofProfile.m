@@ -26,6 +26,23 @@ end
 fprintf('--- A: 300 m on system 1 (four of eight rows), epochs 80 to 140 ---\n');
 pA = spoofProfile(logA, tKf, sysA);
 pA2 = spoofProfile(logA, tKf);
+% the same through the host's pairing log: 4 used GPS slots and 4 used GLONASS slots per epoch, slot order
+S = 12;
+blank = struct('corrValid', true, 'geomRange', zeros(S, 1), 'geomRangeRate', zeros(S, 1));
+blankSt = struct('position', zeros(S, 3), 'velocity', zeros(S, 3), 'LLA', zeros(S, 3), 'satValid', 1);
+recL = struct('prLog', struct('gpsRange', blank, 'gloRange', blank), 'satPosLog', struct('navstarStatus', blankSt, 'glonassStatus', blankSt), 'sysIdLog', []);
+loggedA = repmat(recL, K, 1);  loggedM = repmat(recL, K, 1);
+for k = 1:K
+    g = zeros(S, 1);  g([2 5 7 11]) = 2.2e7 + 1e5 * rand(4, 1);
+    loggedA(k).prLog.gpsRange.geomRange = g;  loggedA(k).prLog.gloRange.geomRange = g([3 1 2 4 5 6 7 8 9 10 11 12]);
+    loggedA(k).satPosLog.navstarStatus.position = 2.6e7 * (rand(S, 3) - 0.5);  loggedA(k).satPosLog.glonassStatus.position = 2.6e7 * (rand(S, 3) - 0.5);
+    loggedA(k).sysIdLog = [1 1 1 1 2 2 2 2]';
+    loggedM(k) = loggedA(k);  gM = g;  gM(9) = 2.2e7;  loggedM(k).prLog.gpsRange.geomRange = gM;   % five GPS slots: counts differ
+end
+fprintf('--- A through the pairing log ---\n');
+pA3 = spoofProfile(logA, tKf, loggedA);
+fprintf('--- A through a pairing log with one used slot too many ---\n');
+pA4 = spoofProfile(logA, tKf, loggedM);
 [logB, sysB] = makeLog(K, n, mMax, 1:5, 50, 60, -40);
 fprintf('--- B: -40 m on five of eight rows (a majority), epochs 50 to 60 ---\n');
 pB = spoofProfile(logB, tKf, sysB);
@@ -34,7 +51,9 @@ fprintf('--- C: clean ---\n');
 pC = spoofProfile(logC, tKf);
 okA = abs(pA.onset - tKf(80)) < 1e-9 && abs(pA.tEnd - tKf(140)) < 1e-9 && abs(pA.sizeOnset - 300) < 5 && pA.sysOff == 1 ...
    && pA.nOff(100) == 4 && abs(pA.perSys(100, 1) - 300) < 5 && abs(pA.perSys(100, 2)) < 5 ...
-   && abs(pA2.onset - tKf(80)) < 1e-9 && isnan(pA2.sysOff) && abs(pA2.sizeOnset - 300) < 5;
+   && abs(pA2.onset - tKf(80)) < 1e-9 && isnan(pA2.sysOff) && abs(pA2.sizeOnset - 300) < 5 ...
+   && pA3.sysOff == 1 && pA3.nSysMismatch == 0 && abs(pA3.perSys(100, 1) - 300) < 5 && abs(pA3.perSys(100, 2)) < 5 ...
+   && pA4.nSysMismatch == K;
 okB = abs(pB.onset - tKf(50)) < 1e-9 && abs(pB.tEnd - tKf(60)) < 1e-9 && abs(pB.sizeOnset + 40) < 5 && pB.nOff(55) == 5 && pB.sysOff == 1;
 okC = isnan(pC.onset) && ~any(pC.present);
 if okA && okB && okC, fprintf('=== test_spoofProfile PASS ===\n'); else, fprintf('okA %d okB %d okC %d\n=== test_spoofProfile FAIL ===\n', okA, okB, okC); end

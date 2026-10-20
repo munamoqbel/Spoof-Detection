@@ -7,6 +7,11 @@ function [prof] = spoofProfile(spfMeasLog, tKf, sysId)
 %   prof = spoofProfile(spfMeasLog, tKf, sysId)   sysId [K x MAX_MEAS]: the system of each row as the host built
 %                                                 the rows (0 or NaN = none). Adds the mean innovation per system
 %                                                 and names the system that carries the offset
+%   prof = spoofProfile(spfMeasLog, tKf, loggedData)   the host's pairing log instead (prLog / satPosLog per epoch,
+%                                                 as pairingCheck takes it): the used range slots in slot order give
+%                                                 the system of the record's range rows in the order the host built
+%                                                 them; the tool counts the epochs where the two counts differ and
+%                                                 warns when the host's row order cannot be the slot order
 %
 %   The innovation is measured against the host's prediction. In NOMINAL mode the filter follows a slow spoof and
 %   the innovation shows only its rate times the filter lag, so the offset read here is a lower bound; in COAST
@@ -25,15 +30,28 @@ K = numel(spfMeasLog);
 if nargin < 2 || isempty(tKf), tKf = 0.5 * (0:K-1)'; end
 tKf = tKf(:);
 if nargin < 3, sysId = []; end
-haveSys = ~isempty(sysId) && size(sysId, 1) == K;
-if ~isempty(sysId) && ~haveSys
-    fprintf('   sysId has %d rows, the log %d epochs: not used\n', size(sysId, 1), K);
+fromLog = isstruct(sysId) || iscell(sysId);
+prSlot = [];  sysSlot = [];
+if fromLog
+    [prSlot, ~, sysSlot] = pairingLogUnpack(sysId);
+    haveSys = size(prSlot, 1) == K;
+    if ~haveSys, fprintf('   the pairing log has %d epochs, the spfMeas records %d: not used\n', size(prSlot, 1), K); end
+else
+    haveSys = ~isempty(sysId) && size(sysId, 1) == K;
+    if ~isempty(sysId) && ~haveSys
+        fprintf('   sysId has %d rows, the log %d epochs: not used\n', size(sysId, 1), K);
+    end
 end
+nSysMismatch = 0;
 MIN_GAP = 10;                                                % m: a gap narrower than this is no second group
 
 nRange = zeros(K, 1);  nOff = zeros(K, 1);  meanOff = NaN(K, 1);  meanClean = NaN(K, 1);  spreadClean = NaN(K, 1);
 sysIds = [];
-if haveSys, sysIds = unique(sysId(isfinite(sysId) & sysId > 0))'; end
+if haveSys && fromLog
+    sysIds = unique(sysSlot(isfinite(sysSlot) & sysSlot > 0))';
+elseif haveSys
+    sysIds = unique(sysId(isfinite(sysId) & sysId > 0))';
+end
 perSys = NaN(K, numel(sysIds));  nPerSys = zeros(K, numel(sysIds));  offSys = zeros(K, numel(sysIds));
 for k = 1:K
     s = spfMeasLog(k);
@@ -46,9 +64,18 @@ for k = 1:K
     isPr  = normP > 0.5 & normV < 0.1 & sum(abs(H(:, 1:3)) > 1e-9, 2) >= 2;
     idx = find(isPr & isfinite(y));
     nRange(k) = numel(idx);
+    rowSys = NaN(1, numel(idx));                              % the system of each range row of this epoch
+    if haveSys && fromLog
+        usedSys = sysSlot(k, isfinite(prSlot(k, :)));         % the used range slots in slot order
+        if numel(usedSys) ~= numel(idx), nSysMismatch = nSysMismatch + 1; end
+        nn = min(numel(usedSys), numel(idx));
+        rowSys(1:nn) = usedSys(1:nn);
+    elseif haveSys
+        rowSys = sysId(k, idx);
+    end
     if haveSys
         for j = 1:numel(sysIds)
-            r = idx(sysId(k, idx) == sysIds(j));
+            r = idx(rowSys == sysIds(j));
             nPerSys(k, j) = numel(r);
             if ~isempty(r), perSys(k, j) = mean(y(r)); end
         end
@@ -66,7 +93,8 @@ for k = 1:K
         nOff(k) = numel(offG);  meanOff(k) = mean(offG);  meanClean(k) = mean(cleanG);
         if numel(cleanG) > 1, spreadClean(k) = std(cleanG); else, spreadClean(k) = 0; end
         if haveSys
-            for j = 1:numel(sysIds), offSys(k, j) = nnz(sysId(k, offRows) == sysIds(j)); end
+            offSysRow = rowSys(ismember(idx, offRows));
+            for j = 1:numel(sysIds), offSys(k, j) = nnz(offSysRow == sysIds(j)); end
         end
     else
         meanClean(k) = mean(yR);  spreadClean(k) = std(yR);
@@ -93,6 +121,15 @@ end
 
 fprintf('spoofProfile: %d epochs; range rows per epoch median %d; an offset group is 2 rows or more, %d m or more from the rest\n', ...
     K, round(median(nRange(nRange > 0))), MIN_GAP);
+if haveSys && fromLog
+    nWith = nnz(nRange > 0);
+    fprintf('   row systems from the pairing log: the used range slots in slot order; their count matched the record''s range rows on %d of %d epochs\n', ...
+        nWith - nSysMismatch, nWith);
+    if nSysMismatch > 0.1 * max(nWith, 1)
+        fprintf('   WARNING: the host does not build its range rows in slot order (or the pairing log and the records differ): the per-system\n');
+        fprintf('            numbers and the named system are unreliable; give sysId per row instead\n');
+    end
+end
 if ~isfinite(onset)
     fprintf('   no offset group on 3 consecutive epochs: nothing in the range innovations that a group of rows carries apart\n');
 else
@@ -122,5 +159,5 @@ else
 end
 prof = struct('t', tKf, 'nRange', nRange, 'nOff', nOff, 'offset', offset, 'meanOff', meanOff, 'meanClean', meanClean, ...
     'spreadClean', spreadClean, 'present', present, 'onset', onset, 'tEnd', tEnd, 'sizeOnset', sizeOnset, 'sizeMax', sizeMax, ...
-    'sysIds', sysIds, 'perSys', perSys, 'nPerSys', nPerSys, 'sysOff', sysOff);
+    'sysIds', sysIds, 'perSys', perSys, 'nPerSys', nPerSys, 'sysOff', sysOff, 'nSysMismatch', nSysMismatch);
 end

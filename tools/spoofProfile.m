@@ -1,4 +1,4 @@
-function [prof] = spoofProfile(spfMeasLog, tKf, sysId)
+function [prof] = spoofProfile(spfMeasLog, tKf, sysId, loggedClean)
 %SPOOFPROFILE  What a spoofed run did to the measurements, from the saved spfMeas records.
 %   prof = spoofProfile(spfMeasLog, tKf)          per epoch the range rows split into two groups where a gap in
 %                                                 their innovations is wider than the group spread; the group
@@ -12,6 +12,12 @@ function [prof] = spoofProfile(spfMeasLog, tKf, sysId)
 %                                                 the system of the record's range rows in the order the host built
 %                                                 them; the tool counts the epochs where the two counts differ and
 %                                                 warns when the host's row order cannot be the slot order
+%   prof = spoofProfile(spfMeasLog, tKf, loggedData, loggedClean)   the clean twin's pairing log as well: the
+%                                                 spoofed ranges minus the clean ones, per slot and epoch, are the
+%                                                 injection itself, read without any filter in the way. Valid when
+%                                                 the spoofed file is the clean file plus an injection, epoch for
+%                                                 epoch; the tool prints the injected offset per system and its
+%                                                 onset, end and size next to the innovation-based reading
 %
 %   The innovation is measured against the host's prediction. In NOMINAL mode the filter follows a slow spoof and
 %   the innovation shows only its rate times the filter lag, so the offset read here is a lower bound; in COAST
@@ -23,13 +29,15 @@ function [prof] = spoofProfile(spfMeasLog, tKf, sysId)
 %   Result: t, nRange, nOff (rows in the offset group), offset (its mean innovation minus the clean group's),
 %   meanOff, meanClean, spreadClean, present (offset group of 2 rows or more, 10 m or more away), onset and tEnd
 %   (first and last epoch of 3 consecutive present epochs), sizeOnset, sizeMax, sysIds and perSys [K x nSys]
-%   (mean range innovation per system), sysOff (the system holding most of the offset rows at onset).
+%   (mean range innovation per system), sysOff (the system holding most of the offset rows at onset), and with the
+%   clean twin: injSys, injOnset, injEnd, injSize and injMax per system, nSlotChanged.
 
 if iscell(spfMeasLog), spfMeasLog = [spfMeasLog{:}]; end
 K = numel(spfMeasLog);
 if nargin < 2 || isempty(tKf), tKf = 0.5 * (0:K-1)'; end
 tKf = tKf(:);
 if nargin < 3, sysId = []; end
+if nargin < 4, loggedClean = []; end
 fromLog = isstruct(sysId) || iscell(sysId);
 prSlot = [];  sysSlot = [];
 if fromLog
@@ -157,7 +165,56 @@ else
         fprintf('\n');
     end
 end
+%% the injection itself: spoofed ranges minus the clean twin's, per slot
+injSys = [];  injOnset = NaN;  injEnd = NaN;  injSize = NaN(1, 0);  injMax = NaN(1, 0);  nSlotChanged = NaN;
+if ~isempty(loggedClean)
+    if ~fromLog
+        fprintf('   the clean twin is used only with the spoofed pairing log as the third argument\n');
+    else
+        [prC, ~, sysC] = pairingLogUnpack(loggedClean);
+        if ~isequal(size(prC), size(prSlot))
+            fprintf('   the clean twin''s pairing log is %d x %d, the spoofed one %d x %d: not compared\n', size(prC), size(prSlot));
+        else
+            both = isfinite(prC) & isfinite(prSlot);
+            dPr  = prSlot - prC;  dPr(~both) = NaN;
+            nSlotChanged = nnz(xor(isfinite(prC), isfinite(prSlot)));
+            injSys = unique(sysSlot(both & sysSlot > 0))';
+            injMean = NaN(K, numel(injSys));  injRows = zeros(K, numel(injSys));
+            for j = 1:numel(injSys)
+                m = both & sysSlot == injSys(j);
+                for k = 1:K
+                    if any(m(k, :)), injMean(k, j) = mean(dPr(k, m(k, :)));  injRows(k, j) = nnz(m(k, :)); end
+                end
+            end
+            injPresent = any(abs(injMean) >= 1, 2);                 % an injection of 1 m or more on some system
+            run3i = conv(double(injPresent), ones(3, 1), 'valid') == 3;
+            if any(run3i)
+                kI = find(run3i, 1);  kE = find(run3i, 1, 'last') + 2;
+                injOnset = tKf(kI);  injEnd = tKf(kE);
+                injSize = mean(injMean(kI:min(kI + 2, K), :), 1);
+                [~, iM] = max(abs(injMean(kI:kE, :)), [], 1);
+                injMax = NaN(1, numel(injSys));
+                for j = 1:numel(injSys), injMax(j) = injMean(kI - 1 + iM(j), j); end
+                fprintf('   injection (spoofed ranges minus the clean twin''s, per used slot): onset %.2f s (epoch %d), end %.2f s (epoch %d), %.1f s long\n', ...
+                    injOnset, kI, injEnd, kE, injEnd - injOnset);
+                fprintf('   per system: %s\n', strjoin(arrayfun(@(j) sprintf('system %d: %+.1f m at onset, largest %+.1f m, %d slots', ...
+                    injSys(j), injSize(j), injMax(j), round(median(injRows(kI:kE, j)))), 1:numel(injSys), 'UniformOutput', false), '; '));
+                if nSlotChanged > 0
+                    fprintf('   %d slot-epochs are used in one file and not the other (satellites the spoof added or removed)\n', nSlotChanged);
+                end
+                pick = unique(round(linspace(kI, kE, min(12, kE - kI + 1))));
+                fprintf('   course of the injection: t [s]   mean offset per system [m]: %s\n', sprintf('%d ', injSys));
+                for k = pick
+                    fprintf('   %25.2f   %s\n', tKf(k), sprintf('%+10.1f ', injMean(k, :)));
+                end
+            else
+                fprintf('   injection (spoofed ranges minus the clean twin''s): none of 1 m or more on 3 consecutive epochs; the two files hold the same ranges\n');
+            end
+        end
+    end
+end
 prof = struct('t', tKf, 'nRange', nRange, 'nOff', nOff, 'offset', offset, 'meanOff', meanOff, 'meanClean', meanClean, ...
     'spreadClean', spreadClean, 'present', present, 'onset', onset, 'tEnd', tEnd, 'sizeOnset', sizeOnset, 'sizeMax', sizeMax, ...
-    'sysIds', sysIds, 'perSys', perSys, 'nPerSys', nPerSys, 'sysOff', sysOff, 'nSysMismatch', nSysMismatch);
+    'sysIds', sysIds, 'perSys', perSys, 'nPerSys', nPerSys, 'sysOff', sysOff, 'nSysMismatch', nSysMismatch, ...
+    'injSys', injSys, 'injOnset', injOnset, 'injEnd', injEnd, 'injSize', injSize, 'injMax', injMax, 'nSlotChanged', nSlotChanged);
 end

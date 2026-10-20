@@ -170,7 +170,9 @@ than the group spread, takes the group farther from zero as the offset
 group, and prints onset, end, size and rows of the offset and its course in
 time; with the system of each row it names the spoofed constellation. The
 offset is read whole while the gate coasts and as a lower bound while the
-filter follows a slow spoof.
+filter follows a slow spoof. With the pairing logs of the spoofed run and of
+its clean twin it also differences the ranges slot by slot, which is the
+injection itself with no filter in the way: onset, end and size per system.
 
 `tools/designConstants.m` is the offline design step (quickstart step 2) on
 recorded data: from the same spfMeas records it takes Eq. 20 per monitored

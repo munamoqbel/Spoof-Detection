@@ -43,6 +43,11 @@ fprintf('--- A through the pairing log ---\n');
 pA3 = spoofProfile(logA, tKf, loggedA);
 fprintf('--- A through a pairing log with one used slot too many ---\n');
 pA4 = spoofProfile(logA, tKf, loggedM);
+% the injection from the spoofed pairing log minus the clean one: +300 m on the GPS slots, epochs 80 to 140
+loggedS = loggedA;
+for k = 80:140, loggedS(k).prLog.gpsRange.geomRange([2 5 7 11]) = loggedA(k).prLog.gpsRange.geomRange([2 5 7 11]) + 300; end
+fprintf('--- A with the clean twin: the injection itself ---\n');
+pA5 = spoofProfile(logA, tKf, loggedS, loggedA);
 [logB, sysB] = makeLog(K, n, mMax, 1:5, 50, 60, -40);
 fprintf('--- B: -40 m on five of eight rows (a majority), epochs 50 to 60 ---\n');
 pB = spoofProfile(logB, tKf, sysB);
@@ -53,7 +58,9 @@ okA = abs(pA.onset - tKf(80)) < 1e-9 && abs(pA.tEnd - tKf(140)) < 1e-9 && abs(pA
    && pA.nOff(100) == 4 && abs(pA.perSys(100, 1) - 300) < 5 && abs(pA.perSys(100, 2)) < 5 ...
    && abs(pA2.onset - tKf(80)) < 1e-9 && isnan(pA2.sysOff) && abs(pA2.sizeOnset - 300) < 5 ...
    && pA3.sysOff == 1 && pA3.nSysMismatch == 0 && abs(pA3.perSys(100, 1) - 300) < 5 && abs(pA3.perSys(100, 2)) < 5 ...
-   && pA4.nSysMismatch == K;
+   && pA4.nSysMismatch == K ...
+   && abs(pA5.injOnset - tKf(80)) < 1e-9 && abs(pA5.injEnd - tKf(140)) < 1e-9 && abs(pA5.injSize(1) - 300) < 1e-6 ...
+   && abs(pA5.injSize(2)) < 1e-6 && pA5.nSlotChanged == 0;
 okB = abs(pB.onset - tKf(50)) < 1e-9 && abs(pB.tEnd - tKf(60)) < 1e-9 && abs(pB.sizeOnset + 40) < 5 && pB.nOff(55) == 5 && pB.sysOff == 1;
 okC = isnan(pC.onset) && ~any(pC.present);
 if okA && okB && okC, fprintf('=== test_spoofProfile PASS ===\n'); else, fprintf('okA %d okB %d okC %d\n=== test_spoofProfile FAIL ===\n', okA, okB, okC); end

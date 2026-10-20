@@ -6,7 +6,10 @@ function test_spoofProfile()
 % (all spoofed, no split possible) and all systems: the two-group reading finds no run of 3 epochs, the per-system
 % course shows the row set, and the reference-based profile from a consistent pairing log (clock ramp, inter-system
 % biases, 1 m code noise) reads the 600 m injection whole with its onset and end, the clock interpolated across the
-% GPS-only epochs. Run from anywhere: octave --no-gui --quiet --eval test_spoofProfile
+% GPS-only epochs. Then a position spoof (G): GPS ranges that describe a point 800 m north, 300 m west and 100 m
+% below the reference with a 50 m clock offset, one garbage slot-epoch (range and position of different
+% satellites), and a gate log for the timeline: the fitted position and clock must come back, in the innovations
+% and against the reference, with the bad slot dropped. Run from anywhere: octave --no-gui --quiet --eval test_spoofProfile
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'tools'));
 randn('seed', 9);  rand('seed', 9);
@@ -25,7 +28,10 @@ function [log, sysId] = makeLog(K, n, mMax, sysRows, offRows, kOn, kEnd, size, f
         for j = 1:nR, H(j, 1:3) = -u(j, :);  H(j, 16) = 1;  y(j) = 2 * randn; end                 % ranges
         for j = 1:nR, H(nR + j, 4:6) = -u(j, :);  H(nR + j, 17) = 1;  y(nR + j) = 0.05 * randn; end  % range rates
         H(2 * nR + 1, 3) = 1;  y(2 * nR + 1) = 1.5 * randn;                                       % pressure
-        if k >= kOn && k <= kEnd, y(offRows) = y(offRows) + size; end
+        if k >= kOn && k <= kEnd
+            if numel(size) == 3, y(offRows) = y(offRows) + H(offRows, 1:3) * size(:);   % a position spoof: per-row offset along the line of sight
+            else, y(offRows) = y(offRows) + size; end
+        end
         rows = [find(keep), nR + find(keep), 2 * nR + 1];                                        % compacted as the host builds them
         m = numel(rows);
         Hk = zeros(mMax, n);  yk = zeros(mMax, 1);  Hk(1:m, :) = H(rows, :);  yk(1:m) = y(rows);
@@ -106,6 +112,36 @@ end
 fprintf('--- F: 600 m on GPS, epochs 80 to 140, GPS rows only on the odd epochs; against the reference position ---\n');
 pF = spoofProfile(logF, tKf, loggedF, [], [lat0 lon0 h0]);
 
+%% G: a position spoof on GPS, epochs 60 to 120, every epoch with all systems; a garbage slot at epoch 70; a gate log
+dP = [800 -300 100];  dClk = 50;
+[logG, ~] = makeLog(K, n, mMax, [4 4 4], 1:4, 60, 120, dP, none);
+for k = 60:120, logG{k}.innovation(1:4) = logG{k}.innovation(1:4) + dClk; end
+C = [-sin(lat0) * cos(lon0), -sin(lat0) * sin(lon0), cos(lat0); -sin(lon0), cos(lon0), 0; -cos(lat0) * cos(lon0), -cos(lat0) * sin(lon0), -sin(lat0)];
+spoofEcef = refEcef + (C' * dP')';
+loggedG = loggedF;
+for k = 1:K
+    clk = 1500 + 30 * tKf(k);
+    ids = [];
+    for s = 1:3
+        g = zeros(S, 1);  pos = zeros(S, 3);
+        for j = usedF{s}
+            sat = satAll((s - 1) * S + j, :);
+            if s == 1 && k >= 60 && k <= 120, g(j) = norm(sat - spoofEcef) + clk + dClk + isbF(s) + 1.0 * randn;
+            else, g(j) = norm(sat - refEcef) + clk + isbF(s) + 1.0 * randn; end
+            pos(j, :) = sat;
+        end
+        if s == 2 && k == 70, pos(2, :) = 1.1 * satAll(S + 9, :); end  % the range of slot 2 with another satellite's position
+        loggedG(k).prLog.(prN{s}).geomRange = g;
+        loggedG(k).satPosLog.(spN{s}).position = pos;
+        ids = [ids; s * ones(numel(usedF{s}), 1)]; %#ok<AGROW>
+    end
+    loggedG(k).sysIdLog = ids;
+end
+spfLogG = struct('count', K, 'mode', ones(K, 1), 'evLatch', 62, 'evProbStart', 118, 'evVeto', [], 'evHandback', 124);
+spfLogG.mode(62:117) = 2;  spfLogG.mode(118:123) = 3;
+fprintf('--- G: a position spoof on GPS (800 N, -300 E, 100 D, clock 50 m), epochs 60 to 120; one garbage slot; gate log ---\n');
+pG = spoofProfile(logG, tKf, loggedG, [], [lat0 lon0 h0], spfLogG);
+
 okA = abs(pA.onset - tKf(80)) < 1e-9 && abs(pA.tEnd - tKf(140)) < 1e-9 && abs(pA.sizeOnset - 300) < 5 && pA.sysOff == 1 ...
    && pA.nOff(100) == 4 && abs(pA.perSys(100, 1) - 300) < 5 && abs(pA.perSys(100, 2)) < 5 ...
    && abs(pA2.onset - tKf(80)) < 1e-9 && isnan(pA2.sysOff) && abs(pA2.sizeOnset - 300) < 5 ...
@@ -118,6 +154,12 @@ okF = isnan(pF.onset) && pF.nSysMismatch == 0 && abs(pF.perSys(101, 1) - 600) < 
    && abs(pF.inj(100, 2)) < 5 && abs(pF.inj(100, 3)) < 5 && abs(pF.inj(101, 1) - 600) < 5 && pF.nSlots(101, 2) == 0 ...
    && abs(pF.clockGap(101) - 0.5) < 1e-9 && pF.clockGap(100) == 0 && max(max(abs(pF.inj(1:70, :)))) < 10 ...
    && abs(pF.isb(2) - 40) < 2 && abs(pF.isb(3) + 25) < 2;
-if okA && okB && okC && okF, fprintf('=== test_spoofProfile PASS ===\n');
-else, fprintf('okA %d okB %d okC %d okF %d\n=== test_spoofProfile FAIL ===\n', okA, okB, okC, okF); end
+fG = median(pG.fitRef(60:120, :), 1);  fI = median(pG.fitInn(60:120, :), 1);     % 4 rows per fit: single epochs scatter in D and clock
+okG = pG.injSys == 1 && abs(pG.injOnset - tKf(60)) < 1e-9 && abs(pG.injEnd - tKf(120)) < 1e-9 && pG.nBadSlot == 1 ...
+   && pG.nSlots(70, 2) == 3 && max(abs(fG(1:2) - dP(1:2))) < 5 && abs(fG(3) - dP(3)) < 10 && abs(fG(4) - dClk) < 10 && fG(5) < 3 && fG(6) == 4 ...
+   && pG.offSysInn == 1 && max(abs(fI(1:2) - dP(1:2))) < 5 && abs(fI(3) - dP(3)) < 10 && abs(fI(4) - dClk) < 10 && fI(6) == 4 ...
+   && max(abs(pG.fitRef(90, 1:2) - dP(1:2))) < 15 && abs(pG.fitRef(90, 3) - dP(3)) < 60 ...
+   && max(abs(pG.fitRef(30, 1:2))) < 15 && pG.fitRef(30, 6) == 4 && abs(pG.isb(2) - 40) < 2 && pF.injSys == 1;
+if okA && okB && okC && okF && okG, fprintf('=== test_spoofProfile PASS ===\n');
+else, fprintf('okA %d okB %d okC %d okF %d okG %d\n=== test_spoofProfile FAIL ===\n', okA, okB, okC, okF, okG); end
 end

@@ -1,4 +1,4 @@
-function [prof] = spoofProfile(spfMeasLog, tKf, sysId, tRef, posRef)
+function [prof] = spoofProfile(spfMeasLog, tKf, sysId, tRef, posRef, spfLog)
 %SPOOFPROFILE  What a spoofed run did to the measurements, from the saved spfMeas records and the pairing log.
 %   prof = spoofProfile(spfMeasLog, tKf)          per epoch the range rows split into two groups where a gap in
 %                                                 their innovations is wider than the group spread; the group
@@ -6,9 +6,10 @@ function [prof] = spoofProfile(spfMeasLog, tKf, sysId, tRef, posRef)
 %                                                 and rows of the offset, and its course in time
 %   prof = spoofProfile(spfMeasLog, tKf, sysId)   sysId [K x MAX_MEAS]: the system of each row as the host built
 %                                                 the rows (0 or NaN = none). Adds the mean innovation per system,
-%                                                 names the system that carries the offset, and prints the course
-%                                                 of the mean innovation per system with the host's row set epoch
-%                                                 by epoch over the stretch where some system is 10 m or more off
+%                                                 names the system that carries the offset, prints the course of
+%                                                 the mean innovation per system with the host's row set epoch by
+%                                                 epoch over the stretch where some system is 10 m or more off,
+%                                                 and fits the position and clock the off system's rows ask for
 %   prof = spoofProfile(spfMeasLog, tKf, loggedData)   the host's pairing log instead (prLog / satPosLog per epoch,
 %                                                 as pairingCheck takes it): the used range slots in slot order give
 %                                                 the system of the record's range rows in the order the host built
@@ -21,14 +22,20 @@ function [prof] = spoofProfile(spfMeasLog, tKf, sysId, tRef, posRef)
 %                                                 inter-system bias and the injection. The biases are run medians,
 %                                                 the clock is read on the epochs where two systems agree within
 %                                                 5 m and interpolated across the others, and what is left per
-%                                                 system is the injection: onset, end, size, system and course
+%                                                 system is the injection: onset, end, size, system and course,
+%                                                 and per epoch the position and clock the off system's ranges
+%                                                 describe (a least-squares fix on them), relative to the reference
+%   prof = spoofProfile(..., spfLog)              the gate log from SPF_logAppend as well: the timeline around the
+%                                                 spoof carries the gate mode under the row set, and the events
 %
 %   The innovation is measured against the host's prediction. In NOMINAL mode the filter follows a slow spoof and
 %   the innovation shows only its rate times the filter lag, so the offset read here is a lower bound; in COAST
 %   (host INS-only) the prediction is the coast and the innovation is the spoof offset plus the INS drift, so the
 %   offset is read whole. A step or a large push shows at full size at its first epoch either way. The two-group
 %   split needs rows of both kinds in the same record: an epoch whose rows are all spoofed shows no split, only
-%   the per-system course and the reference-based profile see it.
+%   the per-system course and the reference-based profile see it. A spoof that moves the position rather than the
+%   clock gives every satellite its own offset: the per-system mean then depends on which satellites are in the
+%   record, and the fitted position and clock are the right summary.
 %   Range rows are those with a unit line of sight in the position columns of H and nothing in the velocity
 %   columns (the pressure row, a single position entry, is left out).
 %
@@ -36,10 +43,12 @@ function [prof] = spoofProfile(spfMeasLog, tKf, sysId, tRef, posRef)
 %   meanOff, meanClean, spreadClean, present (offset group of 2 rows or more, 10 m or more away), onset and tEnd
 %   (first and last epoch of 3 consecutive present epochs), sizeOnset, sizeMax, sysIds, perSys and nPerSys
 %   [K x nSys] (mean range innovation per system and its rows), sysOff (the system holding most of the offset
-%   rows at onset), nSysMismatch; with the reference: inj [K x nSys] (the offset per system against the
-%   reference, clock and biases removed), nSlots [K x nSys], spread [K x nSys] (within the system), clock [K x 1],
-%   clockGap (distance in s to the nearest epoch the clock was read on), isb [1 x nSys], injSys, injOnset,
-%   injEnd, injSize, injMax.
+%   rows at onset), nSysMismatch, offSysInn (the system off in the innovations), fitInn [K x 6] (the position NED,
+%   clock, rms and rows the off system's innovations ask for); with the reference: inj [K x nSys] (the offset per
+%   system against the reference, clock and biases removed), nSlots [K x nSys], spread [K x nSys] (within the
+%   system), clock [K x 1], clockGap (distance in s to the nearest epoch the clock was read on), isb [1 x nSys],
+%   injSys, injOnset, injEnd, injSize, injMax, nBadSlot, fitRef [K x 6] (position NED, clock, rms, rows of the
+%   fix on the off system's ranges, relative to the reference).
 %   MATLAB desktop tool, not codegen. Runs under Octave.
 
 if iscell(spfMeasLog), spfMeasLog = [spfMeasLog{:}]; end
@@ -49,6 +58,7 @@ tKf = tKf(:);
 if nargin < 3, sysId = []; end
 if nargin < 4, tRef = []; end
 if nargin < 5, posRef = []; end
+if nargin < 6, spfLog = []; end
 fromLog = isstruct(sysId) || iscell(sysId);
 prSlot = [];  satSlot = [];  sysSlot = [];
 if fromLog
@@ -63,6 +73,7 @@ else
 end
 nSysMismatch = 0;
 MIN_GAP = 10;                                                % m: a gap narrower than this is no second group
+BAD_RES = 1e5;                                               % m: a range this far from its slot's geometry is not its satellite
 
 nRange = zeros(K, 1);  nOff = zeros(K, 1);  meanOff = NaN(K, 1);  meanClean = NaN(K, 1);  spreadClean = NaN(K, 1);
 sysIds = [];
@@ -73,6 +84,7 @@ elseif haveSys
 end
 nSys = numel(sysIds);
 perSys = NaN(K, nSys);  nPerSys = zeros(K, nSys);  offSys = zeros(K, nSys);
+rowsOf = cell(K, nSys);                                      % the record's range rows of each system
 for k = 1:K
     s = spfMeasLog(k);
     m = double(s.numMeas);
@@ -96,6 +108,7 @@ for k = 1:K
     if haveSys
         for j = 1:nSys
             r = idx(rowSys == sysIds(j));
+            rowsOf{k, j} = r;
             nPerSys(k, j) = numel(r);
             if ~isempty(r), perSys(k, j) = mean(y(r)); end
         end
@@ -127,7 +140,7 @@ onset = NaN;  tEnd = NaN;
 if isfinite(kOn), onset = tKf(kOn);  tEnd = tKf(kEnd); end
 sizeOnset = NaN;  sizeMax = NaN;  sysOff = NaN;
 if isfinite(kOn)
-    sizeOnset = mean(offset(kOn:min(kOn + 2, K)));
+    sizeOnset = median(offset(kOn:min(kOn + 2, K)));
     seg = kOn:kEnd;
     [~, iMax] = max(abs(offset(seg)));  sizeMax = offset(seg(iMax));
     if haveSys
@@ -152,7 +165,7 @@ if ~isfinite(onset)
 else
     fprintf('   onset        %10.2f s (epoch %d)\n', onset, kOn);
     fprintf('   end          %10.2f s (epoch %d), %.1f s long\n', tEnd, kEnd, tEnd - onset);
-    fprintf('   size at onset %+9.1f m (mean of the first 3 epochs), largest %+.1f m\n', sizeOnset, sizeMax);
+    fprintf('   size at onset %+9.1f m (median of the first 3 epochs), largest %+.1f m\n', sizeOnset, sizeMax);
     fprintf('   rows in the offset group at onset %d of %d range rows\n', nOff(kOn), nRange(kOn));
     if haveSys && isfinite(sysOff)
         fprintf('   the offset rows belong to system %d\n', sysOff);
@@ -175,19 +188,33 @@ else
     end
 end
 %% the mean innovation per system, epoch by epoch, where some system is off: the host's row set is visible here
+offSysInn = NaN;  fitInn = NaN(K, 6);  offInn = false(K, 1);
 if haveSys
-    [kA, kB] = runOf3(any(abs(perSys) >= MIN_GAP, 2));
+    offInn = any(abs(perSys) >= MIN_GAP, 2);
+    [kA, kB] = runOf3(offInn);
     if isfinite(kA)
+        kFirst = find(offInn, 1);
+        if kFirst < kA
+            fprintf('   first epoch with a system %d m or more off in the innovations: %.2f s (epoch %d); 3 in a row from %.2f s\n', MIN_GAP, tKf(kFirst), kFirst, tKf(kA));
+        end
         fprintf('   mean range innovation per system from %.2f s (epoch %d) to %.2f s (epoch %d), the stretch where some system is %d m or more off\n', ...
             tKf(kA), kA, tKf(kB), kB, MIN_GAP);
         fprintf('   (the first 8 epochs in a row, then spread to the end; a system without rows is a gap in the host''s row set):\n');
         printCourse(tKf, perSys, nPerSys, sysIds, kA, kB, {}, {});
         rowSets(nPerSys, perSys, sysIds, kA, kB, 'innovation');
+        cnt = sum(abs(perSys(kA:kB, :)) >= MIN_GAP, 1);
+        [~, jS] = max(cnt);  offSysInn = sysIds(jS);
+        for k = 1:K
+            fitInn(k, :) = fitRows(spfMeasLog(k), rowsOf{k, jS});
+        end
+        fprintf('   the position and clock the rows of system %d ask for, relative to the host''s prediction (least squares on the\n', offSysInn);
+        fprintf('   record''s rows of that system, 4 or more; rms = what the rows leave after the fit, 0 when exactly determined):\n');
+        printFit(tKf, fitInn, kA, kB);
     end
 end
 %% the profile against the reference position: no filter in the way
 inj = [];  nSlots = [];  spread = [];  clock = NaN(K, 1);  clockGap = NaN(K, 1);  isb = [];
-injSys = NaN;  injOnset = NaN;  injEnd = NaN;  injSize = NaN;  injMax = NaN;
+injSys = NaN;  injOnset = NaN;  injEnd = NaN;  injSize = NaN;  injMax = NaN;  nBadSlot = 0;  fitRef = NaN(K, 6);  offRef = false(K, 1);
 if ~isempty(posRef)
     if ~(haveSys && fromLog)
         fprintf('   the reference position is used only with the pairing log as the third argument\n');
@@ -196,12 +223,23 @@ if ~isempty(posRef)
     else
         refK = refAtEpochs(tRef, posRef, tKf);
         M = size(prSlot, 2);
-        res = NaN(K, M);
+        res = NaN(K, M);  los = NaN(K, M, 3);
         for k = 1:K
             if ~all(isfinite(refK(k, :))), continue; end
             sat = reshape(satSlot(k, :, :), M, 3);
-            rho = sqrt(sum((sat - repmat(refK(k, :), M, 1)).^2, 2));
+            d = sat - repmat(refK(k, :), M, 1);
+            rho = sqrt(sum(d.^2, 2));
             res(k, :) = prSlot(k, :) - rho';
+            los(k, :, :) = reshape(d ./ repmat(max(rho, 1), 1, 3), [1 M 3]);
+        end
+        bad = abs(res) > BAD_RES;
+        nBadSlot = nnz(bad);
+        if nBadSlot > 0
+            [kb, ~] = find(bad);
+            fprintf('   %d slot-epochs with a range more than %.0f km from the slot''s geometry dropped (first at %.2f s, epoch %d): there the range and the\n', ...
+                nBadSlot, BAD_RES / 1e3, tKf(min(kb)), min(kb));
+            fprintf('   position in the slot are not of the same satellite or instant\n');
+            res(bad) = NaN;
         end
         mS = NaN(K, nSys);  nSlots = zeros(K, nSys);  spread = NaN(K, nSys);
         for j = 1:nSys
@@ -256,7 +294,8 @@ if ~isempty(posRef)
             fprintf('   the clock read on %d of %d epochs with ranges (two systems within %.0f m), interpolated across the others\n', ...
                 numel(kAg), nnz(any(nSlots > 0, 2)), MIN_GAP / 2);
         end
-        [kI, kE] = runOf3(any(abs(inj) >= MIN_GAP, 2));
+        offRef = any(abs(inj) >= MIN_GAP, 2);
+        [kI, kE] = runOf3(offRef);
         if ~isfinite(kI)
             fprintf('   no system %d m or more off the reference on 3 consecutive epochs\n', MIN_GAP);
         else
@@ -264,11 +303,15 @@ if ~isempty(posRef)
             seg = kI:kE;
             cnt = sum(abs(inj(seg, :)) >= MIN_GAP, 1);
             [~, jS] = max(cnt);  injSys = sysIds(jS);
-            injSize = meanFinite(inj(kI:min(kI + 2, K), jS));
+            injSize = medianFinite(inj(kI:min(kI + 2, K), jS));
             v = inj(seg, jS);  [~, iM] = max(abs(v));  injMax = v(iM);
+            kFirst = find(offRef, 1);
+            if kFirst < kI
+                fprintf('   first epoch with a system %d m or more off the reference: %.2f s (epoch %d); 3 in a row from %.2f s\n', MIN_GAP, tKf(kFirst), kFirst, tKf(kI));
+            end
             fprintf('   onset        %10.2f s (epoch %d)\n', injOnset, kI);
             fprintf('   end          %10.2f s (epoch %d), %.1f s long\n', injEnd, kE, injEnd - injOnset);
-            fprintf('   size at onset %+9.1f m on system %d (mean of the first 3 epochs), largest %+.1f m\n', injSize, injSys, injMax);
+            fprintf('   size at onset %+9.1f m on system %d (median of the first 3 epochs), largest %+.1f m\n', injSize, injSys, injMax);
             others = setdiff(1:nSys, jS);
             if ~isempty(others)
                 fprintf('   the other systems in this stretch: median offset%s\n', sprintf(' system %d %+.1f m;', [sysIds(others); medianRows(inj(seg, others))]));
@@ -285,14 +328,105 @@ if ~isempty(posRef)
             printCourse(tKf, inj, nSlots, sysIds, kI, kE, {'clock [m]', sprintf('spread %d [m]', injSys)}, ...
                 {@(k) sprintf('%+11.1f%s', clock(k), ifelse(clockGap(k) > 0.3, 'i', ' ')), @(k) sprintf('%11.1f', spread(k, jS))});
             rowSets(nSlots, inj, sysIds, kI, kE, 'offset');
+            % the position and clock the off system's ranges describe: a least-squares fix on them per epoch
+            C = nedFrame(posRef(1, :));
+            for k = 1:K
+                cols = find(sysSlot(k, :) == sysIds(jS) & isfinite(res(k, :)));
+                if numel(cols) < 4, continue; end
+                u = reshape(los(k, cols, :), numel(cols), 3);
+                A = [-u, ones(numel(cols), 1)];
+                r = res(k, cols)' - clock(k);
+                x = A \ r;
+                e = A * x - r;
+                fitRef(k, :) = [(C * x(1:3))', x(4), sqrt(mean(e.^2)), numel(cols)];
+            end
+            fprintf('   the position and clock the ranges of system %d describe, relative to the reference (least squares on its used slots,\n', injSys);
+            fprintf('   4 or more; receiver clock removed; rms = what the ranges leave after the fit, 0 when exactly determined):\n');
+            printFit(tKf, fitRef, kI, kE);
+            f = fitRef(seg, :);  ok = isfinite(f(:, 1));
+            if any(ok)
+                fprintf('   over the stretch: median position %+.1f N %+.1f E %+.1f D m (horizontal %.1f m), clock %+.1f m, rms %.1f m; the position\n', ...
+                    median(f(ok, 1)), median(f(ok, 2)), median(f(ok, 3)), sqrt(median(f(ok, 1))^2 + median(f(ok, 2))^2), median(f(ok, 4)), median(f(ok, 5)));
+                fprintf('   moves within %.1f N %.1f E %.1f D m (10th to 90th percentile) on %d fitted epochs\n', ...
+                    pctRange(f(ok, 1)), pctRange(f(ok, 2)), pctRange(f(ok, 3)), nnz(ok));
+            end
         end
+    end
+end
+%% the timeline around the spoof: the row set of each epoch, and the gate mode under it
+flag = offInn | offRef;
+if haveSys && any(flag)
+    kF = find(flag, 1);  kL = find(flag, 1, 'last');
+    k1 = max(1, kF - 20);  k2 = min(K, kL + 20);
+    fprintf('   timeline from %.2f s (epoch %d) to %.2f s (epoch %d), one character per epoch, 50 per line: the record''s row set\n', tKf(k1), k1, tKf(k2), k2);
+    fprintf('   (. = no range rows, A = all %d systems, a digit = that system alone, x = some systems)', nSys);
+    modes = [];
+    if ~isempty(spfLog) && isstruct(spfLog) && isfield(spfLog, 'mode')
+        nL = numel(spfLog.mode);
+        if isfield(spfLog, 'count'), nL = min(nL, double(spfLog.count)); end
+        if nL == K
+            modes = spfLog.mode(1:K);
+            fprintf(', the gate mode under it (N nominal, C coast, P probation)');
+        else
+            fprintf('; the gate log has %d epochs, the records %d: no mode line', nL, K);
+        end
+    end
+    fprintf(':\n');
+    mixes = {};  mixCnt = [];
+    for k0 = k1:50:k2
+        kk = k0:min(k0 + 49, k2);
+        line = blanks(numel(kk));
+        for i = 1:numel(kk)
+            on = nPerSys(kk(i), :) > 0;
+            if ~any(on), line(i) = '.';
+            elseif all(on), line(i) = 'A';
+            elseif nnz(on) == 1, line(i) = char('0' + min(sysIds(on), 9));
+            else
+                line(i) = 'x';
+                name = strtrim(sprintf('%d ', sysIds(on)));
+                m = find(strcmp(mixes, name));
+                if isempty(m), mixes{end+1} = name;  mixCnt(end+1) = 1; else, mixCnt(m) = mixCnt(m) + 1; end %#ok<AGROW>
+            end
+        end
+        fprintf('   %9.2f  %s\n', tKf(k0), grouped(line));
+        if ~isempty(modes)
+            ml = blanks(numel(kk));
+            for i = 1:numel(kk)
+                switch round(modes(kk(i)))
+                    case 1, ml(i) = 'N';
+                    case 2, ml(i) = 'C';
+                    case 3, ml(i) = 'P';
+                    otherwise, ml(i) = '?';
+                end
+            end
+            fprintf('   %9s  %s\n', '', grouped(ml));
+        end
+    end
+    if nSys == 1, fprintf('   (one system: A and 1 are the same)\n'); end
+    if ~isempty(mixes)
+        fprintf('   x stands for:');
+        for m = 1:numel(mixes), fprintf(' systems %s on %d epochs;', mixes{m}, mixCnt(m)); end
+        fprintf('\n');
+    end
+    if ~isempty(modes)
+        ev = {'evLatch', 'latch'; 'evProbStart', 'probation start'; 'evVeto', 'probation vetoed'; 'evHandback', 'hand-back'};
+        parts = {};
+        for i = 1:size(ev, 1)
+            if isfield(spfLog, ev{i, 1})
+                for e = spfLog.(ev{i, 1})(:)'
+                    if e >= 1 && e <= K, parts{end+1} = sprintf('%s at %.2f s (epoch %d)', ev{i, 2}, tKf(e), e); end %#ok<AGROW>
+                end
+            end
+        end
+        if ~isempty(parts), fprintf('   gate events: %s\n', strjoin(parts, '; ')); end
     end
 end
 prof = struct('t', tKf, 'nRange', nRange, 'nOff', nOff, 'offset', offset, 'meanOff', meanOff, 'meanClean', meanClean, ...
     'spreadClean', spreadClean, 'present', present, 'onset', onset, 'tEnd', tEnd, 'sizeOnset', sizeOnset, 'sizeMax', sizeMax, ...
     'sysIds', sysIds, 'perSys', perSys, 'nPerSys', nPerSys, 'sysOff', sysOff, 'nSysMismatch', nSysMismatch, ...
+    'offSysInn', offSysInn, 'fitInn', fitInn, ...
     'inj', inj, 'nSlots', nSlots, 'spread', spread, 'clock', clock, 'clockGap', clockGap, 'isb', isb, ...
-    'injSys', injSys, 'injOnset', injOnset, 'injEnd', injEnd, 'injSize', injSize, 'injMax', injMax);
+    'injSys', injSys, 'injOnset', injOnset, 'injEnd', injEnd, 'injSize', injSize, 'injMax', injMax, 'nBadSlot', nBadSlot, 'fitRef', fitRef);
 end
 
 %------------------------------------------------------------------------
@@ -302,6 +436,31 @@ kOn = NaN;  kEnd = NaN;
 if numel(flag) < 3, return; end
 run3 = conv(double(flag(:)), ones(3, 1), 'valid') == 3;
 if any(run3), kOn = find(run3, 1);  kEnd = find(run3, 1, 'last') + 2; end
+end
+
+function [f] = fitRows(s, rows)
+% the position (in the convention of H's position columns) and clock the given rows of one record ask for:
+% least squares of the innovation on [H(:, 1:3), 1]; f = [pos(1:3), clock, rms, rows], NaN with fewer than 4 rows
+f = NaN(1, 6);
+if numel(rows) < 4, return; end
+A = [s.obsMatrix(rows, 1:3), ones(numel(rows), 1)];
+y = s.innovation(rows);
+if rank(A) < 4, return; end
+x = A \ y;
+e = A * x - y;
+f = [x', sqrt(mean(e.^2)), numel(rows)];
+end
+
+function printFit(tKf, fit, kA, kB)
+pick = unique([kA:min(kA + 7, kB), round(linspace(kA, kB, 8))]);
+fprintf('   %10s  %10s  %10s  %10s  %10s  %8s  %4s\n', 't [s]', 'N [m]', 'E [m]', 'D [m]', 'clock [m]', 'rms [m]', 'rows');
+for k = pick
+    if isfinite(fit(k, 1))
+        fprintf('   %10.2f  %+10.1f  %+10.1f  %+10.1f  %+10.1f  %8.1f  %4d\n', tKf(k), fit(k, 1:5), fit(k, 6));
+    else
+        fprintf('   %10.2f  %10s  %10s  %10s  %10s  %8s  %4s\n', tKf(k), '-', '-', '-', '-', '-', '<4');
+    end
+end
 end
 
 function printCourse(tKf, vals, nRows, sysIds, kA, kB, extraHdr, extraFcn)
@@ -343,6 +502,13 @@ end
 fprintf('\n');
 end
 
+function [s] = grouped(line)
+% the characters in groups of 10
+s = '';
+for i = 1:10:numel(line), s = [s, line(i:min(i + 9, numel(line))), ' ']; end %#ok<AGROW>
+s = strtrim(s);
+end
+
 function [refK] = refAtEpochs(tRef, posRef, tKf)
 % the reference position in ECEF at each epoch: one row for a stationary run, else interpolated on tRef
 K = numel(tKf);
@@ -368,6 +534,18 @@ N = a ./ sqrt(1 - e2 * sin(L).^2);
 e = [(N + h) .* cos(L) .* cos(l), (N + h) .* cos(L) .* sin(l), (N * (1 - e2) + h) .* sin(L)];
 end
 
+function [C] = nedFrame(p)
+% rows: the north, east and down unit vectors in ECEF at [lat lon h]
+L = p(1);  l = p(2);
+C = [-sin(L) * cos(l), -sin(L) * sin(l), cos(L); -sin(l), cos(l), 0; -cos(L) * cos(l), -cos(L) * sin(l), -sin(L)];
+end
+
+function [r] = pctRange(x)
+x = sort(x(isfinite(x)));
+if numel(x) < 2, r = 0; return; end
+r = x(max(1, round(0.9 * numel(x)))) - x(max(1, round(0.1 * numel(x))));
+end
+
 function [m] = medianRows(X)
 % the median of each column over its finite entries, NaN for a column without any
 m = NaN(1, size(X, 2));
@@ -377,11 +555,6 @@ end
 function [m] = medianFinite(x)
 x = x(isfinite(x));
 if isempty(x), m = NaN; else, m = median(x); end
-end
-
-function [m] = meanFinite(x)
-x = x(isfinite(x));
-if isempty(x), m = NaN; else, m = mean(x); end
 end
 
 function [s] = ifelse(c, a, b)

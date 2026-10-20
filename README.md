@@ -177,7 +177,13 @@ next to it, and with the pairing log and the reference position it reads
 the profile with no filter in the way: each range minus the geometric
 range from the reference leaves the receiver clock, read where two systems
 agree and interpolated elsewhere, the inter-system biases as run medians,
-and the offset per system, with its onset, end, size and course.
+and the offset per system, with its onset, end, size and course. A spoof
+that moves the position gives every satellite its own offset, so the tool
+also fits, per epoch, the position and clock the off system's rows ask for
+(in the innovations, relative to the host's prediction) and the position
+and clock its ranges describe (against the reference), and prints a
+timeline of the record's row set around the spoof with the gate mode under
+it when the gate log is given.
 
 `tools/designConstants.m` is the offline design step (quickstart step 2) on
 recorded data: from the same spfMeas records it takes Eq. 20 per monitored

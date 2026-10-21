@@ -181,12 +181,19 @@ and the offset per system, with its onset, end, size and course. A spoof
 that moves the position gives every satellite its own offset, so the tool
 also fits, per epoch, the position and clock the off system's rows ask for
 (in the innovations, relative to the host's prediction) and the position
-and clock its ranges describe (against the reference), and prints a
-timeline of the record's row set around the spoof with the gate mode under
-it when the gate log is given. Off epochs closer than 10 s form one
-stretch; every stretch is listed, the tables and the timeline follow the
-strongest, and the timeline says whether the log holds ranges the host did
-not use.
+and clock its ranges describe (against the reference), per system, with
+the fix in the minute before and after the stretch (a sky that is clean
+again reads near zero after), and prints a timeline of the record's row
+set around the spoof with the log's used slots and the gate mode under it
+when the gate log is given. Off epochs closer than 10 s form one stretch;
+every stretch is listed, the tables and the timeline follow the strongest,
+and the timeline says whether the log holds ranges the host did not use or
+flagged with corrValid false.
+
+`runCompare` ends the outage at the first logged P that falls by more than
+30% inside the given interval (the first update back, or a reset): the
+drift, the trace fit and the budget stop there, so a tReacq given too late
+does not pull post-hand-back samples into the INS-only fit.
 
 `tools/designConstants.m` is the offline design step (quickstart step 2) on
 recorded data: from the same spfMeas records it takes Eq. 20 per monitored

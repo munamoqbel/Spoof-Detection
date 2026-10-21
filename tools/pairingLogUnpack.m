@@ -1,7 +1,7 @@
-function [pr, satPos, sysId, nRej] = pairingLogUnpack(loggedData, pairing)
+function [pr, satPos, sysId, nRej, corrOff] = pairingLogUnpack(loggedData, pairing)
 %PAIRINGLOGUNPACK  The arrays pairingCheck needs, from the host's per-epoch log of the range rows.
-%   [pr, satPos, sysId, nRej] = pairingLogUnpack(loggedData)
-%   [pr, satPos, sysId, nRej] = pairingLogUnpack(loggedData, 'order')
+%   [pr, satPos, sysId, nRej, corrOff] = pairingLogUnpack(loggedData)
+%   [pr, satPos, sysId, nRej, corrOff] = pairingLogUnpack(loggedData, 'order')
 %     pairing 'slot' (default): the range in slot j pairs with the position in slot j
 %     pairing 'order': the i-th used range of a system pairs with the i-th live position row
 %     (norm above 1000 km) of that system, for a log whose ranges are compacted while the
@@ -25,6 +25,8 @@ function [pr, satPos, sysId, nRej] = pairingLogUnpack(loggedData, pairing)
 %     satPos [K x M x 3]  ECEF (m)
 %     sysId  [K x M]
 %     nRej   [K x nSys]   slots per system holding a range that is not used (satValid false)
+%     corrOff [K x nSys]  true where the constellation holds ranges but its corrValid flag (when the prLog
+%                         field has one) is false
 %   MATLAB desktop tool, not codegen. Runs under Octave.
 
 if nargin < 2 || isempty(pairing), pairing = 'slot'; end
@@ -48,7 +50,7 @@ for s = 1:nSys, slots(s) = numel(loggedData(k0).prLog.(prFields{s}).geomRange); 
 first = cumsum([0 slots(1:end-1)]);
 M = sum(slots);
 pr = NaN(K, M);  satPos = NaN(K, M, 3);  sysId = NaN(K, M);
-nUsed = zeros(K, nSys);  nIdLog = NaN(K, nSys);  nRej = zeros(K, nSys);
+nUsed = zeros(K, nSys);  nIdLog = NaN(K, nSys);  nRej = zeros(K, nSys);  corrOff = false(K, nSys);
 hasId = isfield(loggedData, 'sysIdLog');
 idVals = [];
 for k = 1:K
@@ -68,6 +70,10 @@ for k = 1:K
             used = used & logical(st.satValid(:));
         end
         nRej(k, s) = nnz(ranged & ~used);
+        pf = loggedData(k).prLog.(prFields{s});
+        if any(ranged) && isfield(pf, 'corrValid') && ~isempty(pf.corrValid) && ~all(logical(pf.corrValid(:)))
+            corrOff(k, s) = true;
+        end
         g(~used) = NaN;
         if byOrder
             live = find(sqrt(sum(p.^2, 2)) > 1e6 & all(isfinite(p), 2));   % position rows that hold a satellite
@@ -110,6 +116,9 @@ end
 fprintf('\n');
 if any(nRej(:))
     fprintf('pairingLogUnpack: ranges with satValid false, not used:%s\n', sprintf(' system %d on %d epochs;', [1:nSys; sum(nRej > 0, 1)]));
+end
+if any(corrOff(:))
+    fprintf('pairingLogUnpack: corrValid false while ranges are present:%s\n', sprintf(' system %d on %d epochs;', [1:nSys; sum(corrOff, 1)]));
 end
 if byOrder
     fprintf('pairingLogUnpack: ranges paired with the live position rows by order');

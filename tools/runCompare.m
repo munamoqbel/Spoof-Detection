@@ -464,6 +464,26 @@ else
     %% 2. state error at tOut
     iOut = find(t <= tOut, 1, 'last');
     iEnd = find(t < tReacq, 1, 'last');            % last INS-only sample before the first update
+    % a logged P that falls by more than 30% inside the outage is the first update back (or a reset): the
+    % record before the fall is the end of the coast, and the drift, the fit and the budget stop there
+    dropNote = '';
+    if ~isempty(Pkf)
+        iG = find(tPkf > t(iOut) & tPkf <= t(iEnd));
+        if numel(iG) >= 2
+            hG = sqrt(max(Pkf(iG, 1), 0) + max(Pkf(iG, 2), 0));
+            jDrop = find(hG(2:end) < 0.7 * hG(1:end-1), 1, 'last') + 1;
+            if ~isempty(jDrop)
+                tDrop = tPkf(iG(jDrop));
+                iEnd2 = find(t < tDrop, 1, 'last');
+                if ~isempty(iEnd2) && iEnd2 > iOut
+                    iEnd = iEnd2;
+                    dropNote = sprintf(['   (the logged sigma falls from %.1f to %.1f m at t = %.2f: the first update back, or a reset; the record before it,\n' ...
+                        '    t = %.2f, is taken as the end of the coast: the drift, the fit and the budget stop there. Give tReacq at or before\n' ...
+                        '    that update''s time tag)\n'], hG(jDrop - 1), hG(jDrop), tDrop, tPkf(iG(jDrop - 1)));
+                end
+            end
+        end
+    end
     T    = t(iEnd) - t(iOut);
     dv   = velErr(iOut, :)';
     db   = biasErr(iOut, :)';
@@ -521,19 +541,7 @@ else
     sigEnd = NaN(1, 3);  sigV = NaN(1, 3);  implied = NaN(1, 3);  tPe = NaN;  nGap = 0;
     if ~isempty(Pkf)
         iPe = find(tPkf <= t(iEnd), 1, 'last');                 % last logged P before the first update back
-        % a logged P that falls by more than 30% inside the outage is the first update back (or a reset): the
-        % record before the fall is the end of the coast, the records after it are not
-        iG = find(tPkf > t(iOut) & tPkf <= t(iEnd));
-        if numel(iG) >= 2
-            hG = sqrt(max(Pkf(iG, 1), 0) + max(Pkf(iG, 2), 0));
-            jDrop = find(hG(2:end) < 0.7 * hG(1:end-1), 1, 'last') + 1;
-            if ~isempty(jDrop)
-                iPe = iG(jDrop - 1);
-                fprintf('   (the logged sigma falls from %.1f to %.1f m at t = %.2f: the first update back, or a reset; the record before it,\n', ...
-                    hG(jDrop - 1), hG(jDrop), tPkf(iG(jDrop)));
-                fprintf('    t = %.2f, is taken as the end of the coast. Give tReacq at or before that update''s time tag)\n', tPkf(iPe));
-            end
-        end
+        if ~isempty(dropNote), fprintf('%s', dropNote); end
         if ~isempty(iPe)
             tPe = tPkf(iPe);
             sigEnd = sqrt(max(Pkf(iPe, 1:3), 0));

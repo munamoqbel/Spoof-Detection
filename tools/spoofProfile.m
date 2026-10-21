@@ -43,12 +43,13 @@ function [prof] = spoofProfile(spfMeasLog, tKf, sysId, tRef, posRef, spfLog)
 %   meanOff, meanClean, spreadClean, present (offset group of 2 rows or more, 10 m or more away), onset and tEnd
 %   (first and last epoch of 3 consecutive present epochs), sizeOnset, sizeMax, sysIds, perSys and nPerSys
 %   [K x nSys] (mean range innovation per system and its rows), sysOff (the system holding most of the offset
-%   rows at onset), nSysMismatch, offSysInn (the system off in the innovations), fitInn [K x 6] (the position NED,
-%   clock, rms and rows the off system's innovations ask for); with the reference: inj [K x nSys] (the offset per
+%   rows at onset), nSysMismatch, offSysInn (the system off in the innovations), fitInn [K x 6 x nSys] (the position NED,
+%   clock, rms and rows each system's innovations ask for); with the reference: inj [K x nSys] (the offset per
 %   system against the reference, clock and biases removed), nSlots [K x nSys], spread [K x nSys] (within the
 %   system), clock [K x 1], clockGap (distance in s to the nearest epoch the clock was read on), isb [1 x nSys],
-%   injSys, injOnset, injEnd, injSize, injMax, nBadSlot, fitRef [K x 6] (position NED, clock, rms, rows of the
-%   fix on the off system's ranges, relative to the reference), fitSign (1 when the two fits agree, -1 when they
+%   injSys, injOnset, injEnd, injSize, injMax, nBadSlot, fitRef [K x 6 x nSys] (position NED, clock, rms, rows of the
+%   fix on each system's ranges, relative to the reference), fixBefore and fixAfter [nSys x 4] (the fix medians N E D
+%   clock over the 60 s before and after the stretch), fitSign (1 when the two fits agree, -1 when they
 %   agree with the sign reversed, 0 otherwise), nRecNoRows and nLogNoSlots (epochs of the timeline window where
 %   the record has no range row but the log has used slots, and the reverse), stretchesInn and stretchesRef
 %   ([kStart kEnd nOff] per stretch; off epochs closer than 20 epochs form one stretch, the tables and the
@@ -65,9 +66,9 @@ if nargin < 5, posRef = []; end
 if nargin < 6, spfLog = []; end
 fromLog = isstruct(sysId) || iscell(sysId);
 prSlot = [];  satSlot = [];  sysSlot = [];
-nRejSlot = [];
+nRejSlot = [];  corrOffSlot = [];
 if fromLog
-    [prSlot, satSlot, sysSlot, nRejSlot] = pairingLogUnpack(sysId);
+    [prSlot, satSlot, sysSlot, nRejSlot, corrOffSlot] = pairingLogUnpack(sysId);
     haveSys = size(prSlot, 1) == K;
     if ~haveSys, fprintf('   the pairing log has %d epochs, the spfMeas records %d: not used\n', size(prSlot, 1), K); end
 else
@@ -199,7 +200,7 @@ else
     end
 end
 %% the mean innovation per system, epoch by epoch, where some system is off: the host's row set is visible here
-offSysInn = NaN;  fitInn = NaN(K, 6);  offInn = false(K, 1);  stInn = zeros(0, 3);  kA = NaN;  kB = NaN;
+offSysInn = NaN;  fitInn = NaN(K, 6, nSys);  offInn = false(K, 1);  stInn = zeros(0, 3);  kA = NaN;  kB = NaN;
 if haveSys
     offInn = any(abs(perSys) >= MIN_GAP, 2);
     [stInn, iS] = stretches(offInn, max(abs(perSys), [], 2), STRETCH_GAP);
@@ -212,18 +213,20 @@ if haveSys
         rowSets(nPerSys, perSys, sysIds, kA, kB, 'innovation');
         cnt = sum(abs(perSys(kA:kB, :)) >= MIN_GAP, 1);
         [~, jS] = max(cnt);  offSysInn = sysIds(jS);
-        for k = 1:K
-            fitInn(k, :) = fitRows(spfMeasLog(k), rowsOf{k, jS});
+        for j = 1:nSys
+            for k = 1:K, fitInn(k, :, j) = fitRows(spfMeasLog(k), rowsOf{k, j}); end
         end
-        fprintf('   the position and clock the rows of system %d ask for, relative to the host''s prediction (least squares on the\n', offSysInn);
-        fprintf('   record''s rows of that system, 4 or more; rms = what the rows leave after the fit, 0 when exactly determined):\n');
-        printFit(tKf, fitInn, kA, kB);
+        fprintf('   the position and clock the rows of each system ask for, relative to the host''s prediction (least squares on the record''s\n');
+        fprintf('   rows of that system, 4 or more; rms = what the rows leave after the fit, 0 when exactly determined); medians over the stretch:\n');
+        printFitSummary(tKf, fitInn, sysIds, kA, kB);
+        fprintf('   per epoch for system %d:\n', offSysInn);
+        printFit(tKf, fitInn(:, :, jS), kA, kB);
     end
 end
 %% the profile against the reference position: no filter in the way
 inj = [];  nSlots = [];  spread = [];  clock = NaN(K, 1);  clockGap = NaN(K, 1);  isb = [];
-injSys = NaN;  injOnset = NaN;  injEnd = NaN;  injSize = NaN;  injMax = NaN;  nBadSlot = 0;  fitRef = NaN(K, 6);  offRef = false(K, 1);
-stRef = zeros(0, 3);  kI = NaN;  kE = NaN;
+injSys = NaN;  injOnset = NaN;  injEnd = NaN;  injSize = NaN;  injMax = NaN;  nBadSlot = 0;  fitRef = NaN(K, 6, nSys);  offRef = false(K, 1);
+stRef = zeros(0, 3);  kI = NaN;  kE = NaN;  jSref = 0;  fixBefore = NaN(nSys, 4);  fixAfter = NaN(nSys, 4);
 if ~isempty(posRef)
     if ~(haveSys && fromLog)
         fprintf('   the reference position is used only with the pairing log as the third argument\n');
@@ -316,7 +319,7 @@ if ~isempty(posRef)
             injOnset = tKf(kI);  injEnd = tKf(kE);
             seg = kI:kE;
             cnt = sum(abs(inj(seg, :)) >= MIN_GAP, 1);
-            [~, jS] = max(cnt);  injSys = sysIds(jS);
+            [~, jS] = max(cnt);  injSys = sysIds(jS);  jSref = jS;
             injSize = medianFinite(inj(kI:min(kI + 2, K), jS));
             v = inj(seg, jS);  [~, iM] = max(abs(v));  injMax = v(iM);
             fprintf('   onset        %10.2f s (epoch %d), the strongest stretch\n', injOnset, kI);
@@ -338,55 +341,65 @@ if ~isempty(posRef)
             printCourse(tKf, inj, nSlots, sysIds, kI, kE, {'clock [m]', sprintf('spread %d [m]', injSys)}, ...
                 {@(k) sprintf('%+11.1f%s', clock(k), ifelse(clockGap(k) > 0.3, 'i', ' ')), @(k) sprintf('%11.1f', spread(k, jS))});
             rowSets(nSlots, inj, sysIds, kI, kE, 'offset');
-            % the position and clock the off system's ranges describe: a least-squares fix on them per epoch
+            % the position and clock each system's ranges describe: a least-squares fix on them per epoch
             C = nedFrame(posRef(1, :));
-            for k = 1:K
-                cols = find(sysSlot(k, :) == sysIds(jS) & isfinite(res(k, :)));
-                if numel(cols) < 4, continue; end
-                u = reshape(los(k, cols, :), numel(cols), 3);
-                A = [-u, ones(numel(cols), 1)];
-                r = res(k, cols)' - clock(k);
-                x = A \ r;
-                e = A * x - r;
-                fitRef(k, :) = [(C * x(1:3))', x(4), sqrt(mean(e.^2)), numel(cols)];
+            for j = 1:nSys
+                for k = 1:K
+                    cols = find(sysSlot(k, :) == sysIds(j) & isfinite(res(k, :)));
+                    if numel(cols) < 4, continue; end
+                    u = reshape(los(k, cols, :), numel(cols), 3);
+                    A = [-u, ones(numel(cols), 1)];
+                    r = res(k, cols)' - clock(k) - isb(j);
+                    x = A \ r;
+                    e = A * x - r;
+                    fitRef(k, :, j) = [(C * x(1:3))', x(4), sqrt(mean(e.^2)), numel(cols)];
+                end
             end
-            fprintf('   the position and clock the ranges of system %d describe, relative to the reference (least squares on its used slots,\n', injSys);
-            fprintf('   4 or more; receiver clock removed; rms = what the ranges leave after the fit, 0 when exactly determined):\n');
-            printFit(tKf, fitRef, kI, kE);
-            f = fitRef(seg, :);  ok = isfinite(f(:, 1));
+            fprintf('   the position and clock the ranges of each system describe, relative to the reference (least squares on its used slots,\n');
+            fprintf('   4 or more; receiver clock removed; rms = what the ranges leave after the fit, 0 when exactly determined); medians over the stretch:\n');
+            printFitSummary(tKf, fitRef, sysIds, kI, kE);
+            fprintf('   per epoch for system %d:\n', injSys);
+            printFit(tKf, fitRef(:, :, jS), kI, kE);
+            f = fitRef(seg, :, jS);  ok = isfinite(f(:, 1));
             if any(ok)
-                fprintf('   over the stretch: median position %+.1f N %+.1f E %+.1f D m (horizontal %.1f m), clock %+.1f m, rms %.1f m; the position\n', ...
-                    median(f(ok, 1)), median(f(ok, 2)), median(f(ok, 3)), sqrt(median(f(ok, 1))^2 + median(f(ok, 2))^2), median(f(ok, 4)), median(f(ok, 5)));
-                fprintf('   moves within %.1f N %.1f E %.1f D m (10th to 90th percentile) on %d fitted epochs\n', ...
-                    pctRange(f(ok, 1)), pctRange(f(ok, 2)), pctRange(f(ok, 3)), nnz(ok));
+                fprintf('   system %d moves within %.1f N %.1f E %.1f D m (10th to 90th percentile) on %d fitted epochs\n', ...
+                    injSys, pctRange(f(ok, 1)), pctRange(f(ok, 2)), pctRange(f(ok, 3)), nnz(ok));
             end
+            % the fix before and after the stretch: a sky that is clean again reads near zero after it
+            nW = round(60 / max(medianFinite(diff(tKf)), 1e-3));
+            [fixBefore, fixAfter] = printBeforeAfter(tKf, fitRef, sysIds, kI, kE, nW);
         end
     end
 end
-%% the two fits side by side: same sign, opposite sign (the host's position columns carry +LOS), or apart
+%% the two fits side by side per system: same sign, opposite sign (the host's position columns carry +LOS), or apart
 fitSign = 0;
 inSeg = false(K, 1);
 if isfinite(kI), inSeg(kI:kE) = true; end
-both = isfinite(fitInn(:, 1)) & isfinite(fitRef(:, 1)) & offRef & inSeg;
-if nnz(both) >= 3
-    hI = median(fitInn(both, 1:2), 1);  hR = median(fitRef(both, 1:2), 1);
+for j = 1:nSys
+    both = isfinite(fitInn(:, 1, j)) & isfinite(fitRef(:, 1, j)) & offRef & inSeg;
+    if nnz(both) < 3, continue; end
+    hI = median(fitInn(both, 1:2, j), 1);  hR = median(fitRef(both, 1:2, j), 1);
     dSame = norm(hI - hR);  dOpp = norm(hI + hR);  sz = norm(hR);
     if sz < MIN_GAP
-        fitSign = 1;
-        fprintf('   both fits put the offset in the clock: position within %.0f m of the reference, clock %+.0f m in the innovations and %+.0f m\n', ...
-            max(norm(hI), sz), median(fitInn(both, 4)), median(fitRef(both, 4)));
-        fprintf('   in the ranges, on %d off epochs\n', nnz(both));
+        verdict = 1;
+        fprintf('   system %d: both fits put the offset in the clock, position within %.0f m of the reference, clock %+.0f m in the innovations\n', ...
+            sysIds(j), max(norm(hI), sz), median(fitInn(both, 4, j)));
+        fprintf('   and %+.0f m in the ranges, on %d off epochs\n', median(fitRef(both, 4, j)), nnz(both));
     elseif dOpp < 0.2 * sz && dOpp < dSame
-        fitSign = -1;
-        fprintf('   the two fits agree within %.0f m horizontal with the sign reversed: the position columns of the host''s H carry +LOS (its\n', dOpp);
-        fprintf('   position error state is estimate minus truth), so the innovation fit reads as minus the position the ranges describe\n');
+        verdict = -1;
+        fprintf('   system %d: the two fits agree within %.0f m horizontal with the sign reversed on %d off epochs (the position columns of the\n', ...
+            sysIds(j), dOpp, nnz(both));
+        fprintf('   host''s H carry +LOS: its position error state is estimate minus truth, so the innovation fit reads as minus the position)\n');
     elseif dSame < 0.2 * sz
-        fitSign = 1;
-        fprintf('   the two fits agree within %.0f m horizontal on %d off epochs\n', dSame, nnz(both));
+        verdict = 1;
+        fprintf('   system %d: the two fits agree within %.0f m horizontal on %d off epochs\n', sysIds(j), dSame, nnz(both));
     else
-        fprintf('   the two fits differ by %.0f m horizontal (reversed: %.0f m) on %d off epochs: the host''s prediction sat that far from the\n', dSame, dOpp, nnz(both));
-        fprintf('   reference, or the record''s rows are not the log''s slots\n');
+        verdict = 0;
+        fprintf('   system %d: the two fits differ by %.0f m horizontal (reversed: %.0f m) on %d off epochs: the host''s prediction sat that far\n', ...
+            sysIds(j), dSame, dOpp, nnz(both));
+        fprintf('   from the reference, or the record''s rows are not the log''s slots\n');
     end
+    if j == jSref, fitSign = verdict; end
 end
 %% the timeline around the spoof: the row set of each epoch, and the gate mode under it
 nRecNoRows = NaN;  nLogNoSlots = NaN;
@@ -457,6 +470,10 @@ if haveSys && isfinite(kF)
         else
             fprintf('   every range in the log was used in this window: no slot with a range and satValid false\n');
         end
+        nCorrW = sum(corrOffSlot(w, :), 1);
+        if any(nCorrW)
+            fprintf('   the log''s corrValid flag is false while ranges are present:%s\n', sprintf(' system %d on %d epochs;', [1:numel(nCorrW); nCorrW]));
+        end
     end
     if ~isempty(mixes)
         fprintf('   x stands for:');
@@ -482,7 +499,8 @@ prof = struct('t', tKf, 'nRange', nRange, 'nOff', nOff, 'offset', offset, 'meanO
     'offSysInn', offSysInn, 'fitInn', fitInn, 'fitSign', fitSign, 'nRecNoRows', nRecNoRows, 'nLogNoSlots', nLogNoSlots, ...
     'stretchesInn', stInn, 'stretchesRef', stRef, ...
     'inj', inj, 'nSlots', nSlots, 'spread', spread, 'clock', clock, 'clockGap', clockGap, 'isb', isb, ...
-    'injSys', injSys, 'injOnset', injOnset, 'injEnd', injEnd, 'injSize', injSize, 'injMax', injMax, 'nBadSlot', nBadSlot, 'fitRef', fitRef);
+    'injSys', injSys, 'injOnset', injOnset, 'injEnd', injEnd, 'injSize', injSize, 'injMax', injMax, 'nBadSlot', nBadSlot, 'fitRef', fitRef, ...
+    'fixBefore', fixBefore, 'fixAfter', fixAfter);
 end
 
 %------------------------------------------------------------------------
@@ -542,6 +560,48 @@ if rank(A) < 4, return; end
 x = A \ y;
 e = A * x - y;
 f = [x', sqrt(mean(e.^2)), numel(rows)];
+end
+
+function printFitSummary(tKf, fit, sysIds, kA, kB)
+% per system the medians of the fit over the epochs kA:kB that have one
+fprintf('   %-10s %10s %10s %10s %10s %10s %8s %7s\n', 'system', 'N [m]', 'E [m]', 'D [m]', 'horiz [m]', 'clock [m]', 'rms [m]', 'epochs');
+for j = 1:numel(sysIds)
+    f = fit(kA:kB, :, j);  ok = isfinite(f(:, 1));
+    if any(ok)
+        m = median(f(ok, :), 1);
+        fprintf('   %-10s %+10.1f %+10.1f %+10.1f %10.1f %+10.1f %8.1f %7d\n', sprintf('system %d', sysIds(j)), m(1), m(2), m(3), hypot(m(1), m(2)), m(4), m(5), nnz(ok));
+    else
+        fprintf('   %-10s no epoch with 4 rows or more between %.2f and %.2f s\n', sprintf('system %d', sysIds(j)), tKf(kA), tKf(kB));
+    end
+end
+end
+
+function [fb, fa] = printBeforeAfter(tKf, fit, sysIds, kI, kE, nW)
+% the medians of the fix per system over the nW epochs before the stretch and after it
+K = size(fit, 1);
+b = max(1, kI - nW):kI - 1;  a = kE + 1:min(K, kE + nW);
+fb = NaN(numel(sysIds), 4);  fa = NaN(numel(sysIds), 4);
+fprintf('   the fix before the stretch and after it, medians N E D clock [m] on the epochs with 4 slots or more (a sky that is clean\n');
+fprintf('   again reads near zero after):\n');
+if isempty(b), sb = 'none'; else, sb = sprintf('before, %.2f to %.2f s', tKf(b(1)), tKf(b(end))); end
+if isempty(a), sa = 'none'; else, sa = sprintf('after, %.2f to %.2f s', tKf(a(1)), tKf(a(end))); end
+fprintf('   %-10s %-44s %-44s\n', '', sb, sa);
+for j = 1:numel(sysIds)
+    parts = {'none', 'none'};
+    for side = 1:2
+        if side == 1, idx = b; else, idx = a; end
+        if isempty(idx), continue; end
+        f = fit(idx, :, j);  ok = isfinite(f(:, 1));
+        if any(ok)
+            m = median(f(ok, 1:4), 1);
+            if side == 1, fb(j, :) = m; else, fa(j, :) = m; end
+            parts{side} = sprintf('%+8.1f %+8.1f %+8.1f %+8.1f  (%d)', m(1), m(2), m(3), m(4), nnz(ok));
+        else
+            parts{side} = 'no fix';
+        end
+    end
+    fprintf('   %-10s %-44s %-44s\n', sprintf('system %d', sysIds(j)), parts{1}, parts{2});
+end
 end
 
 function printFit(tKf, fit, kA, kB)

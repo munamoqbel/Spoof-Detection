@@ -743,6 +743,8 @@ for j = 1:numel(sysIds)
         fprintf('   %-10s no epoch with 4 rows or more between %.2f and %.2f s\n', sprintf('system %d', sysIds(j)), tKf(kA), tKf(kB));
     end
 end
+fprintf('   (with every satellite above the horizon D and the %s trade off against each other: a pair of opposite signs is one small\n', clkName);
+fprintf('   term seen twice, the horizontal part and the rms are the firm numbers)\n');
 end
 
 function [fb, fa] = printBeforeAfter(tKf, fit, sysIds, kI, kE, nW, unit)

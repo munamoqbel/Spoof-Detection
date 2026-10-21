@@ -188,7 +188,12 @@ set around the spoof with the log's used slots and the gate mode under it
 when the gate log is given. Off epochs closer than 10 s form one stretch;
 every stretch is listed, the tables and the timeline follow the strongest,
 and the timeline says whether the log holds ranges the host did not use or
-flagged with corrValid false.
+flagged with corrValid false. The Doppler rows get the same reading: the
+velocity and clock drift the range-rate rows ask for, and against a
+stationary reference the log's range rates minus the line-of-sight
+satellite velocity, so a spoof that moves the position without the
+matching Doppler shows up as a velocity in the ranges and none in the
+rates.
 
 `runCompare` ends the outage at the first logged P that falls by more than
 30% inside the given interval (the first update back, or a reset): the

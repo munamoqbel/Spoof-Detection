@@ -9,7 +9,9 @@ function test_spoofProfile()
 % GPS-only epochs. Then a position spoof (G): GPS ranges that describe a point 800 m north, 300 m west and 100 m
 % below the reference with a 50 m clock offset, one garbage slot-epoch (range and position of different
 % satellites), and a gate log for the timeline: the fitted position and clock must come back, in the innovations
-% and against the reference, with the bad slot dropped. Run from anywhere: octave --no-gui --quiet --eval test_spoofProfile
+% and against the reference, with the bad slot dropped; the GPS rate rows carry a 0.5, -0.3, 0.1 m/s velocity and a 0.2 m/s
+% drift on top of a 0.3 m/s receiver clock drift, and the Doppler reading must return them from the innovations and from the
+% log's rates against the satellite velocities. Run from anywhere: octave --no-gui --quiet --eval test_spoofProfile
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'tools'));
 randn('seed', 9);  rand('seed', 9);
@@ -114,26 +116,39 @@ fprintf('--- F: 600 m on GPS, epochs 80 to 140, GPS rows only on the odd epochs;
 pF = spoofProfile(logF, tKf, loggedF, [], [lat0 lon0 h0]);
 
 %% G: a position spoof on GPS, epochs 60 to 120, every epoch with all systems; a garbage slot at epoch 70; a gate log
-dP = [800 -300 100];  dClk = 50;
+dP = [800 -300 100];  dClk = 50;  dV = [0.5 -0.3 0.1];  dDrift = 0.2;  drift0 = 0.3;
 [logG, ~] = makeLog(K, n, mMax, [4 4 4], 1:4, 60, 120, dP, none);
-for k = 60:120, logG{k}.innovation(1:4) = logG{k}.innovation(1:4) + dClk; end
+for k = 60:120
+    logG{k}.innovation(1:4) = logG{k}.innovation(1:4) + dClk;
+    Hk = logG{k}.obsMatrix;                                                   % the GPS rate rows sit at 13:16
+    logG{k}.innovation(13:16) = logG{k}.innovation(13:16) + Hk(13:16, 4:6) * dV' + dDrift;
+end
 C = [-sin(lat0) * cos(lon0), -sin(lat0) * sin(lon0), cos(lat0); -sin(lon0), cos(lon0), 0; -cos(lat0) * cos(lon0), -cos(lat0) * sin(lon0), -sin(lat0)];
 spoofEcef = refEcef + (C' * dP')';
+satVelAll = randn(S * 3, 3);  satVelAll = 3000 * satVelAll ./ repmat(sqrt(sum(satVelAll.^2, 2)), 1, 3);   % 3 km/s
+spoofVelEcef = (C' * dV')';
 loggedG = loggedF;
 for k = 1:K
     clk = 1500 + 30 * tKf(k);
     ids = [];
     for s = 1:3
-        g = zeros(S, 1);  pos = zeros(S, 3);
+        g = zeros(S, 1);  pos = zeros(S, 3);  rr = zeros(S, 1);  vel = zeros(S, 3);
         for j = usedF{s}
-            sat = satAll((s - 1) * S + j, :);
-            if s == 1 && k >= 60 && k <= 120, g(j) = norm(sat - spoofEcef) + clk + dClk + isbF(s) + 1.0 * randn;
-            else, g(j) = norm(sat - refEcef) + clk + isbF(s) + 1.0 * randn; end
-            pos(j, :) = sat;
+            sat = satAll((s - 1) * S + j, :);  vSat = satVelAll((s - 1) * S + j, :);  u = dirs((s - 1) * S + j, :);
+            if s == 1 && k >= 60 && k <= 120
+                g(j) = norm(sat - spoofEcef) + clk + dClk + isbF(s) + 1.0 * randn;
+                rr(j) = u * (vSat - spoofVelEcef)' + drift0 + dDrift + 0.05 * randn;
+            else
+                g(j) = norm(sat - refEcef) + clk + isbF(s) + 1.0 * randn;
+                rr(j) = u * vSat' + drift0 + 0.05 * randn;
+            end
+            pos(j, :) = sat;  vel(j, :) = vSat;
         end
         if s == 2 && k == 70, pos(2, :) = 1.1 * satAll(S + 9, :); end  % the range of slot 2 with another satellite's position
         loggedG(k).prLog.(prN{s}).geomRange = g;
+        loggedG(k).prLog.(prN{s}).geomRangeRate = rr;
         loggedG(k).satPosLog.(spN{s}).position = pos;
+        loggedG(k).satPosLog.(spN{s}).velocity = vel;
         if s == 2 && k >= 65 && k <= 68                                  % a range the host did not use
             v = false(S, 1);  v(usedF{2}) = true;  v(4) = false;
             loggedG(k).satPosLog.(spN{s}).satValid = v;
@@ -162,6 +177,12 @@ okF = isnan(pF.onset) && pF.nSysMismatch == 0 && abs(pF.perSys(101, 1) - 600) < 
    && abs(pF.clockGap(101) - 0.5) < 1e-9 && pF.clockGap(100) == 0 && max(max(abs(pF.inj(1:70, :)))) < 10 ...
    && abs(pF.isb(2) - 40) < 2 && abs(pF.isb(3) + 25) < 2;
 fG = median(pG.fitRef(60:120, :, 1), 1);  fI = median(pG.fitInn(60:120, :, 1), 1);   % 4 rows per fit: single epochs scatter in D and clock
+medFin = @(X) median(X(isfinite(X(:, 1)), :), 1);                                    % epochs without a fit are NaN rows
+fRI = medFin(pG.fitRateInn(60:120, :, 1));  fRR = medFin(pG.fitRateRef(60:120, :, 1));  fR2 = medFin(pG.fitRateRef(60:120, :, 2));
+okR = max(abs(fRI(1:2) - dV(1:2))) < 0.1 && abs(fRI(3) - dV(3)) < 0.2 && abs(fRI(4) - dDrift) < 0.2 ...
+   && max(abs(fRR(1:2) - dV(1:2))) < 0.1 && abs(fRR(3) - dV(3)) < 0.2 && abs(fRR(4) - dDrift) < 0.2 ...
+   && max(abs(fR2(1:2))) < 0.1 && abs(median(pG.rateDrift(isfinite(pG.rateDrift))) - drift0) < 0.05 ...
+   && max(abs(pG.rateAfter(1, 1:2))) < 0.1 && max(abs(pG.rateBefore(1, 1:2))) < 0.1;
 okG = pG.injSys == 1 && abs(pG.injOnset - tKf(60)) < 1e-9 && abs(pG.injEnd - tKf(120)) < 1e-9 && pG.nBadSlot == 1 ...
    && pG.nSlots(70, 2) == 3 && max(abs(fG(1:2) - dP(1:2))) < 5 && abs(fG(3) - dP(3)) < 10 && abs(fG(4) - dClk) < 10 && fG(5) < 3 && fG(6) == 4 ...
    && pG.offSysInn == 1 && max(abs(fI(1:2) - dP(1:2))) < 5 && abs(fI(3) - dP(3)) < 10 && abs(fI(4) - dClk) < 10 && fI(6) == 4 ...
@@ -172,6 +193,6 @@ okG = pG.injSys == 1 && abs(pG.injOnset - tKf(60)) < 1e-9 && abs(pG.injEnd - tKf
    && pG.fitSign == 1 && pG.nRecNoRows == 0 && pG.nLogNoSlots == 0 && pF.nRecNoRows == 0 ...
    && size(pF.stretchesInn, 1) == 2 && pF.stretchesInn(1, 1) == 1 && pF.stretchesInn(2, 1) == 80 && pF.offSysInn == 1 ...
    && size(pF.stretchesRef, 1) == 1 && nnz(nRejG(:, 2)) == 4 && all(nRejG(65:68, 2) == 1) && nnz(nRejG(:, [1 3])) == 0;
-if okA && okB && okC && okF && okG, fprintf('=== test_spoofProfile PASS ===\n');
-else, fprintf('okA %d okB %d okC %d okF %d okG %d\n=== test_spoofProfile FAIL ===\n', okA, okB, okC, okF, okG); end
+if okA && okB && okC && okF && okG && okR, fprintf('=== test_spoofProfile PASS ===\n');
+else, fprintf('okA %d okB %d okC %d okF %d okG %d okR %d\n=== test_spoofProfile FAIL ===\n', okA, okB, okC, okF, okG, okR); end
 end

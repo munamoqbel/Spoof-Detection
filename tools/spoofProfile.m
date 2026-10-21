@@ -27,6 +27,10 @@ function [prof] = spoofProfile(spfMeasLog, tKf, sysId, tRef, posRef, spfLog)
 %                                                 describe (a least-squares fix on them), relative to the reference
 %   prof = spoofProfile(..., spfLog)              the gate log from SPF_logAppend as well: the timeline around the
 %                                                 spoof carries the gate mode under the row set, and the events
+%   The Doppler rows are read the same way: the velocity and clock drift the range-rate rows ask for, relative to
+%   the host's prediction, and against a stationary reference the range rate minus the line-of-sight satellite
+%   velocity, with the receiver clock drift read where two systems agree and interpolated elsewhere. A spoofer that
+%   moves the position without the matching Doppler shows a velocity in the ranges' drift and none in the rates.
 %
 %   The innovation is measured against the host's prediction. In NOMINAL mode the filter follows a slow spoof and
 %   the innovation shows only its rate times the filter lag, so the offset read here is a lower bound; in COAST
@@ -49,7 +53,10 @@ function [prof] = spoofProfile(spfMeasLog, tKf, sysId, tRef, posRef, spfLog)
 %   system), clock [K x 1], clockGap (distance in s to the nearest epoch the clock was read on), isb [1 x nSys],
 %   injSys, injOnset, injEnd, injSize, injMax, nBadSlot, fitRef [K x 6 x nSys] (position NED, clock, rms, rows of the
 %   fix on each system's ranges, relative to the reference), fixBefore and fixAfter [nSys x 4] (the fix medians N E D
-%   clock over the 60 s before and after the stretch), fitSign (1 when the two fits agree, -1 when they
+%   clock over the 60 s before and after the stretch), fitRateInn and fitRateRef [K x 6 x nSys] (velocity NED, clock
+%   drift, rms, rows the rate rows ask for and the log's rates describe), perSysRate and nPerSysRate, rateDrift
+%   [K x 1] (the receiver clock drift read from the log), rateBefore and rateAfter [nSys x 4],
+%   fitSign (1 when the two fits agree, -1 when they
 %   agree with the sign reversed, 0 otherwise), nRecNoRows and nLogNoSlots (epochs of the timeline window where
 %   the record has no range row but the log has used slots, and the reverse), stretchesInn and stretchesRef
 %   ([kStart kEnd nOff] per stretch; off epochs closer than 20 epochs form one stretch, the tables and the
@@ -81,7 +88,9 @@ nSysMismatch = 0;
 MIN_GAP = 10;                                                % m: a gap narrower than this is no second group
 BAD_RES = 1e5;                                               % m: a range this far from its slot's geometry is not its satellite
 STRETCH_GAP = 20;                                            % epochs: off epochs closer than this belong to one stretch
+MIN_RATE = 0.5;                                              % m/s: two systems' rates closer than this agree on the clock drift
 gapS = STRETCH_GAP * medianFinite(diff(tKf));
+nW = round(60 / max(medianFinite(diff(tKf)), 1e-3));        % epochs in a minute, the before and after windows
 
 nRange = zeros(K, 1);  nOff = zeros(K, 1);  meanOff = NaN(K, 1);  meanClean = NaN(K, 1);  spreadClean = NaN(K, 1);
 sysIds = [];
@@ -97,6 +106,7 @@ if haveSys && fromLog
     for j = 1:nSys, nUsedSys(:, j) = sum(isfinite(prSlot) & sysSlot == sysIds(j), 2); end
 end
 rowsOf = cell(K, nSys);                                      % the record's range rows of each system
+nRate = zeros(K, 1);  perSysR = NaN(K, nSys);  nPerSysR = zeros(K, nSys);  rateRowsOf = cell(K, nSys);
 for k = 1:K
     s = spfMeasLog(k);
     m = double(s.numMeas);
@@ -109,6 +119,7 @@ for k = 1:K
     idx = find(isPr & isfinite(y));
     nRange(k) = numel(idx);
     rowSys = NaN(1, numel(idx));                              % the system of each range row of this epoch
+    usedSys = [];
     if haveSys && fromLog
         usedSys = sysSlot(k, isfinite(prSlot(k, :)));         % the used range slots in slot order
         if numel(usedSys) ~= numel(idx), nSysMismatch = nSysMismatch + 1; end
@@ -123,6 +134,26 @@ for k = 1:K
             rowsOf{k, j} = r;
             nPerSys(k, j) = numel(r);
             if ~isempty(r), perSys(k, j) = mean(y(r)); end
+        end
+    end
+    % the range-rate rows: a unit line of sight in the velocity columns, nothing in the position columns; the host
+    % builds them in the order of its range rows, so the same slot order gives their systems
+    isRr = normV > 0.5 & normP < 0.1 & sum(abs(H(:, 4:6)) > 1e-9, 2) >= 2;
+    idxR = find(isRr & isfinite(y));
+    nRate(k) = numel(idxR);
+    rowSysR = NaN(1, numel(idxR));
+    if haveSys && fromLog
+        nnR = min(numel(usedSys), numel(idxR));
+        rowSysR(1:nnR) = usedSys(1:nnR);
+    elseif haveSys
+        rowSysR = sysId(k, idxR);
+    end
+    if haveSys
+        for j = 1:nSys
+            r = idxR(rowSysR == sysIds(j));
+            rateRowsOf{k, j} = r;
+            nPerSysR(k, j) = numel(r);
+            if ~isempty(r), perSysR(k, j) = mean(y(r)); end
         end
     end
     if numel(idx) < 3, continue; end
@@ -200,7 +231,7 @@ else
     end
 end
 %% the mean innovation per system, epoch by epoch, where some system is off: the host's row set is visible here
-offSysInn = NaN;  fitInn = NaN(K, 6, nSys);  offInn = false(K, 1);  stInn = zeros(0, 3);  kA = NaN;  kB = NaN;
+offSysInn = NaN;  fitInn = NaN(K, 6, nSys);  fitRateInn = NaN(K, 6, nSys);  offInn = false(K, 1);  stInn = zeros(0, 3);  kA = NaN;  kB = NaN;
 if haveSys
     offInn = any(abs(perSys) >= MIN_GAP, 2);
     [stInn, iS] = stretches(offInn, max(abs(perSys), [], 2), STRETCH_GAP);
@@ -218,15 +249,30 @@ if haveSys
         end
         fprintf('   the position and clock the rows of each system ask for, relative to the host''s prediction (least squares on the record''s\n');
         fprintf('   rows of that system, 4 or more; rms = what the rows leave after the fit, 0 when exactly determined); medians over the stretch:\n');
-        printFitSummary(tKf, fitInn, sysIds, kA, kB);
+        printFitSummary(tKf, fitInn, sysIds, kA, kB, 'm', 'clock');
         fprintf('   per epoch for system %d:\n', offSysInn);
         printFit(tKf, fitInn(:, :, jS), kA, kB);
+        % the Doppler rows: the velocity and clock drift they ask for, relative to the host's prediction
+        for j = 1:nSys
+            for k = 1:K, fitRateInn(k, :, j) = fitRateRows(spfMeasLog(k), rateRowsOf{k, j}); end
+        end
+        if any(nRate > 0)
+            fprintf('   the Doppler rows: mean range-rate innovation per system over the stretch%s\n', ...
+                sprintf(' system %d %+.2f m/s on %d;', [sysIds; medianRows(perSysR(kA:kB, :)); sum(nPerSysR(kA:kB, :) > 0, 1)]));
+            fprintf('   the velocity and clock drift the range-rate rows of each system ask for, relative to the host''s prediction (least squares\n');
+            fprintf('   on the record''s rate rows, 4 or more); medians over the stretch:\n');
+            printFitSummary(tKf, fitRateInn, sysIds, kA, kB, 'm/s', 'drift');
+            printBeforeAfter(tKf, fitRateInn, sysIds, kA, kB, nW, 'm/s');
+        else
+            fprintf('   no range-rate rows in the records: no Doppler reading from the innovations\n');
+        end
     end
 end
 %% the profile against the reference position: no filter in the way
 inj = [];  nSlots = [];  spread = [];  clock = NaN(K, 1);  clockGap = NaN(K, 1);  isb = [];
 injSys = NaN;  injOnset = NaN;  injEnd = NaN;  injSize = NaN;  injMax = NaN;  nBadSlot = 0;  fitRef = NaN(K, 6, nSys);  offRef = false(K, 1);
 stRef = zeros(0, 3);  kI = NaN;  kE = NaN;  jSref = 0;  fixBefore = NaN(nSys, 4);  fixAfter = NaN(nSys, 4);  badEp = false(K, 1);
+fitRateRef = NaN(K, 6, nSys);  rateDrift = NaN(K, 1);  rateBefore = NaN(nSys, 4);  rateAfter = NaN(nSys, 4);
 if ~isempty(posRef)
     if ~(haveSys && fromLog)
         fprintf('   the reference position is used only with the pairing log as the third argument\n');
@@ -362,7 +408,7 @@ if ~isempty(posRef)
             end
             fprintf('   the position and clock the ranges of each system describe, relative to the reference (least squares on its used slots,\n');
             fprintf('   4 or more; receiver clock removed; rms = what the ranges leave after the fit, 0 when exactly determined); medians over the stretch:\n');
-            printFitSummary(tKf, fitRef, sysIds, kI, kE);
+            printFitSummary(tKf, fitRef, sysIds, kI, kE, 'm', 'clock');
             fprintf('   per epoch for system %d:\n', injSys);
             printFit(tKf, fitRef(:, :, jS), kI, kE);
             f = fitRef(seg, :, jS);  ok = isfinite(f(:, 1));
@@ -371,8 +417,72 @@ if ~isempty(posRef)
                     injSys, pctRange(f(ok, 1)), pctRange(f(ok, 2)), pctRange(f(ok, 3)), nnz(ok));
             end
             % the fix before and after the stretch: a sky that is clean again reads near zero after it
-            nW = round(60 / max(medianFinite(diff(tKf)), 1e-3));
-            [fixBefore, fixAfter] = printBeforeAfter(tKf, fitRef, sysIds, kI, kE, nW);
+            [fixBefore, fixAfter] = printBeforeAfter(tKf, fitRef, sysIds, kI, kE, nW, 'm');
+            % the Doppler against the reference: range rate minus the line-of-sight satellite velocity (a stationary
+            % reference has none of its own) leaves the receiver clock drift and what the spoof put in the rates
+            [prRate, satVel, haveRate] = logRates(sysId);
+            if ~haveRate
+                fprintf('   the log holds no range rate or no satellite velocity: no Doppler reading against the reference\n');
+            elseif size(posRef, 1) ~= 1
+                fprintf('   the Doppler reading against the reference needs a stationary reference (one posRef row): skipped\n');
+            elseif ~isequal(size(prRate), size(prSlot))
+                fprintf('   the log''s range rates are %d x %d, its ranges %d x %d: no Doppler reading\n', size(prRate), size(prSlot));
+            else
+                rr = NaN(K, M);
+                for k = 1:K
+                    okS = isfinite(prSlot(k, :)) & ~bad(k, :) & isfinite(prRate(k, :)) & all(isfinite(satVel(k, :, :)), 3);
+                    if ~any(okS), continue; end
+                    u = reshape(los(k, :, :), M, 3);  v = reshape(satVel(k, :, :), M, 3);
+                    rr(k, okS) = prRate(k, okS) - sum(u(okS, :) .* v(okS, :), 2)';
+                end
+                mR = NaN(K, nSys);
+                for j = 1:nSys
+                    cols = sysSlot == sysIds(j) & isfinite(rr);
+                    for k = 1:K
+                        v = rr(k, cols(k, :));
+                        if ~isempty(v), mR(k, j) = median(v); end
+                    end
+                end
+                agreeR = false(K, 1);
+                for k = 1:K
+                    v = mR(k, isfinite(mR(k, :)));
+                    if numel(v) >= 2
+                        close = abs(v - median(v)) < MIN_RATE / 2;
+                        if nnz(close) >= 2, agreeR(k) = true;  rateDrift(k) = mean(v(close)); end
+                    end
+                end
+                kAg = find(agreeR);
+                if numel(kAg) >= 2
+                    for k = 1:K
+                        if agreeR(k), continue; end
+                        [~, i] = min(abs(tKf(kAg) - tKf(k)));
+                        if k < kAg(1) || k > kAg(end), rateDrift(k) = rateDrift(kAg(i));
+                        else, rateDrift(k) = interp1(tKf(kAg), rateDrift(kAg), tKf(k), 'linear'); end
+                    end
+                else
+                    for k = 1:K, rateDrift(k) = medianFinite(mR(k, :)); end
+                end
+                for j = 1:nSys
+                    for k = 1:K
+                        cols = find(sysSlot(k, :) == sysIds(j) & isfinite(rr(k, :)));
+                        if numel(cols) < 4 || ~isfinite(rateDrift(k)), continue; end
+                        u = reshape(los(k, cols, :), numel(cols), 3);
+                        A = [-u, ones(numel(cols), 1)];
+                        r = rr(k, cols)' - rateDrift(k);
+                        x = A \ r;
+                        e = A * x - r;
+                        fitRateRef(k, :, j) = [(C * x(1:3))', x(4), sqrt(mean(e.^2)), numel(cols)];
+                    end
+                end
+                fprintf('   the Doppler against the reference: range rate minus the line-of-sight satellite velocity; the receiver clock drift read on\n');
+                fprintf('   %d of %d epochs (two systems within %.1f m/s), median %+.3f m/s; the rate offset per system over the stretch:%s\n', ...
+                    numel(kAg), nnz(any(isfinite(mR), 2)), MIN_RATE / 2, medianFinite(rateDrift(kAg)), ...
+                    sprintf(' system %d %+.2f m/s;', [sysIds; medianRows(mR(seg, :) - repmat(rateDrift(seg), 1, nSys))]));
+                fprintf('   the velocity and clock drift the rates of each system describe, relative to the stationary reference (least squares on its\n');
+                fprintf('   slots, 4 or more; receiver clock drift removed); medians over the stretch:\n');
+                printFitSummary(tKf, fitRateRef, sysIds, kI, kE, 'm/s', 'drift');
+                [rateBefore, rateAfter] = printBeforeAfter(tKf, fitRateRef, sysIds, kI, kE, nW, 'm/s');
+            end
         end
     end
 end
@@ -506,7 +616,9 @@ prof = struct('t', tKf, 'nRange', nRange, 'nOff', nOff, 'offset', offset, 'meanO
     'stretchesInn', stInn, 'stretchesRef', stRef, ...
     'inj', inj, 'nSlots', nSlots, 'spread', spread, 'clock', clock, 'clockGap', clockGap, 'isb', isb, ...
     'injSys', injSys, 'injOnset', injOnset, 'injEnd', injEnd, 'injSize', injSize, 'injMax', injMax, 'nBadSlot', nBadSlot, 'fitRef', fitRef, ...
-    'fixBefore', fixBefore, 'fixAfter', fixAfter, 'badEpochs', badEp);
+    'fixBefore', fixBefore, 'fixAfter', fixAfter, 'badEpochs', badEp, ...
+    'fitRateInn', fitRateInn, 'perSysRate', perSysR, 'nPerSysRate', nPerSysR, 'fitRateRef', fitRateRef, 'rateDrift', rateDrift, ...
+    'rateBefore', rateBefore, 'rateAfter', rateAfter);
 end
 
 %------------------------------------------------------------------------
@@ -568,27 +680,81 @@ e = A * x - y;
 f = [x', sqrt(mean(e.^2)), numel(rows)];
 end
 
-function printFitSummary(tKf, fit, sysIds, kA, kB)
+function [f] = fitRateRows(s, rows)
+% the velocity (in the convention of H's velocity columns) and clock drift the given rate rows of one record ask
+% for: least squares of the innovation on [H(:, 4:6), 1]; f = [vel(1:3), drift, rms, rows], NaN with fewer than 4
+f = NaN(1, 6);
+if numel(rows) < 4, return; end
+A = [s.obsMatrix(rows, 4:6), ones(numel(rows), 1)];
+y = s.innovation(rows);
+if rank(A) < 4, return; end
+x = A \ y;
+e = A * x - y;
+f = [x', sqrt(mean(e.^2)), numel(rows)];
+end
+
+function [prRate, satVel, have] = logRates(loggedData)
+% the range rate per slot and the satellite velocity per slot, in the slot layout of pairingLogUnpack; have is
+% false when the log carries no geomRangeRate or no satellite velocity
+if iscell(loggedData), loggedData = [loggedData{:}]; end
+K = numel(loggedData);  prRate = [];  satVel = [];  have = false;
+k0 = 1;
+while k0 < K && ~(isstruct(loggedData(k0).prLog) && isstruct(loggedData(k0).satPosLog)), k0 = k0 + 1; end
+prFields = fieldnames(loggedData(k0).prLog);  spFields = fieldnames(loggedData(k0).satPosLog);
+nSys = min(numel(prFields), numel(spFields));
+if ~isfield(loggedData(k0).prLog.(prFields{1}), 'geomRangeRate') || ~isfield(loggedData(k0).satPosLog.(spFields{1}), 'velocity'), return; end
+slots = zeros(1, nSys);
+for s = 1:nSys, slots(s) = numel(loggedData(k0).prLog.(prFields{s}).geomRange); end
+first = cumsum([0 slots(1:end-1)]);  M = sum(slots);
+prRate = NaN(K, M);  satVel = NaN(K, M, 3);
+for k = 1:K
+    if ~(isstruct(loggedData(k).prLog) && isstruct(loggedData(k).satPosLog)), continue; end
+    for s = 1:nSys
+        cols = first(s) + (1:slots(s));
+        pf = loggedData(k).prLog.(prFields{s});  st = loggedData(k).satPosLog.(spFields{s});
+        if ~isfield(pf, 'geomRangeRate') || ~isfield(st, 'velocity'), continue; end
+        r = double(pf.geomRangeRate(:));  v = double(st.velocity);
+        if numel(r) ~= slots(s) || size(v, 1) ~= slots(s) || size(v, 2) ~= 3, continue; end
+        prRate(k, cols) = r';  satVel(k, cols, :) = reshape(v, [1 slots(s) 3]);
+    end
+end
+spd = sqrt(sum(satVel.^2, 3));  spd = spd(isfinite(spd) & spd > 0);
+if isempty(spd), return; end
+if median(spd) < 10
+    satVel = satVel * 1e3;
+    fprintf('   (satellite velocities read as km/s, median %.2f: scaled to m/s)\n', median(spd));
+end
+have = any(isfinite(prRate(:)));
+end
+
+function printFitSummary(tKf, fit, sysIds, kA, kB, unit, clkName)
 % per system the medians of the fit over the epochs kA:kB that have one
-fprintf('   %-10s %10s %10s %10s %10s %10s %8s %7s\n', 'system', 'N [m]', 'E [m]', 'D [m]', 'horiz [m]', 'clock [m]', 'rms [m]', 'epochs');
+fprintf('   %-10s %10s %10s %10s %10s %10s %8s %7s\n', 'system', sprintf('N [%s]', unit), sprintf('E [%s]', unit), sprintf('D [%s]', unit), ...
+    'horiz', clkName, 'rms', 'epochs');
+dec = 1;
+if strcmp(unit, 'm/s'), dec = 3; end
 for j = 1:numel(sysIds)
     f = fit(kA:kB, :, j);  ok = isfinite(f(:, 1));
     if any(ok)
         m = median(f(ok, :), 1);
-        fprintf('   %-10s %+10.1f %+10.1f %+10.1f %10.1f %+10.1f %8.1f %7d\n', sprintf('system %d', sysIds(j)), m(1), m(2), m(3), hypot(m(1), m(2)), m(4), m(5), nnz(ok));
+        fprintf(['   %-10s %+10.' num2str(dec) 'f %+10.' num2str(dec) 'f %+10.' num2str(dec) 'f %10.' num2str(dec) 'f %+10.' num2str(dec) 'f %8.' num2str(dec) 'f %7d\n'], ...
+            sprintf('system %d', sysIds(j)), m(1), m(2), m(3), hypot(m(1), m(2)), m(4), m(5), nnz(ok));
     else
         fprintf('   %-10s no epoch with 4 rows or more between %.2f and %.2f s\n', sprintf('system %d', sysIds(j)), tKf(kA), tKf(kB));
     end
 end
 end
 
-function [fb, fa] = printBeforeAfter(tKf, fit, sysIds, kI, kE, nW)
+function [fb, fa] = printBeforeAfter(tKf, fit, sysIds, kI, kE, nW, unit)
 % the medians of the fix per system over the nW epochs before the stretch and after it
 K = size(fit, 1);
 b = max(1, kI - nW):kI - 1;  a = kE + 1:min(K, kE + nW);
 fb = NaN(numel(sysIds), 4);  fa = NaN(numel(sysIds), 4);
-fprintf('   the fix before the stretch and after it, medians N E D clock [m] on the epochs with 4 slots or more (a sky that is clean\n');
-fprintf('   again reads near zero after):\n');
+dec = 1;
+if strcmp(unit, 'm/s'), dec = 3; end
+fmt = ['%+8.' num2str(dec) 'f %+8.' num2str(dec) 'f %+8.' num2str(dec) 'f %+8.' num2str(dec) 'f  (%d)'];
+fprintf('   the same before the stretch and after it, medians N E D and the fourth term [%s] on the epochs with 4 rows or more (a sky that is\n', unit);
+fprintf('   clean again reads near zero after):\n');
 if isempty(b), sb = 'none'; else, sb = sprintf('before, %.2f to %.2f s', tKf(b(1)), tKf(b(end))); end
 if isempty(a), sa = 'none'; else, sa = sprintf('after, %.2f to %.2f s', tKf(a(1)), tKf(a(end))); end
 fprintf('   %-10s %-44s %-44s\n', '', sb, sa);
@@ -601,7 +767,7 @@ for j = 1:numel(sysIds)
         if any(ok)
             m = median(f(ok, 1:4), 1);
             if side == 1, fb(j, :) = m; else, fa(j, :) = m; end
-            parts{side} = sprintf('%+8.1f %+8.1f %+8.1f %+8.1f  (%d)', m(1), m(2), m(3), m(4), nnz(ok));
+            parts{side} = sprintf(fmt, m(1), m(2), m(3), m(4), nnz(ok));
         else
             parts{side} = 'no fix';
         end

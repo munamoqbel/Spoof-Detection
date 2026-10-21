@@ -226,7 +226,7 @@ end
 %% the profile against the reference position: no filter in the way
 inj = [];  nSlots = [];  spread = [];  clock = NaN(K, 1);  clockGap = NaN(K, 1);  isb = [];
 injSys = NaN;  injOnset = NaN;  injEnd = NaN;  injSize = NaN;  injMax = NaN;  nBadSlot = 0;  fitRef = NaN(K, 6, nSys);  offRef = false(K, 1);
-stRef = zeros(0, 3);  kI = NaN;  kE = NaN;  jSref = 0;  fixBefore = NaN(nSys, 4);  fixAfter = NaN(nSys, 4);
+stRef = zeros(0, 3);  kI = NaN;  kE = NaN;  jSref = 0;  fixBefore = NaN(nSys, 4);  fixAfter = NaN(nSys, 4);  badEp = false(K, 1);
 if ~isempty(posRef)
     if ~(haveSys && fromLog)
         fprintf('   the reference position is used only with the pairing log as the third argument\n');
@@ -245,7 +245,7 @@ if ~isempty(posRef)
             los(k, :, :) = reshape(d ./ repmat(max(rho, 1), 1, 3), [1 M 3]);
         end
         bad = abs(res) > BAD_RES;
-        nBadSlot = nnz(bad);
+        nBadSlot = nnz(bad);  badEp = any(bad, 2);
         if nBadSlot > 0
             [kb, ~] = find(bad);
             fprintf('   %d slot-epochs with a range more than %.0f km from the slot''s geometry dropped (first at %.2f s, epoch %d): there the range and the\n', ...
@@ -329,6 +329,11 @@ if ~isempty(posRef)
             if ~isempty(others)
                 fprintf('   the other systems in this stretch: median offset%s\n', sprintf(' system %d %+.1f m;', [sysIds(others); medianRows(inj(seg, others))]));
             end
+            if any(badEp(seg))
+                fprintf('   on %d of the %d epochs of this stretch at least one range lies beyond %.0f km from its slot''s geometry: the receiver''s output\n', ...
+                    nnz(badEp(seg)), numel(seg), BAD_RES / 1e3);
+                fprintf('   there is not a sky, and the medians above mix those epochs with the consistent ones (g in the timeline)\n');
+            end
             nI = nnz(clockGap(seg) > 0.3 & isfinite(inj(seg, jS)));
             if nI > 0
                 fprintf('   on %d of the %d epochs the clock is interpolated (gaps up to %.1f s): the offset there rests on the clock staying on its line\n', ...
@@ -408,7 +413,7 @@ if haveSys && isfinite(kF)
     k1 = max(1, kF - 20);  k2 = min(K, kL + 20);
     fprintf('   timeline around the strongest stretch, %.2f s (epoch %d) to %.2f s (epoch %d), one character per epoch, 50 per line: the record''s row set (rows)\n', tKf(k1), k1, tKf(k2), k2);
     fprintf('   (. = no range rows, A = all %d systems, a digit = that system alone, x = some systems)', nSys);
-    if fromLog, fprintf(', the log''s used slots under it where they differ (log)'); end
+    if fromLog, fprintf(', the log''s used slots under it where they differ (log; g = a range beyond %.0f km in the log)', BAD_RES / 1e3); end
     modes = [];
     if ~isempty(spfLog) && isstruct(spfLog) && isfield(spfLog, 'mode')
         nL = numel(spfLog.mode);
@@ -437,7 +442,8 @@ if haveSys && isfinite(kF)
                 if isempty(m), mixes{end+1} = name;  mixCnt(end+1) = 1; else, mixCnt(m) = mixCnt(m) + 1; end %#ok<AGROW>
             end
             onL = nUsedSys(kk(i), :) > 0;
-            if ~any(onL), logLine(i) = '.';
+            if badEp(kk(i)), logLine(i) = 'g';
+            elseif ~any(onL), logLine(i) = '.';
             elseif all(onL), logLine(i) = 'A';
             elseif nnz(onL) == 1, logLine(i) = char('0' + min(sysIds(onL), 9));
             else, logLine(i) = 'x'; end
@@ -500,7 +506,7 @@ prof = struct('t', tKf, 'nRange', nRange, 'nOff', nOff, 'offset', offset, 'meanO
     'stretchesInn', stInn, 'stretchesRef', stRef, ...
     'inj', inj, 'nSlots', nSlots, 'spread', spread, 'clock', clock, 'clockGap', clockGap, 'isb', isb, ...
     'injSys', injSys, 'injOnset', injOnset, 'injEnd', injEnd, 'injSize', injSize, 'injMax', injMax, 'nBadSlot', nBadSlot, 'fitRef', fitRef, ...
-    'fixBefore', fixBefore, 'fixAfter', fixAfter);
+    'fixBefore', fixBefore, 'fixAfter', fixAfter, 'badEpochs', badEp);
 end
 
 %------------------------------------------------------------------------

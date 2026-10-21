@@ -48,7 +48,9 @@ function [prof] = spoofProfile(spfMeasLog, tKf, sysId, tRef, posRef, spfLog)
 %   system against the reference, clock and biases removed), nSlots [K x nSys], spread [K x nSys] (within the
 %   system), clock [K x 1], clockGap (distance in s to the nearest epoch the clock was read on), isb [1 x nSys],
 %   injSys, injOnset, injEnd, injSize, injMax, nBadSlot, fitRef [K x 6] (position NED, clock, rms, rows of the
-%   fix on the off system's ranges, relative to the reference).
+%   fix on the off system's ranges, relative to the reference), fitSign (1 when the two fits agree, -1 when they
+%   agree with the sign reversed, 0 otherwise), nRecNoRows and nLogNoSlots (epochs of the timeline window where
+%   the record has no range row but the log has used slots, and the reverse).
 %   MATLAB desktop tool, not codegen. Runs under Octave.
 
 if iscell(spfMeasLog), spfMeasLog = [spfMeasLog{:}]; end
@@ -84,6 +86,10 @@ elseif haveSys
 end
 nSys = numel(sysIds);
 perSys = NaN(K, nSys);  nPerSys = zeros(K, nSys);  offSys = zeros(K, nSys);
+nUsedSys = zeros(K, nSys);                                   % the log's used slots per system
+if haveSys && fromLog
+    for j = 1:nSys, nUsedSys(:, j) = sum(isfinite(prSlot) & sysSlot == sysIds(j), 2); end
+end
 rowsOf = cell(K, nSys);                                      % the record's range rows of each system
 for k = 1:K
     s = spfMeasLog(k);
@@ -239,6 +245,9 @@ if ~isempty(posRef)
             fprintf('   %d slot-epochs with a range more than %.0f km from the slot''s geometry dropped (first at %.2f s, epoch %d): there the range and the\n', ...
                 nBadSlot, BAD_RES / 1e3, tKf(min(kb)), min(kb));
             fprintf('   position in the slot are not of the same satellite or instant\n');
+            kb = unique(kb);
+            nLeft = nnz(nRange(kb) < sum(isfinite(prSlot(kb, :)), 2));
+            fprintf('   on %d of these %d epochs the record holds fewer range rows than the log has used slots: the host left a row out\n', nLeft, numel(kb));
             res(bad) = NaN;
         end
         mS = NaN(K, nSys);  nSlots = zeros(K, nSys);  spread = NaN(K, nSys);
@@ -353,13 +362,38 @@ if ~isempty(posRef)
         end
     end
 end
+%% the two fits side by side: same sign, opposite sign (the host's position columns carry +LOS), or apart
+fitSign = 0;
+both = isfinite(fitInn(:, 1)) & isfinite(fitRef(:, 1)) & offRef;
+if nnz(both) >= 3
+    hI = median(fitInn(both, 1:2), 1);  hR = median(fitRef(both, 1:2), 1);
+    dSame = norm(hI - hR);  dOpp = norm(hI + hR);  sz = norm(hR);
+    if sz < MIN_GAP
+        fitSign = 1;
+        fprintf('   both fits put the offset in the clock: position within %.0f m of the reference, clock %+.0f m in the innovations and %+.0f m\n', ...
+            max(norm(hI), sz), median(fitInn(both, 4)), median(fitRef(both, 4)));
+        fprintf('   in the ranges, on %d off epochs\n', nnz(both));
+    elseif dOpp < 0.2 * sz && dOpp < dSame
+        fitSign = -1;
+        fprintf('   the two fits agree within %.0f m horizontal with the sign reversed: the position columns of the host''s H carry +LOS (its\n', dOpp);
+        fprintf('   position error state is estimate minus truth), so the innovation fit reads as minus the position the ranges describe\n');
+    elseif dSame < 0.2 * sz
+        fitSign = 1;
+        fprintf('   the two fits agree within %.0f m horizontal on %d off epochs\n', dSame, nnz(both));
+    else
+        fprintf('   the two fits differ by %.0f m horizontal (reversed: %.0f m) on %d off epochs: the host''s prediction sat that far from the\n', dSame, dOpp, nnz(both));
+        fprintf('   reference, or the record''s rows are not the log''s slots\n');
+    end
+end
 %% the timeline around the spoof: the row set of each epoch, and the gate mode under it
+nRecNoRows = NaN;  nLogNoSlots = NaN;
 flag = offInn | offRef;
 if haveSys && any(flag)
     kF = find(flag, 1);  kL = find(flag, 1, 'last');
     k1 = max(1, kF - 20);  k2 = min(K, kL + 20);
-    fprintf('   timeline from %.2f s (epoch %d) to %.2f s (epoch %d), one character per epoch, 50 per line: the record''s row set\n', tKf(k1), k1, tKf(k2), k2);
+    fprintf('   timeline from %.2f s (epoch %d) to %.2f s (epoch %d), one character per epoch, 50 per line: the record''s row set (rows)\n', tKf(k1), k1, tKf(k2), k2);
     fprintf('   (. = no range rows, A = all %d systems, a digit = that system alone, x = some systems)', nSys);
+    if fromLog, fprintf(', the log''s used slots under it where they differ (log)'); end
     modes = [];
     if ~isempty(spfLog) && isstruct(spfLog) && isfield(spfLog, 'mode')
         nL = numel(spfLog.mode);
@@ -375,7 +409,7 @@ if haveSys && any(flag)
     mixes = {};  mixCnt = [];
     for k0 = k1:50:k2
         kk = k0:min(k0 + 49, k2);
-        line = blanks(numel(kk));
+        line = blanks(numel(kk));  logLine = blanks(numel(kk));
         for i = 1:numel(kk)
             on = nPerSys(kk(i), :) > 0;
             if ~any(on), line(i) = '.';
@@ -387,8 +421,14 @@ if haveSys && any(flag)
                 m = find(strcmp(mixes, name));
                 if isempty(m), mixes{end+1} = name;  mixCnt(end+1) = 1; else, mixCnt(m) = mixCnt(m) + 1; end %#ok<AGROW>
             end
+            onL = nUsedSys(kk(i), :) > 0;
+            if ~any(onL), logLine(i) = '.';
+            elseif all(onL), logLine(i) = 'A';
+            elseif nnz(onL) == 1, logLine(i) = char('0' + min(sysIds(onL), 9));
+            else, logLine(i) = 'x'; end
         end
-        fprintf('   %9.2f  %s\n', tKf(k0), grouped(line));
+        fprintf('   %9.2f %-5s %s\n', tKf(k0), 'rows', grouped(line));
+        if fromLog && ~strcmp(line, logLine), fprintf('   %9s %-5s %s\n', '', 'log', grouped(logLine)); end
         if ~isempty(modes)
             ml = blanks(numel(kk));
             for i = 1:numel(kk)
@@ -399,10 +439,17 @@ if haveSys && any(flag)
                     otherwise, ml(i) = '?';
                 end
             end
-            fprintf('   %9s  %s\n', '', grouped(ml));
+            fprintf('   %9s %-5s %s\n', '', 'mode', grouped(ml));
         end
     end
     if nSys == 1, fprintf('   (one system: A and 1 are the same)\n'); end
+    if fromLog
+        w = k1:k2;
+        nRecNoRows = nnz(nRange(w) == 0 & any(nUsedSys(w, :) > 0, 2));
+        nLogNoSlots = nnz(nRange(w) > 0 & ~any(nUsedSys(w, :) > 0, 2));
+        fprintf('   in this window the record holds no range row on %d epochs where the log has used slots (the host built none), and rows on %d\n', nRecNoRows, nLogNoSlots);
+        fprintf('   epochs where the log has no used slot\n');
+    end
     if ~isempty(mixes)
         fprintf('   x stands for:');
         for m = 1:numel(mixes), fprintf(' systems %s on %d epochs;', mixes{m}, mixCnt(m)); end
@@ -424,7 +471,7 @@ end
 prof = struct('t', tKf, 'nRange', nRange, 'nOff', nOff, 'offset', offset, 'meanOff', meanOff, 'meanClean', meanClean, ...
     'spreadClean', spreadClean, 'present', present, 'onset', onset, 'tEnd', tEnd, 'sizeOnset', sizeOnset, 'sizeMax', sizeMax, ...
     'sysIds', sysIds, 'perSys', perSys, 'nPerSys', nPerSys, 'sysOff', sysOff, 'nSysMismatch', nSysMismatch, ...
-    'offSysInn', offSysInn, 'fitInn', fitInn, ...
+    'offSysInn', offSysInn, 'fitInn', fitInn, 'fitSign', fitSign, 'nRecNoRows', nRecNoRows, 'nLogNoSlots', nLogNoSlots, ...
     'inj', inj, 'nSlots', nSlots, 'spread', spread, 'clock', clock, 'clockGap', clockGap, 'isb', isb, ...
     'injSys', injSys, 'injOnset', injOnset, 'injEnd', injEnd, 'injSize', injSize, 'injMax', injMax, 'nBadSlot', nBadSlot, 'fitRef', fitRef);
 end

@@ -13,6 +13,7 @@ function runAllTests()
 %   9. tests/test_pairingCheck      pairingCheck on the host's per-epoch range log (tools/pairingLogUnpack)
 %  10. tests/test_covPropCheck     cross terms of the host's P+ from one epoch to the next (tools/covPropCheck)
 %  11. tests/test_spoofProfile     onset, end, size and system of a spoof from the spfMeas records (tools/spoofProfile)
+%  12. tests/test_spoofInject      the injection of a step, ramp or clock push into the host's slot arrays (tools/spoofInject)
 %
 % Each test is run in its own workspace (they may 'clear'); its console
 % output is captured and searched for its own PASS marker.
@@ -31,7 +32,8 @@ tests = { ...
     'test_designConstants',  '=== test_designConstants PASS ===';
     'test_pairingCheck',     '=== test_pairingCheck PASS ===';
     'test_covPropCheck',     '=== test_covPropCheck PASS ===';
-    'test_spoofProfile',     '=== test_spoofProfile PASS ==='};
+    'test_spoofProfile',     '=== test_spoofProfile PASS ===';
+    'test_spoofInject',      '=== test_spoofInject PASS ==='};
 
 fprintf('==============================================\n');
 fprintf('  Spoof-detection pre-integration tests\n');

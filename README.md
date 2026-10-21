@@ -196,6 +196,18 @@ satellite velocity, so a spoof that moves the position without the
 matching Doppler shows up as a velocity in the ranges and none in the
 rates.
 
+`tools/spoofInject.m` puts a spoof into one constellation's slot arrays of
+the host for one epoch, the ranges and range rates a receiver standing at
+the true position plus a position offset, moving with a velocity offset
+and carrying a clock offset and drift would measure, exact in the
+geometry; unused slots are left alone. `tools/spoofScenario.m` gives the
+offsets at time t for a position step, a position ramp with its matching
+velocity, a clock step or a clock ramp between tOn and tOff, and zero
+outside. Together they run the matrix on the clean twin: the host calls
+spoofScenario once per epoch and spoofInject once per constellation to
+spoof, after the corrected ranges are formed and before the rows are
+built, and spoofProfile reads the injection back from the ranges.
+
 `runCompare` ends the outage at the first logged P that falls by more than
 30% inside the given interval (the first update back, or a reset): the
 drift, the trace fit and the budget stop there, so a tReacq given too late

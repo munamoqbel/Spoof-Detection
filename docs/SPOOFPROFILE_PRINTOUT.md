@@ -1,8 +1,10 @@
 # Reading the spoofProfile printout
 
 `prof = spoofProfile(spfMeasLog, tKf, loggedData, tRef, posRef, spfLog)` prints
-its reading in the order below. Every block is answering one question; the
-question is given first, then the lines of that block and how to read them.
+its reading in the order below, each block under a separator line that
+carries the block's number and title as used here. Every block is answering
+one question; the question is given first, then the lines of that block and
+how to read them.
 Units are metres and seconds unless the header says m/s. "Epoch" is one 2 Hz
 gate call; "record" is the spfMeas the gate received at that epoch; "log" is
 the host's pairing log (the receiver's ranges per slot); "row" is one
@@ -48,7 +50,7 @@ record and the spoof is one common offset. A position spoof gives every
 satellite its own offset, so this block usually reads "no offset group" or
 a spurious short one; read the fits instead.
 
-## 4. Stretches (innovations)
+## 4. Stretches where a system is off (innovations)
 
     stretches with a system 10 m or more off (off epochs closer than 10 s belong to one stretch):
     1) 27.06 to 31.06 s (epochs 16 to 24), 9 off epochs, median innovation: system 3 -11.2 m on 9;
@@ -60,8 +62,10 @@ span, its off epochs, and the median innovation per system with the
 number of off epochs that system contributed. The strongest stretch gets
 the tables. A short stretch at the start of a run is usually the filter's
 own convergence, listed so that it does not pull the tables back there.
+Without any stretch the block says so and sections 5 to 7 are skipped;
+likewise section 8 without a stretch skips 9 and 10.
 
-## 5. Mean range innovation per system over the strongest stretch
+## 5. Mean range innovation per system over the strongest stretch, with the host's row set
 
     t [s]  system 1 [m] (rows)  system 2 [m] (rows)  system 3 [m] (rows)
     239.57        +42.9 ( 5)        +248.1 ( 2)       -600.5 ( 1)
@@ -80,7 +84,7 @@ stable number.
 How often each combination of systems had rows in the stretch, with the
 median innovation per system on those epochs.
 
-## 6. The position and clock the rows ask for (innovations)
+## 6. The position and clock the rows ask for, from the innovations
 
     system      N [m]    E [m]    D [m]   horiz   clock   rms  epochs
     system 1   +379.3  +1152.9    -0.7  1213.7   -71.5   0.0      13
@@ -101,7 +105,7 @@ vertical and the clock (or the drift) point almost the same way in the
 fit, so a pair of opposite signs is one small term seen twice. The
 horizontal part and the rms are the firm numbers.
 
-## 7. The Doppler rows (innovations)
+## 7. The Doppler rows, from the innovations
 
     the Doppler rows: mean range-rate innovation per system over the stretch system 1 +0.03 m/s on 16; ...
     system     N [m/s]   E [m/s]   D [m/s]   horiz   drift    rms  epochs
@@ -114,7 +118,7 @@ A static spoofed position reads near zero here; a spoofer dragging the
 position without matching Doppler reads as a velocity in section 11 and
 none here.
 
-## 8. The reference-based profile (only with posRef)
+## 8. Against the reference position: the offset per system (only with posRef)
 
     493 slot-epochs with a range more than 100 km from the slot's geometry dropped (first at 236.54 s, epoch 436): ...
     on 53 of these 53 epochs the record holds fewer range rows than the log has used slots: the host left a row out
@@ -163,7 +167,7 @@ interpolated, and the within-system spread of the strongest system.
 
 As in section 5, on the log's usable slots instead of the record's rows.
 
-## 9. The position and clock the ranges describe (reference)
+## 9. The position and clock the ranges describe, against the reference
 
     system      N [m]    E [m]    D [m]   horiz   clock   rms  epochs
     system 1   -381.2  -1158.4    -0.3  1219.5   +85.3   0.0      36
@@ -185,6 +189,8 @@ that is clean again reads near zero after; a difference between before
 and after is a shift in the receiver's output that the nav will follow at
 the hand-back.
 
+## 10. The Doppler against the reference
+
     the Doppler against the reference: ... the receiver clock drift read on 667 of 732 epochs ..., median +0.007 m/s; the rate offset per system over the stretch: ...
     system     N [m/s]   E [m/s]   D [m/s]   horiz   drift    rms  epochs
     the same before the stretch and after it ...
@@ -195,17 +201,17 @@ where two systems agree within 0.25 m/s) and the velocity and drift each
 system's rates describe. This needs the satellite velocity in satPosLog
 and a stationary reference; otherwise the tool says so and skips it.
 
-## 10. The two fits side by side
+## 11. The two fits side by side, per system
 
     system 1: the two fits agree within 6 m horizontal with the sign reversed on 13 off epochs (the position columns of the host's H carry +LOS ...)
 
 Per system, the innovation fit (section 6) against the reference fit
-(section 9) on the off epochs: the same, the same with the sign reversed
+(section 9) on the off epochs, printed only when both exist: the same, the same with the sign reversed
 (the host's position error state is estimate minus truth), both in the
 clock only, or apart by a stated distance (the host's prediction sat that
 far from the reference, or the record's rows are not the log's slots).
 
-## 11. The timeline
+## 12. The timeline: what the receiver gave, what the host built, what the gate did
 
     226.07 rows  AAAAAAAAA. .......... .......A.. .A...A.... ..A..A....
            log   AAAAAAAAA. .......... AggAggAAgg AAggAAgggA gAAgAAgggA

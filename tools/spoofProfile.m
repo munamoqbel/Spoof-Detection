@@ -75,6 +75,7 @@ fromLog = isstruct(sysId) || iscell(sysId);
 prSlot = [];  satSlot = [];  sysSlot = [];
 nRejSlot = [];  corrOffSlot = [];
 if fromLog
+    section(1, 'the log');
     [prSlot, satSlot, sysSlot, nRejSlot, corrOffSlot] = pairingLogUnpack(sysId);
     haveSys = size(prSlot, 1) == K;
     if ~haveSys, fprintf('   the pairing log has %d epochs, the spfMeas records %d: not used\n', size(prSlot, 1), K); end
@@ -192,6 +193,7 @@ if isfinite(kOn)
     end
 end
 
+section(2, 'the records and the systems of their rows');
 fprintf('spoofProfile: %d epochs; range rows per epoch median %d; an offset group is 2 rows or more, %d m or more from the rest\n', ...
     K, round(median(nRange(nRange > 0))), MIN_GAP);
 if haveSys && fromLog
@@ -203,6 +205,7 @@ if haveSys && fromLog
         fprintf('            numbers and the named system are unreliable; give sysId per row instead\n');
     end
 end
+section(3, 'two-group split of the range innovations');
 if ~isfinite(onset)
     fprintf('   no offset group on 3 consecutive epochs: nothing in the range innovations that a group of rows carries apart\n');
 else
@@ -235,9 +238,13 @@ offSysInn = NaN;  fitInn = NaN(K, 6, nSys);  fitRateInn = NaN(K, 6, nSys);  offI
 if haveSys
     offInn = any(abs(perSys) >= MIN_GAP, 2);
     [stInn, iS] = stretches(offInn, max(abs(perSys), [], 2), STRETCH_GAP);
-    if ~isempty(stInn)
+    section(4, 'stretches where a system is off, in the innovations');
+    if isempty(stInn)
+        fprintf('   no epoch where a system''s mean range innovation is %d m or more on 3 epochs: nothing off in the innovations (5 to 7 skipped)\n', MIN_GAP);
+    else
         printStretches(tKf, stInn, iS, offInn, perSys, sysIds, MIN_GAP, gapS, 'innovation');
         kA = stInn(iS, 1);  kB = stInn(iS, 2);
+        section(5, 'mean range innovation per system over the strongest stretch, with the host''s row set');
         fprintf('   mean range innovation per system over the strongest stretch, %.2f s (epoch %d) to %.2f s (epoch %d)\n', tKf(kA), kA, tKf(kB), kB);
         fprintf('   (the first 8 epochs in a row, then spread to the end; a system without rows is a gap in the host''s row set):\n');
         printCourse(tKf, perSys, nPerSys, sysIds, kA, kB, {}, {});
@@ -247,6 +254,7 @@ if haveSys
         for j = 1:nSys
             for k = 1:K, fitInn(k, :, j) = fitRows(spfMeasLog(k), rowsOf{k, j}); end
         end
+        section(6, 'the position and clock the rows ask for, from the innovations');
         fprintf('   the position and clock the rows of each system ask for, relative to the host''s prediction (least squares on the record''s\n');
         fprintf('   rows of that system, 4 or more; rms = what the rows leave after the fit, 0 when exactly determined); medians over the stretch:\n');
         printFitSummary(tKf, fitInn, sysIds, kA, kB, 'm', 'clock');
@@ -256,6 +264,7 @@ if haveSys
         for j = 1:nSys
             for k = 1:K, fitRateInn(k, :, j) = fitRateRows(spfMeasLog(k), rateRowsOf{k, j}); end
         end
+        section(7, 'the Doppler rows, from the innovations');
         if any(nRate > 0)
             fprintf('   the Doppler rows: mean range-rate innovation per system over the stretch%s\n', ...
                 sprintf(' system %d %+.2f m/s on %d;', [sysIds; medianRows(perSysR(kA:kB, :)); sum(nPerSysR(kA:kB, :) > 0, 1)]));
@@ -274,6 +283,7 @@ injSys = NaN;  injOnset = NaN;  injEnd = NaN;  injSize = NaN;  injMax = NaN;  nB
 stRef = zeros(0, 3);  kI = NaN;  kE = NaN;  jSref = 0;  fixBefore = NaN(nSys, 4);  fixAfter = NaN(nSys, 4);  badEp = false(K, 1);
 fitRateRef = NaN(K, 6, nSys);  rateDrift = NaN(K, 1);  rateBefore = NaN(nSys, 4);  rateAfter = NaN(nSys, 4);
 if ~isempty(posRef)
+    section(8, 'against the reference position: the offset per system');
     if ~(haveSys && fromLog)
         fprintf('   the reference position is used only with the pairing log as the third argument\n');
     elseif nSys == 0
@@ -358,7 +368,7 @@ if ~isempty(posRef)
         offRef = any(abs(inj) >= MIN_GAP, 2);
         [stRef, iR] = stretches(offRef, max(abs(inj), [], 2), STRETCH_GAP);
         if isempty(stRef)
-            fprintf('   no stretch with a system %d m or more off the reference on 3 epochs\n', MIN_GAP);
+            fprintf('   no stretch with a system %d m or more off the reference on 3 epochs (9 and 10 skipped)\n', MIN_GAP);
         else
             printStretches(tKf, stRef, iR, offRef, inj, sysIds, MIN_GAP, gapS, 'offset');
             kI = stRef(iR, 1);  kE = stRef(iR, 2);
@@ -406,6 +416,7 @@ if ~isempty(posRef)
                     fitRef(k, :, j) = [(C * x(1:3))', x(4), sqrt(mean(e.^2)), numel(cols)];
                 end
             end
+            section(9, 'the position and clock the ranges describe, against the reference');
             fprintf('   the position and clock the ranges of each system describe, relative to the reference (least squares on its used slots,\n');
             fprintf('   4 or more; receiver clock removed; rms = what the ranges leave after the fit, 0 when exactly determined); medians over the stretch:\n');
             printFitSummary(tKf, fitRef, sysIds, kI, kE, 'm', 'clock');
@@ -420,6 +431,7 @@ if ~isempty(posRef)
             [fixBefore, fixAfter] = printBeforeAfter(tKf, fitRef, sysIds, kI, kE, nW, 'm');
             % the Doppler against the reference: range rate minus the line-of-sight satellite velocity (a stationary
             % reference has none of its own) leaves the receiver clock drift and what the spoof put in the rates
+            section(10, 'the Doppler against the reference');
             [prRate, satVel, haveRate] = logRates(sysId);
             if ~haveRate
                 fprintf('   the log holds no range rate or no satellite velocity: no Doppler reading against the reference\n');
@@ -490,9 +502,11 @@ end
 fitSign = 0;
 inSeg = false(K, 1);
 if isfinite(kI), inSeg(kI:kE) = true; end
-for j = 1:nSys
+cmp = false(1, nSys);
+for j = 1:nSys, cmp(j) = nnz(isfinite(fitInn(:, 1, j)) & isfinite(fitRef(:, 1, j)) & offRef & inSeg) >= 3; end
+if any(cmp), section(11, 'the two fits side by side, per system'); end
+for j = find(cmp)
     both = isfinite(fitInn(:, 1, j)) & isfinite(fitRef(:, 1, j)) & offRef & inSeg;
-    if nnz(both) < 3, continue; end
     hI = median(fitInn(both, 1:2, j), 1);  hR = median(fitRef(both, 1:2, j), 1);
     dSame = norm(hI - hR);  dOpp = norm(hI + hR);  sz = norm(hR);
     if sz < MIN_GAP
@@ -520,6 +534,7 @@ end
 nRecNoRows = NaN;  nLogNoSlots = NaN;
 kF = min([kA, kI]);  kL = max([kB, kE]);
 if haveSys && isfinite(kF)
+    section(12, 'timeline: what the receiver gave, what the host built, what the gate did');
     k1 = max(1, kF - 20);  k2 = min(K, kL + 20);
     fprintf('   timeline around the strongest stretch, %.2f s (epoch %d) to %.2f s (epoch %d), one character per epoch, 50 per line: the record''s row set (rows)\n', tKf(k1), k1, tKf(k2), k2);
     fprintf('   (. = no range rows, A = all %d systems, a digit = that system alone, x = some systems)', nSys);
@@ -622,6 +637,12 @@ prof = struct('t', tKf, 'nRange', nRange, 'nOff', nOff, 'offset', offset, 'meanO
 end
 
 %------------------------------------------------------------------------
+function section(n, title)
+% a separator with the number and title of the block, the numbering of docs/SPOOFPROFILE_PRINTOUT.md
+head = sprintf('--- %d. %s ', n, title);
+fprintf('\n%s%s\n', head, repmat('-', 1, max(0, 112 - numel(head))));
+end
+
 function [kOn, kEnd] = runOf3(flag)
 % first and last epoch of the stretch between the first and the last run of 3 consecutive true entries
 kOn = NaN;  kEnd = NaN;

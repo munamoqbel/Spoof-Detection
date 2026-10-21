@@ -50,7 +50,9 @@ function [prof] = spoofProfile(spfMeasLog, tKf, sysId, tRef, posRef, spfLog)
 %   injSys, injOnset, injEnd, injSize, injMax, nBadSlot, fitRef [K x 6] (position NED, clock, rms, rows of the
 %   fix on the off system's ranges, relative to the reference), fitSign (1 when the two fits agree, -1 when they
 %   agree with the sign reversed, 0 otherwise), nRecNoRows and nLogNoSlots (epochs of the timeline window where
-%   the record has no range row but the log has used slots, and the reverse).
+%   the record has no range row but the log has used slots, and the reverse), stretchesInn and stretchesRef
+%   ([kStart kEnd nOff] per stretch; off epochs closer than 20 epochs form one stretch, the tables and the
+%   timeline follow the strongest).
 %   MATLAB desktop tool, not codegen. Runs under Octave.
 
 if iscell(spfMeasLog), spfMeasLog = [spfMeasLog{:}]; end
@@ -63,8 +65,9 @@ if nargin < 5, posRef = []; end
 if nargin < 6, spfLog = []; end
 fromLog = isstruct(sysId) || iscell(sysId);
 prSlot = [];  satSlot = [];  sysSlot = [];
+nRejSlot = [];
 if fromLog
-    [prSlot, satSlot, sysSlot] = pairingLogUnpack(sysId);
+    [prSlot, satSlot, sysSlot, nRejSlot] = pairingLogUnpack(sysId);
     haveSys = size(prSlot, 1) == K;
     if ~haveSys, fprintf('   the pairing log has %d epochs, the spfMeas records %d: not used\n', size(prSlot, 1), K); end
 else
@@ -76,6 +79,8 @@ end
 nSysMismatch = 0;
 MIN_GAP = 10;                                                % m: a gap narrower than this is no second group
 BAD_RES = 1e5;                                               % m: a range this far from its slot's geometry is not its satellite
+STRETCH_GAP = 20;                                            % epochs: off epochs closer than this belong to one stretch
+gapS = STRETCH_GAP * medianFinite(diff(tKf));
 
 nRange = zeros(K, 1);  nOff = zeros(K, 1);  meanOff = NaN(K, 1);  meanClean = NaN(K, 1);  spreadClean = NaN(K, 1);
 sysIds = [];
@@ -194,17 +199,14 @@ else
     end
 end
 %% the mean innovation per system, epoch by epoch, where some system is off: the host's row set is visible here
-offSysInn = NaN;  fitInn = NaN(K, 6);  offInn = false(K, 1);
+offSysInn = NaN;  fitInn = NaN(K, 6);  offInn = false(K, 1);  stInn = zeros(0, 3);  kA = NaN;  kB = NaN;
 if haveSys
     offInn = any(abs(perSys) >= MIN_GAP, 2);
-    [kA, kB] = runOf3(offInn);
-    if isfinite(kA)
-        kFirst = find(offInn, 1);
-        if kFirst < kA
-            fprintf('   first epoch with a system %d m or more off in the innovations: %.2f s (epoch %d); 3 in a row from %.2f s\n', MIN_GAP, tKf(kFirst), kFirst, tKf(kA));
-        end
-        fprintf('   mean range innovation per system from %.2f s (epoch %d) to %.2f s (epoch %d), the stretch where some system is %d m or more off\n', ...
-            tKf(kA), kA, tKf(kB), kB, MIN_GAP);
+    [stInn, iS] = stretches(offInn, max(abs(perSys), [], 2), STRETCH_GAP);
+    if ~isempty(stInn)
+        printStretches(tKf, stInn, iS, offInn, perSys, sysIds, MIN_GAP, gapS, 'innovation');
+        kA = stInn(iS, 1);  kB = stInn(iS, 2);
+        fprintf('   mean range innovation per system over the strongest stretch, %.2f s (epoch %d) to %.2f s (epoch %d)\n', tKf(kA), kA, tKf(kB), kB);
         fprintf('   (the first 8 epochs in a row, then spread to the end; a system without rows is a gap in the host''s row set):\n');
         printCourse(tKf, perSys, nPerSys, sysIds, kA, kB, {}, {});
         rowSets(nPerSys, perSys, sysIds, kA, kB, 'innovation');
@@ -221,6 +223,7 @@ end
 %% the profile against the reference position: no filter in the way
 inj = [];  nSlots = [];  spread = [];  clock = NaN(K, 1);  clockGap = NaN(K, 1);  isb = [];
 injSys = NaN;  injOnset = NaN;  injEnd = NaN;  injSize = NaN;  injMax = NaN;  nBadSlot = 0;  fitRef = NaN(K, 6);  offRef = false(K, 1);
+stRef = zeros(0, 3);  kI = NaN;  kE = NaN;
 if ~isempty(posRef)
     if ~(haveSys && fromLog)
         fprintf('   the reference position is used only with the pairing log as the third argument\n');
@@ -304,21 +307,19 @@ if ~isempty(posRef)
                 numel(kAg), nnz(any(nSlots > 0, 2)), MIN_GAP / 2);
         end
         offRef = any(abs(inj) >= MIN_GAP, 2);
-        [kI, kE] = runOf3(offRef);
-        if ~isfinite(kI)
-            fprintf('   no system %d m or more off the reference on 3 consecutive epochs\n', MIN_GAP);
+        [stRef, iR] = stretches(offRef, max(abs(inj), [], 2), STRETCH_GAP);
+        if isempty(stRef)
+            fprintf('   no stretch with a system %d m or more off the reference on 3 epochs\n', MIN_GAP);
         else
+            printStretches(tKf, stRef, iR, offRef, inj, sysIds, MIN_GAP, gapS, 'offset');
+            kI = stRef(iR, 1);  kE = stRef(iR, 2);
             injOnset = tKf(kI);  injEnd = tKf(kE);
             seg = kI:kE;
             cnt = sum(abs(inj(seg, :)) >= MIN_GAP, 1);
             [~, jS] = max(cnt);  injSys = sysIds(jS);
             injSize = medianFinite(inj(kI:min(kI + 2, K), jS));
             v = inj(seg, jS);  [~, iM] = max(abs(v));  injMax = v(iM);
-            kFirst = find(offRef, 1);
-            if kFirst < kI
-                fprintf('   first epoch with a system %d m or more off the reference: %.2f s (epoch %d); 3 in a row from %.2f s\n', MIN_GAP, tKf(kFirst), kFirst, tKf(kI));
-            end
-            fprintf('   onset        %10.2f s (epoch %d)\n', injOnset, kI);
+            fprintf('   onset        %10.2f s (epoch %d), the strongest stretch\n', injOnset, kI);
             fprintf('   end          %10.2f s (epoch %d), %.1f s long\n', injEnd, kE, injEnd - injOnset);
             fprintf('   size at onset %+9.1f m on system %d (median of the first 3 epochs), largest %+.1f m\n', injSize, injSys, injMax);
             others = setdiff(1:nSys, jS);
@@ -364,7 +365,9 @@ if ~isempty(posRef)
 end
 %% the two fits side by side: same sign, opposite sign (the host's position columns carry +LOS), or apart
 fitSign = 0;
-both = isfinite(fitInn(:, 1)) & isfinite(fitRef(:, 1)) & offRef;
+inSeg = false(K, 1);
+if isfinite(kI), inSeg(kI:kE) = true; end
+both = isfinite(fitInn(:, 1)) & isfinite(fitRef(:, 1)) & offRef & inSeg;
 if nnz(both) >= 3
     hI = median(fitInn(both, 1:2), 1);  hR = median(fitRef(both, 1:2), 1);
     dSame = norm(hI - hR);  dOpp = norm(hI + hR);  sz = norm(hR);
@@ -387,11 +390,10 @@ if nnz(both) >= 3
 end
 %% the timeline around the spoof: the row set of each epoch, and the gate mode under it
 nRecNoRows = NaN;  nLogNoSlots = NaN;
-flag = offInn | offRef;
-if haveSys && any(flag)
-    kF = find(flag, 1);  kL = find(flag, 1, 'last');
+kF = min([kA, kI]);  kL = max([kB, kE]);
+if haveSys && isfinite(kF)
     k1 = max(1, kF - 20);  k2 = min(K, kL + 20);
-    fprintf('   timeline from %.2f s (epoch %d) to %.2f s (epoch %d), one character per epoch, 50 per line: the record''s row set (rows)\n', tKf(k1), k1, tKf(k2), k2);
+    fprintf('   timeline around the strongest stretch, %.2f s (epoch %d) to %.2f s (epoch %d), one character per epoch, 50 per line: the record''s row set (rows)\n', tKf(k1), k1, tKf(k2), k2);
     fprintf('   (. = no range rows, A = all %d systems, a digit = that system alone, x = some systems)', nSys);
     if fromLog, fprintf(', the log''s used slots under it where they differ (log)'); end
     modes = [];
@@ -449,6 +451,12 @@ if haveSys && any(flag)
         nLogNoSlots = nnz(nRange(w) > 0 & ~any(nUsedSys(w, :) > 0, 2));
         fprintf('   in this window the record holds no range row on %d epochs where the log has used slots (the host built none), and rows on %d\n', nRecNoRows, nLogNoSlots);
         fprintf('   epochs where the log has no used slot\n');
+        nRejW = sum(nRejSlot(w, :) > 0, 1);
+        if any(nRejW)
+            fprintf('   the log holds ranges the host did not use (satValid false):%s\n', sprintf(' system %d on %d epochs;', [1:numel(nRejW); nRejW]));
+        else
+            fprintf('   every range in the log was used in this window: no slot with a range and satValid false\n');
+        end
     end
     if ~isempty(mixes)
         fprintf('   x stands for:');
@@ -472,6 +480,7 @@ prof = struct('t', tKf, 'nRange', nRange, 'nOff', nOff, 'offset', offset, 'meanO
     'spreadClean', spreadClean, 'present', present, 'onset', onset, 'tEnd', tEnd, 'sizeOnset', sizeOnset, 'sizeMax', sizeMax, ...
     'sysIds', sysIds, 'perSys', perSys, 'nPerSys', nPerSys, 'sysOff', sysOff, 'nSysMismatch', nSysMismatch, ...
     'offSysInn', offSysInn, 'fitInn', fitInn, 'fitSign', fitSign, 'nRecNoRows', nRecNoRows, 'nLogNoSlots', nLogNoSlots, ...
+    'stretchesInn', stInn, 'stretchesRef', stRef, ...
     'inj', inj, 'nSlots', nSlots, 'spread', spread, 'clock', clock, 'clockGap', clockGap, 'isb', isb, ...
     'injSys', injSys, 'injOnset', injOnset, 'injEnd', injEnd, 'injSize', injSize, 'injMax', injMax, 'nBadSlot', nBadSlot, 'fitRef', fitRef);
 end
@@ -483,6 +492,43 @@ kOn = NaN;  kEnd = NaN;
 if numel(flag) < 3, return; end
 run3 = conv(double(flag(:)), ones(3, 1), 'valid') == 3;
 if any(run3), kOn = find(run3, 1);  kEnd = find(run3, 1, 'last') + 2; end
+end
+
+function [st, iStrong] = stretches(flag, strength, maxGap)
+% runs of true entries of flag, merged when maxGap or fewer false entries separate them; st rows [kStart kEnd nOff]
+% for the stretches with 3 off epochs or more; iStrong = the row whose off epochs have the largest median strength
+st = zeros(0, 3);  iStrong = [];  med = [];
+k = find(flag(:))';
+if isempty(k), return; end
+breaks = find(diff(k) > maxGap + 1);
+starts = k([1, breaks + 1]);  ends = k([breaks, numel(k)]);
+for i = 1:numel(starts)
+    seg = starts(i):ends(i);
+    n = nnz(flag(seg));
+    if n >= 3
+        st(end+1, :) = [starts(i), ends(i), n]; %#ok<AGROW>
+        v = strength(seg);  v = v(flag(seg));
+        med(end+1) = medianFinite(v); %#ok<AGROW>
+    end
+end
+if ~isempty(st), [~, iStrong] = max(med); end
+end
+
+function printStretches(tKf, st, iS, flag, vals, sysIds, minGap, gapS, what)
+% one line per stretch: when, how many off epochs, the median value per system over them, the strongest marked
+fprintf('   stretches with a system %d m or more off (off epochs closer than %.0f s belong to one stretch):\n', minGap, gapS);
+for i = 1:size(st, 1)
+    seg = st(i, 1):st(i, 2);  off = seg(flag(seg));
+    parts = '';
+    for j = 1:numel(sysIds)
+        v = vals(off, j);  v = v(isfinite(v) & abs(v) >= minGap);
+        if ~isempty(v), parts = [parts, sprintf(' system %d %+.1f m on %d;', sysIds(j), median(v), numel(v))]; end %#ok<AGROW>
+    end
+    mark = '';
+    if i == iS, mark = '   <- the tables below'; end
+    fprintf('   %d) %.2f to %.2f s (epochs %d to %d), %d off epochs, median %s:%s%s\n', ...
+        i, tKf(st(i, 1)), tKf(st(i, 2)), st(i, 1), st(i, 2), st(i, 3), what, parts, mark);
+end
 end
 
 function [f] = fitRows(s, rows)

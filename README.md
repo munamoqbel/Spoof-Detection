@@ -183,7 +183,10 @@ also fits, per epoch, the position and clock the off system's rows ask for
 (in the innovations, relative to the host's prediction) and the position
 and clock its ranges describe (against the reference), and prints a
 timeline of the record's row set around the spoof with the gate mode under
-it when the gate log is given.
+it when the gate log is given. Off epochs closer than 10 s form one
+stretch; every stretch is listed, the tables and the timeline follow the
+strongest, and the timeline says whether the log holds ranges the host did
+not use.
 
 `tools/designConstants.m` is the offline design step (quickstart step 2) on
 recorded data: from the same spfMeas records it takes Eq. 20 per monitored

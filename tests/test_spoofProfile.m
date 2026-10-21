@@ -74,6 +74,7 @@ pC = spoofProfile(logC, tKf);
 % with a stationary reference, a clock ramp of 30 m/s, inter-system biases and 1 m code noise
 firstOnly = false(K, 1);  firstOnly(81:2:139) = true;
 [logF, sysF] = makeLog(K, n, mMax, [4 4 4], 1:4, 80, 140, 600, firstOnly);
+for k = 1:8, logF{k}.innovation(1:4) = logF{k}.innovation(1:4) - 12; end      % an early transient: its own stretch
 lat0 = 0.90;  lon0 = 0.10;  h0 = 50;
 a = 6378137;  e2 = 6.69437999014e-3;
 Nr = a / sqrt(1 - e2 * sin(lat0)^2);
@@ -133,6 +134,10 @@ for k = 1:K
         if s == 2 && k == 70, pos(2, :) = 1.1 * satAll(S + 9, :); end  % the range of slot 2 with another satellite's position
         loggedG(k).prLog.(prN{s}).geomRange = g;
         loggedG(k).satPosLog.(spN{s}).position = pos;
+        if s == 2 && k >= 65 && k <= 68                                  % a range the host did not use
+            v = false(S, 1);  v(usedF{2}) = true;  v(4) = false;
+            loggedG(k).satPosLog.(spN{s}).satValid = v;
+        end
         ids = [ids; s * ones(numel(usedF{s}), 1)]; %#ok<AGROW>
     end
     loggedG(k).sysIdLog = ids;
@@ -141,6 +146,7 @@ spfLogG = struct('count', K, 'mode', ones(K, 1), 'evLatch', 62, 'evProbStart', 1
 spfLogG.mode(62:117) = 2;  spfLogG.mode(118:123) = 3;
 fprintf('--- G: a position spoof on GPS (800 N, -300 E, 100 D, clock 50 m), epochs 60 to 120; one garbage slot; gate log ---\n');
 pG = spoofProfile(logG, tKf, loggedG, [], [lat0 lon0 h0], spfLogG);
+[~, ~, ~, nRejG] = pairingLogUnpack(loggedG);
 
 okA = abs(pA.onset - tKf(80)) < 1e-9 && abs(pA.tEnd - tKf(140)) < 1e-9 && abs(pA.sizeOnset - 300) < 5 && pA.sysOff == 1 ...
    && pA.nOff(100) == 4 && abs(pA.perSys(100, 1) - 300) < 5 && abs(pA.perSys(100, 2)) < 5 ...
@@ -160,7 +166,9 @@ okG = pG.injSys == 1 && abs(pG.injOnset - tKf(60)) < 1e-9 && abs(pG.injEnd - tKf
    && pG.offSysInn == 1 && max(abs(fI(1:2) - dP(1:2))) < 5 && abs(fI(3) - dP(3)) < 10 && abs(fI(4) - dClk) < 10 && fI(6) == 4 ...
    && max(abs(pG.fitRef(90, 1:2) - dP(1:2))) < 15 && abs(pG.fitRef(90, 3) - dP(3)) < 60 ...
    && max(abs(pG.fitRef(30, 1:2))) < 15 && pG.fitRef(30, 6) == 4 && abs(pG.isb(2) - 40) < 2 && pF.injSys == 1 ...
-   && pG.fitSign == 1 && pG.nRecNoRows == 0 && pG.nLogNoSlots == 0 && pF.nRecNoRows == 0;
+   && pG.fitSign == 1 && pG.nRecNoRows == 0 && pG.nLogNoSlots == 0 && pF.nRecNoRows == 0 ...
+   && size(pF.stretchesInn, 1) == 2 && pF.stretchesInn(1, 1) == 1 && pF.stretchesInn(2, 1) == 80 && pF.offSysInn == 1 ...
+   && size(pF.stretchesRef, 1) == 1 && nnz(nRejG(:, 2)) == 4 && all(nRejG(65:68, 2) == 1) && nnz(nRejG(:, [1 3])) == 0;
 if okA && okB && okC && okF && okG, fprintf('=== test_spoofProfile PASS ===\n');
 else, fprintf('okA %d okB %d okC %d okF %d okG %d\n=== test_spoofProfile FAIL ===\n', okA, okB, okC, okF, okG); end
 end

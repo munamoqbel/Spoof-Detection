@@ -1,9 +1,30 @@
-%******************************************************************************************
+%***************************************************************************
 % DESCRIPTION:
-% Struct constructors for the spoofing-detection gate (one fixed layout per type, sized from
-% CST_gnssHybrid.NO_STATES, CST_spfParam.MAX_MEAS and CST_spfParam.WINDOW_LENGTH).
-% The gate works on update increments dx = postState - priorState (= K*y).
-%******************************************************************************************
+% Struct constructors of the spoofing-detection gate: one fixed layout
+% per type, sized from CST_gnssHybrid.NO_STATES, CST_spfParam.MAX_MEAS
+% and CST_spfParam.WINDOW_LENGTH, so that Coder sees every struct built
+% in one place. The gate works on the host's update increments
+% dx = postState - priorState (= K y), propagated with the host's own
+% interval matrices, never on an absolute state.
+%
+% INPUTS:
+%   per constructor: the field values; the zero* constructors take none
+%
+% OUTPUTS:
+%   per constructor: the struct, or the pool with a window opened or
+%   all windows closed
+%
+% ASSUMPTIONS AND LIMITATIONS:
+% kfMeasFromUpdate pads exact-size host arrays to MAX_MEAS with element
+% loops (no variable-size slices for Coder) and forms S = H P_bar H' + R
+% itself; setKfMeas takes S from the host. A numMeas above MAX_MEAS is
+% clamped and flagged (numMeasClamped).
+%
+% REQUIREMENT TRACEABILITY:
+% Paper E24: a window opens on the post-update solution, separation
+% zero and covariance P+ (openWindow). The anchor is the certified-clean
+% coast of the Sec. 5 recovery.
+%***************************************************************************
 %#codegen
 classdef STRUCT_SPF
     methods(Static)
@@ -16,7 +37,7 @@ classdef STRUCT_SPF
             numMeasUsed    = uint8(min(double(numMeas), double(CST_spfParam.MAX_MEAS)));
 
             kfMeas = struct( ...
-                'innovation',     innovation, ...      % y = z - h(xPrior)   [MAX_MEAS x 1]
+                'innovation',     innovation, ...      % y = z - h(xPrior)   [MAX_MEAS x 1]  (Eq. 3)
                 'innovationCov',  innovationCov, ...   % S = H P H' + R      [MAX_MEAS x MAX_MEAS]
                 'obsMatrix',      obsMatrix, ...       % H                   [MAX_MEAS x n]
                 'measNoiseCov',   measNoiseCov, ...    % R                   [MAX_MEAS x MAX_MEAS]
@@ -29,7 +50,7 @@ classdef STRUCT_SPF
 
         function [kfMeas] = kfMeasFromUpdate(innovation, obsMatrix, measNoiseCov, ...
                 numMeas, priorState, priorCov, postState, postCov)
-            % pad the host arrays (exact-size or padded) to MAX_MEAS and form S = H P_bar H' + R
+            % the host arrays (exact size or padded) to MAX_MEAS, and S = H P_bar H' + R
 
             mMax = double(CST_spfParam.MAX_MEAS);
             n    = CST_gnssHybrid.NO_STATES;
@@ -83,7 +104,7 @@ classdef STRUCT_SPF
                 'active',              logical(active), ...
                 'hadAlarm',            logical(hadAlarm), ...
                 'windowAge',           windowAge, ...
-                'separation',          separation, ...        % KF - coast per window [n x N]
+                'separation',          separation, ...        % KF - coast per window [n x N]  (Eq. 49)
                 'coastCovariance',     coastCovariance, ...   % P_C per window        [n x n x N]
                 'innovationBuffer',    innovationBuffer, ...
                 'innovationCovBuffer', innovationCovBuffer,...
@@ -121,15 +142,15 @@ classdef STRUCT_SPF
             report = struct( ...
                 'alarmPerAxis',         logical(alarmPerAxis), ...
                 'anyAlarm',             logical(anyAlarm), ...
-                'maxProtectionLevel',   maxProtectionLevel, ...
+                'maxProtectionLevel',   maxProtectionLevel, ...   % Eq. 51, largest over the windows
                 'ssAlarm',              logical(ssAlarm), ...
                 'cpiAlarm',             logical(cpiAlarm), ...
                 'cleanCloseFound',      logical(cleanCloseFound), ...
                 'cleanCloseSeparation', cleanCloseSeparation, ...
                 'cleanCloseCovar',      cleanCloseCovar, ...
                 'solveFault',           logical(solveFault), ...
-                'ssRatio',              ssRatio, ...     % [1x3] |d|/(k_FA sigma_SS), alarm at > 1
-                'cpiRatio',             cpiRatio);       % [1x3] q/T_N, alarm at > 1
+                'ssRatio',              ssRatio, ...     % [1x3] |d| / (k_FA sigma_SS + B), alarm at > 1
+                'cpiRatio',             cpiRatio);       % [1x3] q / T_N, alarm at > 1
         end
 
         function [report] = zeroMonitorReport
@@ -154,7 +175,7 @@ classdef STRUCT_SPF
         end
 
         function [poolOut] = openWindow(poolIn, kfMeas)
-            % open a window on this epoch's post-update solution (separation 0, covariance P+)
+            % a window opens on this epoch's post-update solution: separation 0, covariance P+ (E24)
 
             poolOut = poolIn;
 
@@ -193,9 +214,9 @@ classdef STRUCT_SPF
             SPF_ssMonitor = struct( ...
                 'alarmPerAxis',       logical(alarmPerAxis), ...
                 'anyAlarm',           logical(anyAlarm), ...
-                'separation',         separation, ...
-                'sigmaSeparation',    sigmaSeparation, ...
-                'protectionLevel',    protectionLevel, ...
+                'separation',         separation, ...        % [1x3] Eq. 49 per monitored axis
+                'sigmaSeparation',    sigmaSeparation, ...   % [1x3] Eq. 50
+                'protectionLevel',    protectionLevel, ...   % [1x3] Eq. 51
                 'maxProtectionLevel', maxProtectionLevel);
         end
 
@@ -212,7 +233,7 @@ classdef STRUCT_SPF
 
         %% ---------------- FSM state ----------------
         function [anchor] = setAnchor(valid, separation, covariance, epoch)
-            % certified-clean coast, kept live: separation = host solution - anchor coast
+            % the certified-clean coast, kept live: separation = host solution - anchor coast
 
             anchor = struct( ...
                 'valid',      logical(valid), ...
@@ -241,9 +262,9 @@ classdef STRUCT_SPF
                 'probSep',        probSep, ...        % (active filter) - (coast) [n x 1]
                 'pool',           pool, ...
                 'anchor',         anchor, ...
-                'dwellCount',     dwellCount, ...
-                'probationCount', probationCount, ...
-                'coastCount',     coastCount, ...
+                'dwellCount',     dwellCount, ...     % consecutive re-validation passes
+                'probationCount', probationCount, ... % quiet probation epochs
+                'coastCount',     coastCount, ...     % epochs in COAST + PROBATION
                 'armed',          logical(armed), ... % monitors active (after the warm-up)
                 'armCount',       armCount);          % qualifying epochs so far
         end
@@ -312,8 +333,8 @@ classdef STRUCT_SPF
                 'ssAlarm',               logical(ssAlarm), ...
                 'cpiAlarm',              logical(cpiAlarm), ...
                 'alarmPerAxis',          logical(alarmPerAxis), ...
-                'maxProtectionLevel',    maxProtectionLevel, ...
-                'qReval',                qReval, ...
+                'maxProtectionLevel',    maxProtectionLevel, ...     % Eq. 51
+                'qReval',                qReval, ...                 % re-validation chi-square
                 'revalComputed',         logical(revalComputed), ...
                 'dwellCount',            dwellCount, ...
                 'eventLatched',          logical(eventLatched), ...
@@ -324,13 +345,13 @@ classdef STRUCT_SPF
                 'anchorMissing',         logical(anchorMissing), ...
                 'coastEpochs',           coastEpochs, ...
                 'inputFault',            logical(inputFault), ...     % non-finite input this epoch
-                'numMeasClamped',        logical(numMeasClamped), ... % host passed > MAX_MEAS rows
+                'numMeasClamped',        logical(numMeasClamped), ... % the host passed more than MAX_MEAS rows
                 'solveFault',            logical(solveFault), ...     % a covariance was unusable
-                'ssRatio',               ssRatio, ...                 % [1x3] SS margin, alarm > 1
-                'cpiRatio',              cpiRatio, ...                % [1x3] CPI margin, alarm > 1
+                'ssRatio',               ssRatio, ...                 % [1x3] SS margin, alarm at > 1
+                'cpiRatio',              cpiRatio, ...                % [1x3] CPI margin, alarm at > 1
                 'armed',                 logical(armed), ...          % monitors active
-                'resetInhibit',          logical(resetInhibit), ...   % host must not reset this epoch
-                'coastBudgetExceeded',   logical(coastBudgetExceeded)); % coast PL (K_MD * sigma_C) above ARM_PL_MAX, or COAST_BUDGET_EPOCHS passed: host may reset
+                'resetInhibit',          logical(resetInhibit), ...   % the host must not reset this epoch
+                'coastBudgetExceeded',   logical(coastBudgetExceeded)); % coast PL above ARM_PL_MAX or COAST_BUDGET_EPOCHS passed: the host may reset
         end
 
         function [info] = zeroInfo
@@ -382,14 +403,14 @@ classdef STRUCT_SPF
         end
 
         function [nav] = setNav(applyCorrection, state, correction, covar, sigmaPosition)
-            % applyCorrection (LATCH, COMMIT): (state, covar) go to the host's setKF as (x+, P+)
+            % applyCorrection (latch, commit): (state, covar) go to the host's setKF as (x+, P+)
 
             nav = struct( ...
                 'applyCorrection', logical(applyCorrection), ...
                 'state',           state, ...         % [n x 1] x+
-                'correction',      correction, ...    % [n x 1] same as an increment
+                'correction',      correction, ...    % [n x 1] the same as an increment
                 'covar',           covar, ...         % [n x n] P+
-                'sigmaPosition',   sigmaPosition);    % [3 x 1] 1-sigma of position
+                'sigmaPosition',   sigmaPosition);    % [3 x 1] 1-sigma of the position
         end
 
         function [nav] = zeroNav

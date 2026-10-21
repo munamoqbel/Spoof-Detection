@@ -1,10 +1,13 @@
 # deploy/ — drop-in runtime set
 
 The ten files here are the gate as it goes into the simulation: the same
-code as the copies in the repository root, with the header paragraphs and
-inline commentary cut to a few lines each. Logic, signatures, struct
-layouts and `%#codegen` are unchanged; a scripted attack and a shadow
-sweep produce bitwise identical telemetry with either set on the path.
+code as the copies in the repository root, with a header of five sections
+(description, inputs, outputs, assumptions and limitations, requirement
+traceability) kept to 76 columns, and inline comments that say what a
+line does and point to the paper's equation where there is one. Logic,
+signatures, struct layouts and `%#codegen` are unchanged; a scripted
+attack and a shadow sweep produce bitwise identical telemetry with either
+set on the path. The root copies keep the long design notes.
 
 | file | role |
 |---|---|

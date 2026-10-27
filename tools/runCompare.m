@@ -298,6 +298,17 @@ else
     noteNV = '2 Hz jumps excluded';
 end
 fprintf(F0, 'navVel vs d(navPos)/dt', sprintf('%+6.2f s', sNV), sprintf('%7.3f m/s std', rNV), noteNV);
+% the mean of the same difference, jumps included: the net motion of the logged position against the logged
+% velocity. A mean on an axis is a velocity the position does not integrate (a KF velocity correction that
+% does not reach the mechanisation, or two velocity variables in the host)
+dvNav = interpRows(t, r.navVel, tA + sNV) - velNav(inAided, :);
+okDv  = all(isfinite(dvNav), 2);
+dvMean = mean(dvNav(okDv, :), 1);
+noteDv = 'm/s: reported velocity minus the motion of the logged position';
+if any(abs(dvMean) > 0.05)
+    noteDv = 'm/s: WARNING, a velocity the logged position does not integrate (its KF correction not reaching the mechanisation?)';
+end
+fprintf(F0, 'mean navVel - d(navPos)/dt', '    -', sprintf('N %+.3f E %+.3f D %+.3f', dvMean), noteDv);
 fprintf(F0, 'navAtt yaw vs nav course', '    -', sprintf('%7.1f mrad rms', rNA * 1e3), '');
 
 %% (c) lag of the nav solution behind the truth, per quantity

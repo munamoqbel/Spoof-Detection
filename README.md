@@ -148,19 +148,25 @@ rows. Verdict lines name an R far above the state uncertainty (rows switched
 off in effect), a range rate built from the nav solution itself, and an
 opposite-sign or wrong-frame derivative. `tests/test_dopplerCheck.m` covers
 the five cases.
-`tools/feedbackCheck.m` asks whether the KF update reaches the mechanisation:
-per 2 Hz epoch the logged nav position and velocity are fitted with a line
-0.1 to 0.3 s before the epoch and another 0.1 to 0.3 s after it, the two lines
-at the epoch differ by the jump the update put into the solution, and that
-jump is regressed on the increment postState minus priorState per NED axis. A
-slope of -1 is an increment applied in full (error state estimate minus
-truth), 0 one that never reaches the logged solution; the position slopes
-validate the method before the velocity slopes are read, and with biasEst the
-sum of the accelerometer bias increments over the window is set against the
-change of biasEst. Verdict lines name an axis whose increment does not reach
-the solution, one applied in part or with the opposite sign, and a log without
-jumps. `tests/test_feedbackCheck.m` covers the applied, half-applied and
-unapplied cases.
+`tools/feedbackCheck.m` asks whether the KF update reaches the mechanisation,
+when, and in full. Per nav sample the change of the logged position minus the
+integral of the logged velocity is the part of the motion the velocity does
+not explain; summed over the half epoch either side of tKf it is the
+correction the update put into the position, whenever and however it was
+applied, and its running sum regressed on the increment postState minus
+priorState across the epochs is the step profile, from which the instant of
+the update is read (10, 50 and 90 % of the step). The change is regressed
+jointly on the increments of the records k-1, k and k+1: -1 at k is an
+increment applied in full at its own epoch (error state estimate minus
+truth), 0 one that never reaches the logged solution, a coefficient at k-1 or
+k+1 records offset by one epoch from the nav log. The velocity is read the
+same way against a line fitted before the epoch, and with biasEst the sum of
+the accelerometer bias increments over the window is set against the change
+of biasEst. Verdict lines name an axis whose increment does not reach the
+solution, one applied in part, over more than one epoch or with the opposite
+sign, offset records, and a step spread over more than 0.05 s (a slewed
+feedback). `tests/test_feedbackCheck.m` covers the applied, half-applied,
+unapplied, offset and slewed cases.
 `tools/covPropCheck.m` reads the same spfMeas records and asks whether the
 host's P keeps its cross terms from one 2 Hz epoch to the next: the previous
 P+ is propagated over the interval with the INS error dynamics (no Q), the

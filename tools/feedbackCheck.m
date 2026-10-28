@@ -137,12 +137,12 @@ tStep = 0;                                               % the instant of the up
 if ~isempty(t50), tStep = median(t50); end
 
 % ---- pass 2: the velocity, lines either side of the step ----
-chgVelLate = NaN(K, 3);
+chgVelLate = NaN(K, 3);  waveVel = NaN(K, J, 3);
 for k = find(used)'
     iB = find(t >= tKf(k) + tStep - TB1 & t <= tKf(k) + tStep - TB2);
     iA = find(t >= tKf(k) + tStep + TA1 & t <= tKf(k) + tStep + TA2);
     iLa = find(t >= tKf(k) + tStep + TL1 & t <= tKf(k) + tStep + TL2);
-    iV = find(t >= tKf(k) - HALF - tol & t <= tKf(k) + LATE + tol);
+    iV = find(t >= tKf(k) - HALF - tol & t <= tKf(k) + LATE + 1.5 * dtNav);   % past the grid by a sample, so its last point interpolates
     if numel(iB) < 4 || numel(iA) < 4
         used(k) = false;  chgPos(k, :) = NaN;  continue;
     end
@@ -156,6 +156,9 @@ for k = find(used)'
     tV = t(iV) - tKf(k);
     dv = navVel(iV, :) - (repmat(cB(1, :), numel(iV), 1) + tV * cB(2, :));
     devVel(k, :, :) = interp1(tV, dv, tau, 'linear', NaN);
+    w = interp1(tV, navVel(iV, :), tau, 'linear', NaN);
+    w0 = interp1(tV, navVel(iV, :), tStep - TB2, 'linear', NaN);
+    waveVel(k, :, :) = w - repmat(w0, J, 1);                  % the velocity within the epoch, from just before the step
 end
 nUsed = nnz(used);
 [coefPos, sePos, rPos] = lagFit(incPos, chgPos, used);
@@ -164,6 +167,18 @@ profPos = profileOf(incPos, cumPos, used);
 profVel = profileOf(incVel, devVel, used);
 tPos = stepTimes(tau, profPos, sum(coefPos, 1));
 tVel = stepTimes(tau, profVel, sum(coefVel, 1));
+% the plain average of the velocity and of the unexplained position change within the epoch: the vehicle's own
+% dynamics average out, what is left is what every update does and what the mechanisation does between updates
+meanWaveV = reshape(nanmeanRows(waveVel(used, :, :)), J, 3);
+meanWaveP = reshape(nanmeanRows(cumPos(used, :, :)), J, 3);
+jAfter = tau >= tStep + TA1 & tau <= LATE & all(isfinite(meanWaveV), 2)';
+slopeV = NaN(1, 3);  jumpV = NaN(1, 3);
+if nnz(jAfter) >= 4
+    A = [ones(nnz(jAfter), 1), tau(jAfter)'];
+    c = A \ meanWaveV(jAfter, :);
+    slopeV = c(2, :);                                        % m/s^2 between the updates
+    jumpV = c(1, :) + (tStep - TB2) * c(2, :);               % the line after, brought back to just before the step
+end
 
 % ---- the change against the state x+ of record k ----
 gainPos = NaN(3, 3);  rxPos = NaN(1, 3);  sxPos = NaN(1, 3);
@@ -272,6 +287,7 @@ fprintf('         mean                        %+11.4f %+11.4f %+11.4f   m/s\n', 
 fprintf('         on x+ velocity              %+11.3f %+11.3f %+11.3f       (equal to the early read when the correction stays)\n', gainVelLate);
 fprintf('         standard error              %11.3f %11.3f %11.3f\n', sxVelLate);
 printProfile(tau, profPos, profVel, tPos, tVel);
+printWave(tau, meanWaveV, meanWaveP, slopeV, jumpV, tStep, TA1, LATE, MG);
 fprintf('   accelerometer bias increment x+ - x- (%d:%d), in mg\n', iAcc(1), iAcc(end));
 fprintf('      mean                         %+11.4f %+11.4f %+11.4f   mg\n', mean(incAccU, 1) / MG);
 fprintf('      median                       %+11.4f %+11.4f %+11.4f   mg\n', median(incAccU, 1) / MG);
@@ -376,6 +392,7 @@ res = struct('t', tKf, 'incPos', incPos, 'incVel', incVel, 'chgPos', chgPos, 'ch
     'coefPos', coefPos, 'coefVel', coefVel, 'sePos', sePos, 'seVel', seVel, 'rPos', rPos, 'rVel', rVel, ...
     'gainPos', gainPos, 'gainVel', gainVel, 'gainVelLate', gainVelLate, 'rxPos', rxPos, 'rxVel', rxVel, 'chgVelLate', chgVelLate, ...
     'accSame', accSame, 'corrVelBias', medVB, 'corrVelAtt', medVA, 'corrPosVel', medPV, ...
+    'meanWaveV', meanWaveV, 'meanWaveP', meanWaveP, 'slopeV', slopeV, 'jumpV', jumpV, ...
     'tau', tau, 'profPos', profPos, 'profVel', profVel, 'tStep', tStep, ...
     't10', [tPos(1, :); tVel(1, :)], 't50', [tPos(2, :); tVel(2, :)], 't90', [tPos(3, :); tVel(3, :)], ...
     'keep', keep, 'aPP', aPP, 'aPV', aPV, 'aVV', aVV, 'aVP', aVP, 'xpMean', xpMean, 'xmMean', xmMean, ...
@@ -421,6 +438,35 @@ fprintf('      (sign flipped: 1.00 is the increment subtracted in full; before t
 fprintf('      filter is about to correct, not a feedback)\n');
 fprintf('      step at 10 / 50 / 90 %% of its size, position   %s\n', stepText(tPos));
 fprintf('                                     velocity   %s\n', stepText(tVel));
+end
+
+function printWave(tau, wV, wP, slopeV, jumpV, tStep, TA1, LATE, MG)
+show = [-0.2 -0.1 -0.05 -0.02 -0.01 0 0.01 0.02 0.05 0.1 0.2 0.25 0.3 0.35 0.4 0.45];
+j = zeros(size(show));
+for i = 1:numel(show), [~, j(i)] = min(abs(tau - show(i))); end
+ax = 'NED';
+fprintf('   mean waveform within the epoch (plain average over the epochs, from tKf %+.2f s): what every update does and what the\n', tStep - 0.05);
+fprintf('   mechanisation does between the updates, the vehicle''s own dynamics averaged out\n');
+fprintf('      tau (s)         %s\n', sprintf('%6.2f', show));
+for a = 1:3
+    fprintf('      velocity %s mm/s %s\n', ax(a), sprintf('%6.1f', 1000 * wV(j, a)));
+end
+for a = 1:3
+    fprintf('      position %s mm   %s\n', ax(a), sprintf('%6.1f', 1000 * wP(j, a)));
+end
+fprintf('      (position: the change navVel does not explain, cumulative from tKf - 0.25 s)\n');
+fprintf('      velocity line after the step (tKf %+.2f to %+.2f s): jump at the step %+7.1f %+7.1f %+7.1f mm/s\n', tStep + TA1, LATE, 1000 * jumpV);
+fprintf('                                                    slope           %+7.1f %+7.1f %+7.1f mm/s^2 = %+.2f %+.2f %+.2f mg\n', 1000 * slopeV, slopeV / MG);
+fprintf('      (the slope is the acceleration the mechanisation carries between updates on that axis; over half an epoch it puts\n');
+fprintf('      back %+.1f %+.1f %+.1f mm/s against the jump)\n', 500 * slopeV);
+end
+
+function [m] = nanmeanRows(X)
+% mean over the first dimension, NaN left out
+ok = isfinite(X);
+X(~ok) = 0;
+m = sum(X, 1) ./ max(sum(ok, 1), 1);
+m(sum(ok, 1) == 0) = NaN;
 end
 
 function [s] = stepText(tS)

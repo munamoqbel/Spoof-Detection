@@ -22,7 +22,7 @@ cnt  = @(txt, s) numel(strfind(txt, s));
 ok = true;
 chk = struct();
 % A: full feedback, D velocity and Z bias not applied
-[runA, logA] = makeRun(t, tKf, velTrue, [1 1 0], 1, 0, 0, 1, 1, 'none');
+[runA, logA] = makeRun(t, tKf, velTrue, [1 1 0], 1, 0, 0, 1, 1, 'none', 0, 0.02);
 txtA = evalc('resA = feedbackCheck(runA, logA);');
 fprintf('%s', txtA);
 chk.posA      = near(resA.coefPos(2, :), -1, 0.03) && near(resA.coefPos([1 3], :), 0, 0.03) && near(resA.gainPos(1, :), -1, 0.03);
@@ -31,6 +31,8 @@ chk.stepA     = near(resA.t50(1, :), 0, 0.011) && near(resA.t90(1, :) - resA.t10
 chk.keepA     = near([resA.keep.position, resA.keep.velocity], 0, 0.01);
 chk.usedA     = resA.nUsed == K;
 chk.biasA     = abs(resA.dBias(3) / resA.incBias(3)) < 0.05 && near(resA.dBias(1:2) ./ resA.incBias(1:2), -1, 1e-6);
+chk.waveA     = abs(resA.slopeV(3) / 9.80665e-3 - 2.04) < 0.15 && all(abs(resA.slopeV(1:2)) < 0.02) && abs(resA.jumpV(3)) < 0.002 && ...
+                abs(resA.jumpV(1) + mean(resA.incVel(resA.used, 1))) < 0.002 && abs(resA.meanWaveP(end, 3) + mean(resA.incPos(resA.used, 3))) < 0.003;
 chk.verdictA  = cnt(txtA, 'the D velocity increment does not reach') == 1 && cnt(txtA, 'bias increments reach biasEst on some axes only') == 1 && cnt(txtA, 'VERDICT') == 2;
 % B: everything applied, cell input, biasEst per nav sample, a window
 [runB, logB] = makeRun(t, tKf, velTrue, [1 1 1], 1, 1, 0, 1, 1, 'none');
@@ -92,8 +94,9 @@ if ok, fprintf('=== test_feedbackCheck PASS ===\n'); else, fprintf('=== test_fee
 end
 
 %------------------------------------------------------------------------
-function [run, log] = makeRun(t, tKf, velTrue, applyVel, applyPos, applyBias, tauSlew, gKeep, gApplied, phiMode, undoAt)
+function [run, log] = makeRun(t, tKf, velTrue, applyVel, applyPos, applyBias, tauSlew, gKeep, gApplied, phiMode, undoAt, aErr)
 if nargin < 11, undoAt = 0; end
+if nargin < 12, aErr = 0; end
 % a mechanised solution with a velocity error e and a position error pErr. At each epoch the KF increment
 % (random, plus a persistent +0.009 m/s on D and +0.05 m on D) is added to the carried state x- to give x+;
 % the mechanisation receives gApplied x+ on the axes in applyVel (velocity) and, with applyPos, on every
@@ -137,6 +140,7 @@ for i = 1:N
     e = e - f * pendV;  pErr = pErr - f * pendP;
     pendV = (1 - f) * pendV;  pendP = (1 - f) * pendP;
     if t(i) >= tUndo - 1e-9, e = e + undoV;  tUndo = Inf; end         % the velocity correction taken back
+    e(3) = e(3) + aErr * dt;                                           % a constant vertical acceleration error
     velNav(i, :) = velTrue(i, :) + e;
     pErrArr(i, :) = pErr;
 end

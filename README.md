@@ -163,7 +163,11 @@ state x+ of record k (-GAIN when the host applies GAIN x+). The velocity is
 read the same way against lines fitted either side of the step, early in the
 epoch and again late in it (a correction that is gone by the late read is
 being taken back between the updates), and the profile is followed to 0.45 s
-after the epoch. From the
+after the epoch. The plain average of the velocity within the epoch, the
+vehicle's own dynamics averaged out, shows what every update does and what
+the mechanisation does between updates: the jump at the step and the slope
+after it, the acceleration the mechanisation carries on that axis, in mg.
+From the
 records alone, x- of record k+1 regressed on x+ of record k gives the share of
 each state the bookkeeping keeps after the feedback (1 - GAIN for the host's
 split), the velocity residual integrated into the position residual (0.5 s

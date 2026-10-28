@@ -309,6 +309,26 @@ if any(abs(dvMean) > 0.05)
     noteDv = 'm/s: WARNING, a velocity the logged position does not integrate (its KF correction not reaching the mechanisation?)';
 end
 fprintf(F0, 'mean navVel - d(navPos)/dt', '    -', sprintf('N %+.3f E %+.3f D %+.3f', dvMean), noteDv);
+% the median of the same difference leaves the 2 Hz jumps out: it is the motion of the position BETWEEN updates
+% against the reported velocity. With a mean on an axis, a median near zero means the position does integrate the
+% velocity and the 2 Hz corrections undo it every epoch (the velocity correction is not reaching the
+% mechanisation); a median equal to the mean means the position does not integrate the reported velocity at all
+% (two velocity variables in the host)
+dvMed = median(dvNav(okDv, :), 1);
+fprintf(F0, 'median, 2 Hz jumps excluded', '    -', sprintf('N %+.3f E %+.3f D %+.3f', dvMed), ...
+    'm/s: the motion of the position between updates against the reported velocity');
+axName0 = 'NED';
+for ax = 1:3
+    if abs(dvMean(ax)) > 0.05
+        if abs(dvMed(ax)) > 0.5 * abs(dvMean(ax))
+            fprintf('   %s: the position does not integrate the reported velocity between updates either: two vertical velocity variables in the\n', axName0(ax));
+            fprintf('   host, one reported and used in h(x), one integrated\n');
+        else
+            fprintf('   %s: the position integrates the reported velocity between updates and the 2 Hz corrections undo it: the KF velocity\n', axName0(ax));
+            fprintf('   correction on this axis is not reaching the mechanisation\n');
+        end
+    end
+end
 fprintf(F0, 'navAtt yaw vs nav course', '    -', sprintf('%7.1f mrad rms', rNA * 1e3), '');
 
 %% (c) lag of the nav solution behind the truth, per quantity

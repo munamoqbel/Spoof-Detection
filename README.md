@@ -148,6 +148,19 @@ rows. Verdict lines name an R far above the state uncertainty (rows switched
 off in effect), a range rate built from the nav solution itself, and an
 opposite-sign or wrong-frame derivative. `tests/test_dopplerCheck.m` covers
 the five cases.
+`tools/feedbackCheck.m` asks whether the KF update reaches the mechanisation:
+per 2 Hz epoch the logged nav position and velocity are fitted with a line
+0.1 to 0.3 s before the epoch and another 0.1 to 0.3 s after it, the two lines
+at the epoch differ by the jump the update put into the solution, and that
+jump is regressed on the increment postState minus priorState per NED axis. A
+slope of -1 is an increment applied in full (error state estimate minus
+truth), 0 one that never reaches the logged solution; the position slopes
+validate the method before the velocity slopes are read, and with biasEst the
+sum of the accelerometer bias increments over the window is set against the
+change of biasEst. Verdict lines name an axis whose increment does not reach
+the solution, one applied in part or with the opposite sign, and a log without
+jumps. `tests/test_feedbackCheck.m` covers the applied, half-applied and
+unapplied cases.
 `tools/covPropCheck.m` reads the same spfMeas records and asks whether the
 host's P keeps its cross terms from one 2 Hz epoch to the next: the previous
 P+ is propagated over the interval with the INS error dynamics (no Q), the

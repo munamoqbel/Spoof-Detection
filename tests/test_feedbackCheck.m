@@ -72,6 +72,14 @@ txtG = evalc('resG = feedbackCheck(runG, logG);');
 chk.gainG     = near(resG.gainPos(1, :), -0.16, 0.02) && all(resG.rxPos < -0.98) && near(resG.coefPos(2, :), -0.16, 0.03);
 chk.keepG     = near([resG.keep.position, resG.keep.velocity], 0.6, 0.01) && near(resG.aVP, 0.30, 0.02) && near(resG.aPV, 0, 0.02);
 chk.verdictG  = cnt(txtG, 'lost between setKF and the mechanisation') == 6 && cnt(txtG, 'propagated with Phi transposed') == 1 && cnt(txtG, 'does not reach') == 0 && cnt(txtG, 'without the Phi coupling') == 0;
+% H: the velocity correction applied at the step and taken back 0.25 s later
+[runH, logH] = makeRun(t, tKf, velTrue, [1 1 1], 1, 1, 0, 1, 1, 'none', 0.25);
+txtH = evalc('resH = feedbackCheck(runH, logH);');
+chk.gainH     = near(resH.gainVel, -1, 0.1) && near(resH.gainVelLate, 0, 0.1) && near(resH.gainPos(1, :), -1, 0.03);
+chk.verdictH  = cnt(txtH, 'something restores the velocity between the updates') == 3;
+% the coupling block from the postCov of the records
+chk.covA      = abs(resA.corrVelBias(3, 3) - 0.5) < 1e-9 && abs(resA.corrVelBias(1, 1) - 0.3) < 1e-9 && abs(resA.corrPosVel(1) - 0.7) < 1e-9 && ...
+                resA.corrVelBias(2, 2) == 0 && cnt(txtA, 'coupling the covariance carries') == 1;
 names = fieldnames(chk);
 for i = 1:numel(names)
     if ~chk.(names{i}), fprintf('   FAILED sub-check: %s\n', names{i}); ok = false; end
@@ -84,7 +92,8 @@ if ok, fprintf('=== test_feedbackCheck PASS ===\n'); else, fprintf('=== test_fee
 end
 
 %------------------------------------------------------------------------
-function [run, log] = makeRun(t, tKf, velTrue, applyVel, applyPos, applyBias, tauSlew, gKeep, gApplied, phiMode)
+function [run, log] = makeRun(t, tKf, velTrue, applyVel, applyPos, applyBias, tauSlew, gKeep, gApplied, phiMode, undoAt)
+if nargin < 11, undoAt = 0; end
 % a mechanised solution with a velocity error e and a position error pErr. At each epoch the KF increment
 % (random, plus a persistent +0.009 m/s on D and +0.05 m on D) is added to the carried state x- to give x+;
 % the mechanisation receives gApplied x+ on the axes in applyVel (velocity) and, with applyPos, on every
@@ -94,12 +103,14 @@ function [run, log] = makeRun(t, tKf, velTrue, applyVel, applyPos, applyBias, ta
 % increment reaches biasEst only with applyBias. The records hold x- and x+.
 N = numel(t);  K = numel(tKf);  n = 22;  dt = t(2) - t(1);  DT = 0.5;
 lat0 = 0.8;  lon0 = 0.1;  h0 = 100;
+P = eye(n);  P(6, 12) = 0.5;  P(12, 6) = 0.5;  P(4, 10) = -0.3;  P(10, 4) = -0.3;  P(1, 4) = 0.7;  P(4, 1) = 0.7;
+tUndo = -Inf;  undoV = zeros(1, 3);
 e = [0.05 -0.03 0.21];  pErr = [1 -1 2];  biasFb = [1e-3 -2e-3 5e-3];
 xm = zeros(1, 6);                                       % carried state: position 1:3, velocity 4:6
 pendV = zeros(1, 3);  pendP = zeros(1, 3);
 if tauSlew > 0, f = 1 - exp(-dt / tauSlew); else, f = 1; end
 velNav = zeros(N, 3);  pErrArr = zeros(N, 3);  biasEst = zeros(K, 6);
-log = repmat(struct('priorState', zeros(n, 1), 'postState', zeros(n, 1), 'numMeas', uint8(12)), K, 1);
+log = repmat(struct('priorState', zeros(n, 1), 'postState', zeros(n, 1), 'numMeas', uint8(12), 'postCov', P), K, 1);
 kNext = 1;
 for i = 1:N
     if kNext <= K && t(i) >= tKf(kNext) - 1e-9
@@ -109,6 +120,7 @@ for i = 1:N
         xp = xm + [incP, incV];
         pendV = pendV + gApplied * xp(4:6) .* applyVel;
         pendP = pendP + gApplied * xp(1:3) * applyPos;
+        if undoAt > 0, tUndo = tKf(kNext) + undoAt;  undoV = gApplied * xp(4:6) .* applyVel; end
         biasFb = biasFb - incB .* [1 1 applyBias];
         x = zeros(n, 1);  x(1:6) = xp';  x(10:12) = incB';
         xmRec = zeros(n, 1);  xmRec(1:6) = xm';
@@ -124,6 +136,7 @@ for i = 1:N
     end
     e = e - f * pendV;  pErr = pErr - f * pendP;
     pendV = (1 - f) * pendV;  pendP = (1 - f) * pendP;
+    if t(i) >= tUndo - 1e-9, e = e + undoV;  tUndo = Inf; end         % the velocity correction taken back
     velNav(i, :) = velTrue(i, :) + e;
     pErrArr(i, :) = pErr;
 end

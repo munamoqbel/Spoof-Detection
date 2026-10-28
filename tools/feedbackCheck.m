@@ -62,10 +62,12 @@ if numel(tKf) ~= K
     error('feedbackCheck: tKf has %d epochs, spfMeasLog %d records', numel(tKf), K);
 end
 HALF = 0.25;                                             % half an epoch: the interval owned by each update (s)
-TB1 = 0.3;  TB2 = 0.05;                                  % line before the step, tStep - TB1 to tStep - TB2 (s)
-TA1 = 0.05;  TA2 = 0.25;                                 % line after the step, tStep + TA1 to tStep + TA2 (s)
+LATE = 0.45;                                             % the profile is followed to tKf + LATE, before the next update (s)
+TB1 = 0.2;  TB2 = 0.05;                                  % line before the step, tStep - TB1 to tStep - TB2 (s), clear of the previous epoch's late changes
+TA1 = 0.05;  TA2 = 0.22;                                 % line after the step, tStep + TA1 to tStep + TA2 (s)
+TL1 = 0.30;  TL2 = 0.45;                                 % the late read of the velocity, tStep + TL1 to tStep + TL2 (s)
 MG  = 9.80665e-3;                                        % m/s^2 per mg
-tau = -HALF:0.01:HALF;  J = numel(tau);
+tau = -HALF:0.01:LATE;  J = numel(tau);
 dtNav  = median(diff(t));
 tol    = dtNav / 4;                                      % sample-time jitter allowed at the interval ends
 navNed = nedFrom(run.navPos);
@@ -80,11 +82,23 @@ if n < 20, iPrs = []; end
 
 % ---- the records ----
 XM = NaN(K, n);  XP = NaN(K, n);
+hasCov = isfield(spfMeasLog, 'postCov');
+cVB = NaN(K, 3, 3);  cVA = NaN(K, 3, 3);  cPV = NaN(K, 3);       % |correlation| velocity x accel bias, velocity x attitude, position-velocity
 for k = 1:K
     s = spfMeasLog(k);
     if numel(s.postState) == n && numel(s.priorState) == n
         XM(k, :) = s.priorState(:)';
         XP(k, :) = s.postState(:)';
+    end
+    if hasCov && isequal(size(s.postCov), [n n])
+        P = s.postCov;
+        d = sqrt(diag(P));
+        if all(isfinite(d)) && all(d > 0)
+            C = P ./ (d * d');
+            cVB(k, :, :) = abs(C(4:6, iAcc));
+            cVA(k, :, :) = abs(C(4:6, 7:9));
+            cPV(k, :) = abs([C(1, 4), C(2, 5), C(3, 6)]);
+        end
     end
 end
 INC = XP - XM;
@@ -99,12 +113,14 @@ used = false(K, 1);
 for k = 1:K
     if ~okRec(k), continue; end
     iI = find(t >= tKf(k) - HALF - tol & t < tKf(k) + HALF - tol);   % the samples of this update's half epochs
+    iL = find(t >= tKf(k) - HALF - tol & t <= tKf(k) + LATE + tol);  % followed into the next half epoch, before its update
     if numel(iI) < 10 || iI(1) < 2, continue; end
     incPos(k, :) = INC(k, 1:3);
     incVel(k, :) = INC(k, 4:6);
     r = resPos(iI, :);  r(~isfinite(r)) = 0;
     chgPos(k, :) = sum(r, 1);
-    tI = t(iI) - tKf(k);
+    r = resPos(iL, :);  r(~isfinite(r)) = 0;
+    tI = t(iL) - tKf(k);
     cs = cumsum(r, 1);
     for j = 1:J
         m = find(tI <= tau(j) + tol, 1, 'last');
@@ -121,16 +137,22 @@ tStep = 0;                                               % the instant of the up
 if ~isempty(t50), tStep = median(t50); end
 
 % ---- pass 2: the velocity, lines either side of the step ----
+chgVelLate = NaN(K, 3);
 for k = find(used)'
     iB = find(t >= tKf(k) + tStep - TB1 & t <= tKf(k) + tStep - TB2);
     iA = find(t >= tKf(k) + tStep + TA1 & t <= tKf(k) + tStep + TA2);
-    iV = find(t >= tKf(k) - HALF - tol & t <= tKf(k) + HALF + tol);
+    iLa = find(t >= tKf(k) + tStep + TL1 & t <= tKf(k) + tStep + TL2);
+    iV = find(t >= tKf(k) - HALF - tol & t <= tKf(k) + LATE + tol);
     if numel(iB) < 4 || numel(iA) < 4
         used(k) = false;  chgPos(k, :) = NaN;  continue;
     end
     cB = [ones(numel(iB), 1), t(iB) - tKf(k)] \ navVel(iB, :);   % line before: value at tKf and slope
     cA = [ones(numel(iA), 1), t(iA) - tKf(k)] \ navVel(iA, :);   % line after
     chgVel(k, :) = (cA(1, :) + tStep * cA(2, :)) - (cB(1, :) + tStep * cB(2, :));
+    if numel(iLa) >= 4
+        cL = [ones(numel(iLa), 1), t(iLa) - tKf(k)] \ navVel(iLa, :);   % line late in the epoch
+        chgVelLate(k, :) = (cL(1, :) + tStep * cL(2, :)) - (cB(1, :) + tStep * cB(2, :));
+    end
     tV = t(iV) - tKf(k);
     dv = navVel(iV, :) - (repmat(cB(1, :), numel(iV), 1) + tV * cB(2, :));
     devVel(k, :, :) = interp1(tV, dv, tau, 'linear', NaN);
@@ -144,14 +166,18 @@ tPos = stepTimes(tau, profPos, sum(coefPos, 1));
 tVel = stepTimes(tau, profVel, sum(coefVel, 1));
 
 % ---- the change against the state x+ of record k ----
-gainPos = NaN(3, 3);  rxPos = NaN(1, 3);  gainVel = NaN(1, 3);  rxVel = NaN(1, 3);
+gainPos = NaN(3, 3);  rxPos = NaN(1, 3);  sxPos = NaN(1, 3);
+gainVel = NaN(1, 3);  rxVel = NaN(1, 3);  sxVel = NaN(1, 3);
+gainVelLate = NaN(1, 3);  sxVelLate = NaN(1, 3);
 for a = 1:3
     X = [XP(used, a), XP(used, a + 3)];
     if ~isempty(iPrs) && a == 3, X = [X, XP(used, iPrs)]; end
-    [c, rr] = fitThrough(X, chgPos(used, a));
-    gainPos(1:numel(c), a) = c;  rxPos(a) = rr;
-    [c, rr] = fitThrough(XP(used, a + 3), chgVel(used, a));
-    gainVel(a) = c;  rxVel(a) = rr;
+    [c, rr, ss] = fitThrough(X, chgPos(used, a));
+    gainPos(1:numel(c), a) = c;  rxPos(a) = rr;  sxPos(a) = ss;
+    [c, rr, ss] = fitThrough(XP(used, a + 3), chgVel(used, a));
+    gainVel(a) = c;  rxVel(a) = rr;  sxVel(a) = ss;
+    [c, ~, ss] = fitThrough(XP(used, a + 3), chgVelLate(used, a));
+    gainVelLate(a) = c;  sxVelLate(a) = ss;
 end
 
 % ---- bookkeeping: x- of record k+1 on x+ of record k ----
@@ -179,6 +205,22 @@ end
 keepVal(1) = median(aPP);  keepVal(2) = median(aVV);     % own-state share from the joint fit, free of the coupling
 xpMean = mean(XP(okRec, :), 1);
 xpRms  = sqrt(mean(XP(okRec, :).^2, 1));
+incAccU = INC(okRec, iAcc);                              % the accelerometer bias increments, for the chase / tracking reading
+accSame = NaN(1, 3);
+for a = 1:3
+    nz = incAccU(:, a) ~= 0 & isfinite(incAccU(:, a));
+    if any(nz), accSame(a) = 100 * mean(sign(incAccU(nz, a)) == sign(mean(incAccU(nz, a)))); end
+end
+medVB = NaN(3, 3);  medVA = NaN(3, 3);  medPV = NaN(1, 3);
+if hasCov
+    for i = 1:3
+        for j = 1:3
+            v = cVB(okRec, i, j);  v = v(isfinite(v));  if ~isempty(v), medVB(i, j) = median(v); end
+            v = cVA(okRec, i, j);  v = v(isfinite(v));  if ~isempty(v), medVA(i, j) = median(v); end
+        end
+        v = cPV(okRec, i);  v = v(isfinite(v));  if ~isempty(v), medPV(i) = median(v); end
+    end
+end
 xmMean = mean(XM(okRec, :), 1);
 xmRms  = sqrt(mean(XM(okRec, :).^2, 1));
 
@@ -223,8 +265,30 @@ fprintf('         correlation with x+ position %+10.2f %+11.2f %+11.2f\n', rxPos
 printBlock('velocity increment x+ - x- (4:6)', 'change of navVel across the step', incVel(used, :), chgVel(used, :), coefVel, seVel, rVel, 'm/s');
 fprintf('      on the state x+ of record k\n');
 fprintf('         x+ velocity                 %+11.3f %+11.3f %+11.3f       (-GAIN when the host applies GAIN x+)\n', gainVel);
+fprintf('         standard error              %11.3f %11.3f %11.3f\n', sxVel);
 fprintf('         correlation                 %+11.2f %+11.2f %+11.2f\n', rxVel);
+fprintf('      read %.2f to %.2f s after the step instead (the correction still there late in the epoch)\n', TL1, TL2);
+fprintf('         mean                        %+11.4f %+11.4f %+11.4f   m/s\n', mean(chgVelLate(used, :), 1));
+fprintf('         on x+ velocity              %+11.3f %+11.3f %+11.3f       (equal to the early read when the correction stays)\n', gainVelLate);
+fprintf('         standard error              %11.3f %11.3f %11.3f\n', sxVelLate);
 printProfile(tau, profPos, profVel, tPos, tVel);
+fprintf('   accelerometer bias increment x+ - x- (%d:%d), in mg\n', iAcc(1), iAcc(end));
+fprintf('      mean                         %+11.4f %+11.4f %+11.4f   mg\n', mean(incAccU, 1) / MG);
+fprintf('      median                       %+11.4f %+11.4f %+11.4f   mg\n', median(incAccU, 1) / MG);
+fprintf('      with the sign of the mean    %10.0f%% %10.0f%% %10.0f%%   of the epochs (near 50 tracking a wandering bias, well above it a chase)\n', accSame);
+fprintf('      x+ accel bias  mean / rms     %+8.3f /%6.3f %+8.3f /%6.3f %+8.3f /%6.3f   mg\n', [xpMean(iAcc); xpRms(iAcc)] / MG);
+if hasCov
+    fprintf('   coupling the covariance carries (postCov), |correlation| between the states, median over the epochs\n');
+    fprintf('      position - velocity, same axis  %8.2f    %8.2f    %8.2f\n', medPV);
+    fprintf('      velocity x accel bias            bX        bY        bZ        velocity x attitude   roll      pitch     yaw\n');
+    rowName = {'vN', 'vE', 'vD'};
+    for i = 1:3
+        fprintf('         %s                        %6.2f    %6.2f    %6.2f           %s                %6.2f    %6.2f    %6.2f\n', ...
+            rowName{i}, medVB(i, :), rowName{i}, medVA(i, :));
+    end
+    fprintf('      (a velocity row near zero on every bias and attitude column is an axis whose error the filter cannot attribute to\n');
+    fprintf('      the IMU: no coupling in F for that axis)\n');
+end
 fprintf('   state carried between updates (records only): x- of record k+1 on x+ of record k\n');
 fprintf('      share of x+ kept in x-, median over the states of the group\n');
 for g = 1:size(groups, 1)
@@ -265,8 +329,8 @@ if nUsed < 10
 else
     % on an axis where the bookkeeping keeps a residual and the change follows the state x+ closely, the
     % state-based reading replaces the increment-based one
-    byStatePos = splitAxes(rxPos, keepVal(1), xpRms(1:3), 1e-3);
-    byStateVel = splitAxes(rxVel, keepVal(2), xpRms(4:6), 1e-4);
+    byStatePos = splitAxes(gainPos(1, :), sxPos, rxPos, keepVal(1), xpRms(1:3), 1e-3);
+    byStateVel = splitAxes(gainVel, sxVel, rxVel, keepVal(2), xpRms(4:6), 1e-4);
     verdict = [verdict, axisVerdicts('position', coefPos, rmsPos, 1e-4, byStatePos)];
     verdict = [verdict, axisVerdicts('velocity', coefVel, rmsVel, 1e-5, byStateVel)];
     verdict = [verdict, stepVerdicts('position', tPos, coefPos, rmsPos, 1e-4)];
@@ -276,6 +340,14 @@ else
     [vS, nS] = splitVerdicts(gainVel, keepVal(2), 'velocity', byStateVel);
     verdict = [verdict, vS];  notes = [notes, nS];
     for i = 1:numel(notes), fprintf('   NOTE: %s\n', notes{i}); end
+    ax = 'NED';
+    for a = 1:3
+        early = gainVel(a);  late = gainVelLate(a);
+        if isfinite(early) && isfinite(late) && abs(early) > 3 * sxVel(a) && abs(early) > 0.03 && abs(late) < 0.3 * abs(early)
+            verdict{end+1} = sprintf('the %s velocity correction applied at the step (%+.3f of x+) is gone by tKf %+.2f s (%+.3f of x+ left): something restores the velocity between the updates', ...
+                ax(a), early, tStep + TL1, late);
+        end
+    end
     if isfinite(keepVal(2)) && keepVal(2) > 0.2 && any(abs(aVP) > 0.1)
         verdict{end+1} = sprintf('the velocity residual receives %s x the position residual each epoch: the residual is propagated with Phi transposed (kfState * phi in place of (phi * kfState'')'')', sprintf('%+.2f ', aVP));
     end
@@ -302,7 +374,8 @@ end
 keep = cell2struct(num2cell(keepVal(:)), regexprep(groups(:, 1), ' ', '_'), 1);
 res = struct('t', tKf, 'incPos', incPos, 'incVel', incVel, 'chgPos', chgPos, 'chgVel', chgVel, 'used', used, ...
     'coefPos', coefPos, 'coefVel', coefVel, 'sePos', sePos, 'seVel', seVel, 'rPos', rPos, 'rVel', rVel, ...
-    'gainPos', gainPos, 'gainVel', gainVel, 'rxPos', rxPos, 'rxVel', rxVel, ...
+    'gainPos', gainPos, 'gainVel', gainVel, 'gainVelLate', gainVelLate, 'rxPos', rxPos, 'rxVel', rxVel, 'chgVelLate', chgVelLate, ...
+    'accSame', accSame, 'corrVelBias', medVB, 'corrVelAtt', medVA, 'corrPosVel', medPV, ...
     'tau', tau, 'profPos', profPos, 'profVel', profVel, 'tStep', tStep, ...
     't10', [tPos(1, :); tVel(1, :)], 't50', [tPos(2, :); tVel(2, :)], 't90', [tPos(3, :); tVel(3, :)], ...
     'keep', keep, 'aPP', aPP, 'aPV', aPV, 'aVV', aVV, 'aVP', aVP, 'xpMean', xpMean, 'xmMean', xmMean, ...
@@ -332,7 +405,7 @@ fprintf('      correlation with record k    %+11.2f %+11.2f %+11.2f\n', r);
 end
 
 function printProfile(tau, profPos, profVel, tPos, tVel)
-show = [-0.2 -0.1 -0.05 -0.02 -0.01 0 0.01 0.02 0.05 0.1 0.2 0.25];
+show = [-0.2 -0.1 -0.05 -0.02 -0.01 0 0.01 0.02 0.05 0.1 0.2 0.25 0.3 0.35 0.4 0.45];
 j = zeros(size(show));
 for i = 1:numel(show), [~, j(i)] = min(abs(tau - show(i))); end
 fprintf('   step profile: share of the increment in the logged solution at tKf + tau (regression across the epochs)\n');
@@ -362,15 +435,22 @@ for a = 1:3
 end
 end
 
-function [c, r] = fitThrough(X, y)
+function [c, r, se] = fitThrough(X, y)
 % least squares through the origin, rows with a NaN and columns without variation left out; r the
-% correlation of y with the first column
-c = NaN(size(X, 2), 1);  r = NaN;
+% correlation of y with the first column, se the standard error of the first coefficient
+c = NaN(size(X, 2), 1);  r = NaN;  se = NaN;
 ok = all(isfinite([X, y]), 2);
 live = sum(X(ok, :).^2, 1) > 0;
 if nnz(ok) > 10 && any(live)
-    c(live) = X(ok, live) \ y(ok);
-    dx = X(ok, 1) - mean(X(ok, 1));  dy = y(ok) - mean(y(ok));
+    Xo = X(ok, live);  yo = y(ok);
+    c(live) = Xo \ yo;
+    resid = yo - Xo * c(live);
+    s2 = sum(resid.^2) / max(numel(yo) - nnz(live), 1);
+    if live(1)
+        V = s2 * inv(Xo' * Xo);
+        se = sqrt(V(1, 1));
+    end
+    dx = X(ok, 1) - mean(X(ok, 1));  dy = yo - mean(yo);
     den = sqrt(sum(dx.^2) * sum(dy.^2));
     if den > 0, r = sum(dx .* dy) / den; end
 end
@@ -475,12 +555,12 @@ for a = 1:3
 end
 end
 
-function [by] = splitAxes(rx, keepShare, xpRms, tiny)
+function [by] = splitAxes(gain, se, rx, keepShare, xpRms, tiny)
 % the axes read from the state: the bookkeeping keeps a residual (a split feedback) and the change of the
-% logged solution follows x+ closely
+% logged solution follows x+ (a correlation of 0.8, or a coefficient three standard errors from zero)
 by = false(1, 3);
 if isfinite(keepShare) && keepShare >= 0.2 && keepShare <= 0.98
-    by = xpRms > tiny & isfinite(rx) & abs(rx) >= 0.8;
+    by = xpRms > tiny & isfinite(gain) & ((isfinite(rx) & abs(rx) >= 0.8) | (isfinite(se) & abs(gain) > 3 * se));
 end
 end
 

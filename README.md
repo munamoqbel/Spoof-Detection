@@ -156,17 +156,26 @@ correction the update put into the position, whenever and however it was
 applied, and its running sum regressed on the increment postState minus
 priorState across the epochs is the step profile, from which the instant of
 the update is read (10, 50 and 90 % of the step). The change is regressed
-jointly on the increments of the records k-1, k and k+1: -1 at k is an
-increment applied in full at its own epoch (error state estimate minus
-truth), 0 one that never reaches the logged solution, a coefficient at k-1 or
-k+1 records offset by one epoch from the nav log. The velocity is read the
-same way against a line fitted before the epoch, and with biasEst the sum of
-the accelerometer bias increments over the window is set against the change
-of biasEst. Verdict lines name an axis whose increment does not reach the
-solution, one applied in part, over more than one epoch or with the opposite
-sign, offset records, and a step spread over more than 0.05 s (a slewed
-feedback). `tests/test_feedbackCheck.m` covers the applied, half-applied,
-unapplied, offset and slewed cases.
+jointly on the increments of the records k-1, k and k+1 (-1 at k an increment
+applied in full at its own epoch, 0 one that never reaches the logged
+solution, a coefficient at k-1 or k+1 records offset by one epoch) and on the
+state x+ of record k (-GAIN when the host applies GAIN x+). The velocity is
+read the same way against lines fitted either side of the step. From the
+records alone, x- of record k+1 regressed on x+ of record k gives the share of
+each state the bookkeeping keeps after the feedback (1 - GAIN for the host's
+split), the velocity residual integrated into the position residual (0.5 s
+times the kept share when the residual is propagated with Phi) and the
+position residual leaking into the velocity residual (Phi transposed). With
+biasEst the sum of the accelerometer bias increments over the window is set
+against the change of biasEst. Verdict lines name an axis whose increment
+does not reach the solution, one applied in part, over more than one epoch or
+with the opposite sign, offset records, a slewed step, a logged solution that
+receives less of the state than the bookkeeping removes (part of each
+correction lost between setKF and the mechanisation), and a residual
+propagated with Phi transposed or without its coupling.
+`tests/test_feedbackCheck.m` covers the applied, half-applied, unapplied,
+offset and slewed cases, the host's split with GAIN 0.4, and a split that
+books 0.4 but applies 0.16 with Phi transposed.
 `tools/covPropCheck.m` reads the same spfMeas records and asks whether the
 host's P keeps its cross terms from one 2 Hz epoch to the next: the previous
 P+ is propagated over the interval with the INS error dynamics (no Q), the

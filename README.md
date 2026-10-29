@@ -166,7 +166,13 @@ being taken back between the updates), and the profile is followed to 0.45 s
 after the epoch. The plain average of the velocity within the epoch, the
 vehicle's own dynamics averaged out, shows what every update does and what
 the mechanisation does between updates: the jump at the step and the slope
-after it, the acceleration the mechanisation carries on that axis, in mg.
+after it, the acceleration the mechanisation carries on that axis, in mg;
+with tTrue and trueVel in the run the same is read from the velocity error,
+free of the vehicle's dynamics, and per block of the window the acceleration
+error is set against the fed-back Z accelerometer bias (biasEst, and biasTrue
+when given): a slope of plus or minus one across the blocks is a bias feedback
+that acts on the vertical acceleration in full, zero one that does not, and
+an estimate that trends away from the truth is a chase.
 From the
 records alone, x- of record k+1 regressed on x+ of record k gives the share of
 each state the bookkeeping keeps after the feedback (1 - GAIN for the host's
@@ -186,8 +192,9 @@ correction lost between setKF and the mechanisation), and a residual
 propagated with Phi transposed or without its coupling.
 `tests/test_feedbackCheck.m` covers the applied, half-applied, unapplied,
 offset and slewed cases, the host's split with GAIN 0.4, a split that books
-0.4 but applies 0.16 with Phi transposed, and a velocity correction taken
-back 0.25 s after the step.
+0.4 but applies 0.16 with Phi transposed, a velocity correction taken back
+0.25 s after the step, and a constant vertical acceleration error with a bias
+estimate running away from a constant truth.
 `tools/covPropCheck.m` reads the same spfMeas records and asks whether the
 host's P keeps its cross terms from one 2 Hz epoch to the next: the previous
 P+ is propagated over the interval with the INS error dynamics (no Q), the

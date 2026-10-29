@@ -22,7 +22,7 @@ cnt  = @(txt, s) numel(strfind(txt, s));
 ok = true;
 chk = struct();
 % A: full feedback, D velocity and Z bias not applied
-[runA, logA] = makeRun(t, tKf, velTrue, [1 1 0], 1, 0, 0, 1, 1, 'none', 0, 0.02);
+[runA, logA] = makeRun(t, tKf, velTrue, [1 1 0], 1, 0, 0, 1, 1, 'none', 0, 0.02, 1e-5);
 txtA = evalc('resA = feedbackCheck(runA, logA);');
 fprintf('%s', txtA);
 chk.posA      = near(resA.coefPos(2, :), -1, 0.03) && near(resA.coefPos([1 3], :), 0, 0.03) && near(resA.gainPos(1, :), -1, 0.03);
@@ -31,7 +31,11 @@ chk.stepA     = near(resA.t50(1, :), 0, 0.011) && near(resA.t90(1, :) - resA.t10
 chk.keepA     = near([resA.keep.position, resA.keep.velocity], 0, 0.01);
 chk.usedA     = resA.nUsed == K;
 chk.biasA     = abs(resA.dBias(3) / resA.incBias(3)) < 0.05 && near(resA.dBias(1:2) ./ resA.incBias(1:2), -1, 1e-6);
-chk.waveA     = abs(resA.slopeV(3) / 9.80665e-3 - 2.04) < 0.15 && all(abs(resA.slopeV(1:2)) < 0.02) && abs(resA.jumpV(3)) < 0.002 && ...
+chk.errA      = abs(resA.slopeE(3) / 9.80665e-3 - 2.04) < 0.05 && all(abs(resA.slopeE(1:2)) < 1e-4) && abs(resA.jumpE(3)) < 1e-3 && ...
+                abs(resA.jumpE(1) + mean(resA.incVel(resA.used, 1))) < 1e-3;
+chk.blocksA   = numel(resA.blocks.t0) == 4 && all(abs(resA.blocks.acc(:, 3) - 2.04) < 0.05) && ~isfinite(resA.blocks.slopeOnBias) && ...
+                abs(resA.blocks.trendErr) < 0.1 && cnt(txtA, 'does not act on the vertical acceleration') == 0 && cnt(txtA, 'runs away from the truth') == 0;
+chk.waveA     = all(abs(resA.slopeV(1:2)) < 0.005) && abs(resA.jumpV(3)) < 0.002 && ...
                 abs(resA.jumpV(1) + mean(resA.incVel(resA.used, 1))) < 0.002 && abs(resA.meanWaveP(end, 3) + mean(resA.incPos(resA.used, 3))) < 0.003;
 chk.verdictA  = cnt(txtA, 'the D velocity increment does not reach') == 1 && cnt(txtA, 'bias increments reach biasEst on some axes only') == 1 && cnt(txtA, 'VERDICT') == 2;
 % B: everything applied, cell input, biasEst per nav sample, a window
@@ -39,6 +43,7 @@ chk.verdictA  = cnt(txtA, 'the D velocity increment does not reach') == 1 && cnt
 runB.biasEst = interp1(tKf, runB.biasEst, t, 'previous', 'extrap');
 txtB = evalc('resB = feedbackCheck(runB, num2cell(logB), [100 300]);');
 chk.coefB     = near(resB.coefPos(2, :), -1, 0.03) && near(resB.coefVel(2, :), -1, 0.03) && near(resB.gainVel, -1, 0.03);
+chk.waveB     = all(abs(resB.slopeV(1:2)) < 0.003) && all(abs(resB.slopeE) < 1e-4) && all(abs(resB.meanWaveP(end, :) + mean(resB.incPos(resB.used, :), 1)) < 0.004);
 chk.winB      = resB.nUsed == nnz(tKf >= 100 & tKf <= 300) && all(resB.t(resB.used) >= 100) && all(resB.t(resB.used) <= 300);
 chk.biasB     = near(resB.dBias ./ resB.incBias, -1, 1e-6);
 chk.quietB    = cnt(txtB, 'VERDICT') == 0;
@@ -79,6 +84,12 @@ chk.verdictG  = cnt(txtG, 'lost between setKF and the mechanisation') == 6 && cn
 txtH = evalc('resH = feedbackCheck(runH, logH);');
 chk.gainH     = near(resH.gainVel, -1, 0.1) && near(resH.gainVelLate, 0, 0.1) && near(resH.gainPos(1, :), -1, 0.03);
 chk.verdictH  = cnt(txtH, 'something restores the velocity between the updates') == 3;
+% I: a constant 2 mg vertical acceleration error, everything applied, the Z bias estimate drifting away from a constant truth
+[runI, logI] = makeRun(t, tKf, velTrue, [1 1 1], 1, 1, 0, 1, 1, 'none', 0, 0.02, 1e-5);
+txtI = evalc('resI = feedbackCheck(runI, logI);');
+chk.blocksI   = all(abs(resI.blocks.acc(:, 3) - 2.04) < 0.05) && abs(resI.blocks.slopeOnBias) < 0.3 && resI.blocks.seOnBias < 0.3 && ...
+                abs(resI.blocks.trendErr + 2.04) < 0.4 && abs(resI.slopeE(3) / 9.80665e-3 - 2.04) < 0.05;
+chk.verdictI  = cnt(txtI, 'does not act on the vertical acceleration') == 1 && cnt(txtI, 'runs away from the truth') == 1 && cnt(txtI, 'VERDICT') == 2;
 % the coupling block from the postCov of the records
 chk.covA      = abs(resA.corrVelBias(3, 3) - 0.5) < 1e-9 && abs(resA.corrVelBias(1, 1) - 0.3) < 1e-9 && abs(resA.corrPosVel(1) - 0.7) < 1e-9 && ...
                 resA.corrVelBias(2, 2) == 0 && cnt(txtA, 'coupling the covariance carries') == 1;
@@ -94,9 +105,10 @@ if ok, fprintf('=== test_feedbackCheck PASS ===\n'); else, fprintf('=== test_fee
 end
 
 %------------------------------------------------------------------------
-function [run, log] = makeRun(t, tKf, velTrue, applyVel, applyPos, applyBias, tauSlew, gKeep, gApplied, phiMode, undoAt, aErr)
+function [run, log] = makeRun(t, tKf, velTrue, applyVel, applyPos, applyBias, tauSlew, gKeep, gApplied, phiMode, undoAt, aErr, bDrift)
 if nargin < 11, undoAt = 0; end
 if nargin < 12, aErr = 0; end
+if nargin < 13, bDrift = 0; end
 % a mechanised solution with a velocity error e and a position error pErr. At each epoch the KF increment
 % (random, plus a persistent +0.009 m/s on D and +0.05 m on D) is added to the carried state x- to give x+;
 % the mechanisation receives gApplied x+ on the axes in applyVel (velocity) and, with applyPos, on every
@@ -119,7 +131,7 @@ for i = 1:N
     if kNext <= K && t(i) >= tKf(kNext) - 1e-9
         incV = 0.02 * randn(1, 3) + [0 0 0.009];
         incP = 0.10 * randn(1, 3) + [0 0 0.05];
-        incB = 2e-5 * randn(1, 3) + [0 0 1e-5];
+        incB = 2e-5 * randn(1, 3) + [0 0 bDrift];
         xp = xm + [incP, incV];
         pendV = pendV + gApplied * xp(4:6) .* applyVel;
         pendP = pendP + gApplied * xp(1:3) * applyPos;
@@ -145,11 +157,18 @@ for i = 1:N
     pErrArr(i, :) = pErr;
 end
 posNed = cumtrapz(t, velNav) + pErrArr;
+% lat, lon, h integrated sample by sample with the radii at the sample, the way a mechanisation does
 a = 6378137;  e2 = 6.69437999014e-3;
-RN = a * (1 - e2) / (1 - e2 * sin(lat0)^2)^1.5;
-RE = a / sqrt(1 - e2 * sin(lat0)^2);
-h   = h0 - posNed(:, 3);
-lat = lat0 + posNed(:, 1) ./ (RN + h);
-lon = lon0 + posNed(:, 2) ./ ((RE + h) * cos(lat0));
-run = struct('t', t, 'navPos', [lat, lon, h], 'navVel', velNav, 'tKf', tKf, 'biasEst', biasEst);
+lat = zeros(N, 1);  lon = zeros(N, 1);  h = zeros(N, 1);
+lat(1) = lat0;  lon(1) = lon0;  h(1) = h0;
+dP = diff(posNed);
+for i = 1:N-1
+    RN = a * (1 - e2) / (1 - e2 * sin(lat(i))^2)^1.5;
+    RE = a / sqrt(1 - e2 * sin(lat(i))^2);
+    lat(i+1) = lat(i) + dP(i, 1) / (RN + h(i));
+    lon(i+1) = lon(i) + dP(i, 2) / ((RE + h(i)) * cos(lat(i)));
+    h(i+1)   = h(i) - dP(i, 3);
+end
+run = struct('t', t, 'navPos', [lat, lon, h], 'navVel', velNav, 'tKf', tKf, 'biasEst', biasEst, ...
+    'tTrue', t, 'trueVel', velTrue, 'biasTrue', [1e-3 -2e-3 5e-3 0 0 0]);
 end

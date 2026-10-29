@@ -74,6 +74,7 @@ blocks = {iPos(1:2), iVel(1:2); iVel(1:2), iAtt(1:2); iVel(1:2), iBa; iAtt, iBg}
 blockName = {'pos-vel', 'vel-tilt', 'vel-accel bias', 'tilt-gyro bias'};
 
 ratio = NaN(K, 4);  sigLogged = NaN(K, 4);  sigOneStep = NaN(K, 4);  sigChain = NaN(K, 4);  hphRatio = NaN(K, 1);
+ratioVert = NaN(K, 1);  corrVert = NaN(K, 2);                 % the vertical pair vD x bZ: logged / predicted, and both correlations
 Pc = [];  kOut = [];
 if hasOut, kOut = find(tKf <= tOut + 1e-3, 1, 'last'); end
 if ~isempty(kOut), Pc = spfMeasLog(kOut).postCov; end
@@ -92,6 +93,10 @@ for k = 1:K
         lb = norm(L(blocks{b, 1}, blocks{b, 2}), 'fro');
         if pb > 1e-300, ratio(k, b) = lb / pb; end
     end
+    iv = iVel(3);  ib = iBa(3);                                   % the vertical pair, the one the horizontal blocks leave out
+    if abs(Pp(iv, ib)) > 1e-300, ratioVert(k) = L(iv, ib) / Pp(iv, ib); end
+    if L(iv, iv) > 0 && L(ib, ib) > 0, corrVert(k, 1) = L(iv, ib) / sqrt(L(iv, iv) * L(ib, ib)); end
+    if Pp(iv, iv) > 0 && Pp(ib, ib) > 0, corrVert(k, 2) = Pp(iv, ib) / sqrt(Pp(iv, iv) * Pp(ib, ib)); end
     if inOutage(k) && ~isempty(Pc)
         Pc = Phi * Pc * Phi';
         Pc = applyRows(Pc, spfMeasLog(k));
@@ -101,6 +106,8 @@ end
 aided = ~inOutage;  aided(1) = false;
 medianAided  = medianRows(ratio(aided, :));
 medianOutage = medianRows(ratio(inOutage, :));
+medVertAided = medianRows(ratioVert(aided));  medVertOut = medianRows(ratioVert(inOutage));
+corrVertAided = medianRows(corrVert(aided, :));
 
 if haveNav, navTxt = 'C and f from the nav solution'; else, navTxt = 'level vehicle, f = -g (no run given)'; end
 fprintf('covPropCheck: %d epochs, %d states, Phi over each interval from %s, no Q\n', K, n, navTxt);
@@ -115,6 +122,12 @@ reading = cell(1, 4);
 for b = 1:4
     reading{b} = readRatio(medianAided(b), medianOutage(b));
     fprintf('   %-16s %8s %8s   %s\n', blockName{b}, fmtRatio(medianAided(b)), fmtRatio(medianOutage(b)), reading{b});
+    if b == 3
+        fprintf('   %-16s %8s %8s   %s\n', 'vD x bZ (element)', fmtRatio(medVertAided), fmtRatio(medVertOut), readRatio(medVertAided, medVertOut));
+        fprintf('   %-16s %8s %8s   (the vertical pair the block above leaves out: logged correlation %+.3f, one-step\n', '', '', '', corrVertAided(1));
+        fprintf('   %-16s %8s %8s   predicted %+.3f; a filter that keeps the pair reads 0.5 to 0.7 within a few epochs, one that\n', '', '', '', corrVertAided(2));
+        fprintf('   %-16s %8s %8s   starts from nothing each epoch reads dt x sigma_b / sigma_v, a few hundredths)\n', '', '', '');
+    end
 end
 if any(isfinite(hphRatio))
     fprintf('   S - R against H P- H'' with P- the propagated previous P+, median over the aided rows: %.2f (1 = the host updates\n', ...
@@ -176,6 +189,15 @@ elseif all(kept)
     fprintf('            the implied one then comes from a drop listed above, or from a pDiag that is not postCov (see the pDiag line)\n');
 else
     fprintf('   VERDICT: cross blocks partly kept (ratios between 0.2 and 0.7): the host shrinks them each epoch rather than zeroing them\n');
+end
+if isfinite(medVertAided) && medVertAided < 0.5 && isfinite(corrVertAided(2)) && abs(corrVertAided(2)) > 0.1
+    fprintf('   VERDICT: the vertical pair vD x bZ is %.2f of what the propagation from the previous P+ gives (logged correlation %+.3f against\n', medVertAided, corrVertAided(1));
+    fprintf('            %+.3f predicted): the host''s 2 Hz path loses the velocity-to-Z-bias term each epoch, which is why the Z bias is\n', corrVertAided(2));
+    fprintf('            learned over minutes instead of seconds. Nothing in Q repairs that; find the line that writes P there\n');
+elseif isfinite(corrVertAided(1)) && abs(corrVertAided(1)) < 0.1 && isfinite(corrVertAided(2)) && abs(corrVertAided(2)) < 0.1
+    fprintf('   VERDICT: the vertical pair vD x bZ reads %+.3f in the logged P+ and %+.3f in the one-step prediction: the previous P+ carries\n', corrVertAided(1), corrVertAided(2));
+    fprintf('            none of it either, so the term never accumulates; a filter that keeps it reads 0.5 to 0.7. The pair is removed\n');
+    fprintf('            somewhere in the 2 Hz path, or the velocity row of F has no Z-bias column\n');
 end
 pDiagMatch = NaN;
 if ~isempty(pDiag)
@@ -260,7 +282,7 @@ if ~isempty(propTelLog)
     end
 end
 res = struct('t', tKf, 'ratio', ratio, 'sigLogged', sigLogged, 'sigOneStep', sigOneStep, 'sigChain', sigChain, ...
-    'inOutage', inOutage, 'medianAided', medianAided, 'medianOutage', medianOutage, 'hphRatio', hphRatio, 'pDiagMatch', pDiagMatch, ...
+    'inOutage', inOutage, 'medianAided', medianAided, 'medianOutage', medianOutage, 'hphRatio', hphRatio, 'ratioVert', ratioVert, 'corrVert', corrVert, 'pDiagMatch', pDiagMatch, ...
     'accInterval', accInterval, 'accCoupling', accCoupling, 'ratioHost', ratioHost, 'drops', drops);
 end
 

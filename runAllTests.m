@@ -15,6 +15,7 @@ function runAllTests()
 %  11. tests/test_spoofProfile     onset, end, size and system of a spoof from the spfMeas records (tools/spoofProfile)
 %  12. tests/test_spoofInject      the injection of a step, ramp or clock push into the host's slot arrays (tools/spoofInject)
 %  13. tests/test_feedbackCheck    the jump of the logged nav solution across each update against the KF increment (tools/feedbackCheck)
+%  14. tests/test_gravityCheck     the WGS84 normal gravity at a run's site and the error of a host constant (tools/gravityCheck)
 %
 % Each test is run in its own workspace (they may 'clear'); its console
 % output is captured and searched for its own PASS marker.
@@ -35,7 +36,8 @@ tests = { ...
     'test_covPropCheck',     '=== test_covPropCheck PASS ===';
     'test_spoofProfile',     '=== test_spoofProfile PASS ===';
     'test_spoofInject',      '=== test_spoofInject PASS ===';
-    'test_feedbackCheck',    '=== test_feedbackCheck PASS ==='};
+    'test_feedbackCheck',    '=== test_feedbackCheck PASS ===';
+    'test_gravityCheck',     '=== test_gravityCheck PASS ==='};
 
 fprintf('==============================================\n');
 fprintf('  Spoof-detection pre-integration tests\n');

@@ -89,6 +89,7 @@ if n < 20, iPrs = []; end
 XM = NaN(K, n);  XP = NaN(K, n);
 hasCov = isfield(spfMeasLog, 'postCov');
 cVB = NaN(K, 3, 3);  cVA = NaN(K, 3, 3);  cPV = NaN(K, 3);       % |correlation| velocity x accel bias, velocity x attitude, position-velocity
+sVel = NaN(K, 3);  sBia = NaN(K, 3);                             % sigma of the velocity and of the accelerometer bias, from postCov
 for k = 1:K
     s = spfMeasLog(k);
     if numel(s.postState) == n && numel(s.priorState) == n
@@ -103,6 +104,7 @@ for k = 1:K
             cVB(k, :, :) = abs(C(4:6, iAcc));
             cVA(k, :, :) = abs(C(4:6, 7:9));
             cPV(k, :) = abs([C(1, 4), C(2, 5), C(3, 6)]);
+            sVel(k, :) = d(4:6)';  sBia(k, :) = d(iAcc)';
         end
     end
 end
@@ -236,8 +238,14 @@ for a = 1:3
     nz = incAccU(:, a) ~= 0 & isfinite(incAccU(:, a));
     if any(nz), accSame(a) = 100 * mean(sign(incAccU(nz, a)) == sign(mean(incAccU(nz, a)))); end
 end
-medVB = NaN(3, 3);  medVA = NaN(3, 3);  medPV = NaN(1, 3);
+medVB = NaN(3, 3);  medVA = NaN(3, 3);  medPV = NaN(1, 3);  medSV = NaN(1, 3);  medSB = NaN(1, 3);  oneEpoch = NaN(1, 3);
+dtEp = median(diff(tKf));
 if hasCov
+    for a = 1:3
+        v = sVel(okRec, a);  v = v(isfinite(v));  if ~isempty(v), medSV(a) = median(v); end
+        v = sBia(okRec, a);  v = v(isfinite(v));  if ~isempty(v), medSB(a) = median(v); end
+    end
+    oneEpoch = dtEp * medSB ./ medSV;                       % the correlation one epoch of propagation builds from nothing
     for i = 1:3
         for j = 1:3
             v = cVB(okRec, i, j);  v = v(isfinite(v));  if ~isempty(v), medVB(i, j) = median(v); end
@@ -315,6 +323,10 @@ if hasCov
     end
     fprintf('      (a velocity row near zero on every bias and attitude column is an axis whose error the filter cannot attribute to\n');
     fprintf('      the IMU: no coupling in F for that axis)\n');
+    fprintf('      sigma of the velocity %.4f %.4f %.4f m/s and of the accelerometer bias %.3f %.3f %.3f mg (postCov diagonals, medians)\n', medSV, medSB / MG);
+    fprintf('      one epoch of propagation builds a velocity x same-axis bias correlation of dt x sigma_b / sigma_v = %.3f %.3f %.3f\n', oneEpoch);
+    fprintf('      (a P that carries the term from one epoch to the next reads 0.5 to 0.7 on the vertical pair; one that starts from\n');
+    fprintf('      nothing each epoch reads the build-up alone)\n');
 end
 fprintf('   state carried between updates (records only): x- of record k+1 on x+ of record k\n');
 fprintf('      share of x+ kept in x-, median over the states of the group\n');
@@ -405,6 +417,10 @@ else
     if isfinite(keepVal(1)) && keepVal(1) > 0.2 && all(abs(aPV) < 0.1 * keepVal(1)) && all(abs(aVP) < 0.1)
         verdict{end+1} = 'the position residual does not receive the velocity residual: the residual is carried without the Phi coupling';
     end
+    if hasCov && isfinite(medVB(3, 3)) && isfinite(oneEpoch(3)) && medVB(3, 3) < 0.15 && medVB(3, 3) < 3 * oneEpoch(3)
+        verdict{end+1} = sprintf('the velocity-to-Z-bias term of P is not carried from one epoch to the next: vD x bZ reads %.3f, the build-up of a single epoch is %.3f, a filter that keeps the term reads 0.5 to 0.7; the Z bias is learned over minutes instead of seconds for that reason, not for its Q. covPropCheck(spfMeasLog, tKf, [], [], run) says where the term goes', ...
+            medVB(3, 3), oneEpoch(3));
+    end
     if ~isempty(iPrs) && isfinite(gainPos(3, 3)) && abs(gainPos(3, 3)) > 0.1 && xpRms(iPrs) > 1e-3
         verdict{end+1} = sprintf('the altitude moves by %+.2f x the pressure altitude state at each update, on top of the position feedback', gainPos(3, 3));
     end
@@ -426,7 +442,7 @@ keep = cell2struct(num2cell(keepVal(:)), regexprep(groups(:, 1), ' ', '_'), 1);
 res = struct('t', tKf, 'incPos', incPos, 'incVel', incVel, 'chgPos', chgPos, 'chgVel', chgVel, 'used', used, ...
     'coefPos', coefPos, 'coefVel', coefVel, 'sePos', sePos, 'seVel', seVel, 'rPos', rPos, 'rVel', rVel, ...
     'gainPos', gainPos, 'gainVel', gainVel, 'gainVelLate', gainVelLate, 'rxPos', rxPos, 'rxVel', rxVel, 'chgVelLate', chgVelLate, ...
-    'accSame', accSame, 'corrVelBias', medVB, 'corrVelAtt', medVA, 'corrPosVel', medPV, ...
+    'accSame', accSame, 'corrVelBias', medVB, 'corrVelAtt', medVA, 'corrPosVel', medPV, 'sigVel', medSV, 'sigBias', medSB, 'oneEpoch', oneEpoch, ...
     'meanWaveV', meanWaveV, 'meanWaveP', meanWaveP, 'meanWaveE', meanWaveE, 'slopeV', slopeV, 'jumpV', jumpV, ...
     'slopeE', slopeE, 'jumpE', jumpE, 'aNet', aNet, 'blocks', blk, ...
     'tau', tau, 'profPos', profPos, 'profVel', profVel, 'tStep', tStep, ...

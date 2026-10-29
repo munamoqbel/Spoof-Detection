@@ -199,6 +199,13 @@ offset and slewed cases, the host's split with GAIN 0.4, a split that books
 0.25 s after the step, a constant vertical acceleration error with a bias
 estimate running away from a constant truth, and a true bias that moves with
 an estimate following it at a lag.
+`tools/gravityCheck.m` prints the WGS84 normal gravity at a run's site (the
+mean latitude and height of truePos) and the Down acceleration error, in mg,
+that a host carries when its mechanisation uses a constant (9.80665, 9.81,
+9.8) or the ellipsoid value without the height terms, or any value given; the
+candidate that matches the constant feedbackCheck measures in its vertical
+budget names the host's gravity model. `tests/test_gravityCheck.m` checks the
+formula against the tabulated values.
 `tools/covPropCheck.m` reads the same spfMeas records and asks whether the
 host's P keeps its cross terms from one 2 Hz epoch to the next: the previous
 P+ is propagated over the interval with the INS error dynamics (no Q), the

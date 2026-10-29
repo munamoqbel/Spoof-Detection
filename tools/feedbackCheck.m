@@ -377,8 +377,19 @@ else
             verdict{end+1} = sprintf('the fed-back Z accelerometer bias acts on the vertical acceleration in part (%+.2f +- %.2f mg per mg across the blocks)', blk.slopeOnBias, blk.seOnBias);
         end
     end
-    if isfinite(blk.trendErr) && abs(blk.trendErr) > 0.5
-        verdict{end+1} = sprintf('the Z accelerometer bias estimate runs away from the truth by %+.2f mg per 1000 s: a chase of an acceleration error the bias feedback does not remove', blk.trendErr);
+    if isfinite(blk.errStart) && isfinite(blk.errEnd)
+        if abs(blk.errEnd) > abs(blk.errStart) + 0.5
+            verdict{end+1} = sprintf('the Z accelerometer bias estimate runs away from the truth, est - true from %+.2f to %+.2f mg over the window: a chase of an acceleration error the bias feedback does not remove', blk.errStart, blk.errEnd);
+        elseif blk.lagMax > 0.3
+            fprintf('   NOTE: the Z bias estimate follows a moving true bias with a lag of up to %.2f mg (est - true %+.2f to %+.2f mg over the window): the\n', blk.lagMax, blk.errStart, blk.errEnd);
+            fprintf('   bias loop is slower than the simulated bias; the lag is the acceleration error the mechanisation carries while it closes\n');
+        end
+    end
+    if isfinite(blk.lagGain) && abs(blk.lagGain) >= 0.7 && abs(blk.lagGain) <= 1.3 && blk.lagGainSe < 0.4
+        fprintf('   NOTE: the fed-back Z bias acts on the vertical acceleration in full (%+.2f +- %.2f mg per mg of bias lag)\n', blk.lagGain, blk.lagGainSe);
+    end
+    if isfinite(blk.lagGain) && abs(blk.lagGain) >= 0.7 && abs(blk.lagGain) <= 1.3 && abs(blk.lagConst) > 3 * blk.lagConstSe && abs(blk.lagConst) > 0.2
+        verdict{end+1} = sprintf('a vertical acceleration error of %+.2f +- %.2f mg remains with the bias right: a gravity-model or Z scale-factor difference between the simulator and the host', blk.lagConst, blk.lagConstSe);
     end
     ax = 'NED';
     for a = 1:3
@@ -520,6 +531,19 @@ if isfinite(blk.trendAcc)
     if isfinite(blk.trendErr), fprintf(', est - true %+.2f mg', blk.trendErr); end
     fprintf('\n');
 end
+if isfinite(blk.lagMax)
+    fprintf('      the true Z bias moves %.2f mg rms from one block to the next; the estimate lags it by up to %.2f mg, est - true %+.2f mg in\n', blk.trueMove, blk.lagMax, blk.errStart);
+    fprintf('      the first block and %+.2f mg in the last\n', blk.errEnd);
+end
+if isfinite(blk.lagGain)
+    fprintf('      D acceleration error = %+.2f (+- %.2f) x (biasTrue - biasEst) %+.2f (+- %.2f) mg   (+-1: the fed-back bias acts in full;\n', ...
+        blk.lagGain, blk.lagGainSe, blk.lagConst, blk.lagConstSe);
+    fprintf('      the constant is what remains with the bias right)\n');
+end
+if isfinite(blk.vTau)
+    fprintf('      vD error = %.1f (+- %.1f) s x the acceleration error %+.3f m/s   (the time the filter and the split take to remove what the\n', blk.vTau, blk.vTauSe, blk.vOffset);
+    fprintf('      mechanisation puts back: 0.5 s x (1 / K + 1 / GAIN) in epochs; GAIN 0.1 alone is 5 s of it)\n');
+end
 end
 
 function [s] = fmt(x, f, blank)
@@ -553,7 +577,9 @@ function [blk] = blockBudget(t, tKf, used, tau, waveErr, waveVel, errVel, hasTru
 % per block of the window: the acceleration the mechanisation carries between updates (mg), the fed-back Z bias
 % (biasEst, mg), the true one (biasTrue, mg) and the vD error; then the acceleration error regressed on biasEst Z
 blk = struct('t0', [], 'len', NaN, 'acc', [], 'bEst', [], 'bTrue', [], 'vErr', [], 'n', [], ...
-    'slopeOnBias', NaN, 'seOnBias', NaN, 'trendAcc', NaN, 'trendEst', NaN, 'trendErr', NaN);
+    'slopeOnBias', NaN, 'seOnBias', NaN, 'trendAcc', NaN, 'trendEst', NaN, 'trendErr', NaN, ...
+    'lagGain', NaN, 'lagGainSe', NaN, 'lagConst', NaN, 'lagConstSe', NaN, 'lagMax', NaN, 'trueMove', NaN, ...
+    'errStart', NaN, 'errEnd', NaN, 'vTau', NaN, 'vTauSe', NaN, 'vOffset', NaN);
 kk = find(used);
 if numel(kk) < 100, return; end
 tA = tKf(kk(1));  tB = tKf(kk(end));
@@ -598,6 +624,36 @@ if nnz(ok) >= 3
     if all(isfinite(blk.bEst(ok))), c = [ones(nnz(ok), 1), tb] \ blk.bEst(ok);  blk.trendEst = c(2); end
     if all(isfinite(blk.bTrue(ok))), c = [ones(nnz(ok), 1), tb] \ (blk.bEst(ok) - blk.bTrue(ok));  blk.trendErr = c(2); end
 end
+% the acceleration error against the lag of the estimate behind the true bias: a gain of +-1 is a bias feedback that
+% acts in full on the vertical acceleration, the intercept is what remains with the bias right
+ok = isfinite(blk.acc(:, 3)) & isfinite(blk.bEst) & isfinite(blk.bTrue);
+if nnz(ok) >= 4
+    lag = blk.bTrue(ok) - blk.bEst(ok);
+    blk.lagMax = max(abs(lag));
+    blk.errStart = blk.bEst(find(ok, 1, 'first')) - blk.bTrue(find(ok, 1, 'first'));
+    blk.errEnd   = blk.bEst(find(ok, 1, 'last')) - blk.bTrue(find(ok, 1, 'last'));
+    blk.trueMove = sqrt(mean(diff(blk.bTrue(ok)).^2));
+    if std(lag) > 1e-3
+        [c, se] = fitLine(lag, blk.acc(ok, 3));
+        blk.lagGain = c(2);  blk.lagGainSe = se(2);  blk.lagConst = c(1);  blk.lagConstSe = se(1);
+    end
+end
+% the vD error against the acceleration error: the slope is the time the filter and the split take to remove what the
+% mechanisation puts back, 0.5 s x (1 / K + 1 / GAIN) in epochs
+ok = isfinite(blk.acc(:, 3)) & isfinite(blk.vErr);
+if nnz(ok) >= 4 && std(blk.acc(ok, 3)) > 0.1
+    [c, se] = fitLine(blk.acc(ok, 3) * MG, blk.vErr(ok));
+    blk.vTau = c(2);  blk.vTauSe = se(2);  blk.vOffset = c(1);
+end
+end
+
+function [c, se] = fitLine(x, y)
+% y = c(1) + c(2) x, with the standard errors of both
+X = [ones(numel(x), 1), x(:)];
+c = X \ y(:);
+resid = y(:) - X * c;
+V = sum(resid.^2) / max(numel(x) - 2, 1) * inv(X' * X);
+se = sqrt(diag(V));
 end
 
 function [B] = biasOnSamples(run, name, t, tKf)

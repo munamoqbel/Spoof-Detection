@@ -90,6 +90,13 @@ txtI = evalc('resI = feedbackCheck(runI, logI);');
 chk.blocksI   = all(abs(resI.blocks.acc(:, 3) - 2.04) < 0.05) && abs(resI.blocks.slopeOnBias) < 0.3 && resI.blocks.seOnBias < 0.3 && ...
                 abs(resI.blocks.trendErr + 2.04) < 0.4 && abs(resI.slopeE(3) / 9.80665e-3 - 2.04) < 0.05;
 chk.verdictI  = cnt(txtI, 'does not act on the vertical acceleration') == 1 && cnt(txtI, 'runs away from the truth') == 1 && cnt(txtI, 'VERDICT') == 2;
+% J: a true Z bias that moves, an estimate that follows it with a lag, the fed-back bias acting in full on the vertical
+% acceleration, and a constant 0.7 mg on top: the acceleration error must read as 1 x lag + 0.7 mg
+[runJ, logJ] = makeRun(t, tKf, velTrue, [1 1 1], 1, 1, 0, 1, 1, 'none', 0, 0, 0, 'lag');
+txtJ = evalc('resJ = feedbackCheck(runJ, logJ);');
+chk.lagJ      = abs(resJ.blocks.lagGain - 1) < 0.15 && abs(resJ.blocks.lagConst - 0.7) < 0.15 && resJ.blocks.lagMax > 0.3 && ...
+                cnt(txtJ, 'acts on the vertical acceleration in full') == 1 && cnt(txtJ, 'follows a moving true bias') == 1 && ...
+                cnt(txtJ, 'remains with the bias right') == 1 && cnt(txtJ, 'runs away') == 0;
 % the coupling block from the postCov of the records
 chk.covA      = abs(resA.corrVelBias(3, 3) - 0.5) < 1e-9 && abs(resA.corrVelBias(1, 1) - 0.3) < 1e-9 && abs(resA.corrPosVel(1) - 0.7) < 1e-9 && ...
                 resA.corrVelBias(2, 2) == 0 && cnt(txtA, 'coupling the covariance carries') == 1;
@@ -105,10 +112,11 @@ if ok, fprintf('=== test_feedbackCheck PASS ===\n'); else, fprintf('=== test_fee
 end
 
 %------------------------------------------------------------------------
-function [run, log] = makeRun(t, tKf, velTrue, applyVel, applyPos, applyBias, tauSlew, gKeep, gApplied, phiMode, undoAt, aErr, bDrift)
+function [run, log] = makeRun(t, tKf, velTrue, applyVel, applyPos, applyBias, tauSlew, gKeep, gApplied, phiMode, undoAt, aErr, bDrift, biasMode)
 if nargin < 11, undoAt = 0; end
 if nargin < 12, aErr = 0; end
 if nargin < 13, bDrift = 0; end
+if nargin < 14, biasMode = 'const'; end
 % a mechanised solution with a velocity error e and a position error pErr. At each epoch the KF increment
 % (random, plus a persistent +0.009 m/s on D and +0.05 m on D) is added to the carried state x- to give x+;
 % the mechanisation receives gApplied x+ on the axes in applyVel (velocity) and, with applyPos, on every
@@ -121,6 +129,12 @@ lat0 = 0.8;  lon0 = 0.1;  h0 = 100;
 P = eye(n);  P(6, 12) = 0.5;  P(12, 6) = 0.5;  P(4, 10) = -0.3;  P(10, 4) = -0.3;  P(1, 4) = 0.7;  P(4, 1) = 0.7;
 tUndo = -Inf;  undoV = zeros(1, 3);
 e = [0.05 -0.03 0.21];  pErr = [1 -1 2];  biasFb = [1e-3 -2e-3 5e-3];
+MG = 9.80665e-3;
+% 'lag': the true Z bias wanders by +-1 mg with a 150 s period, the estimate follows it with a first-order lag of 100 s,
+% the fed-back bias acts on the vertical acceleration in full and a constant 0.7 mg remains: the acceleration error is
+% (true - est) + 0.7 mg
+bTrueZ = 5e-3 + strcmp(biasMode, 'lag') * MG * sin(2 * pi * t / 150);
+bEstZ = 5e-3;
 xm = zeros(1, 6);                                       % carried state: position 1:3, velocity 4:6
 pendV = zeros(1, 3);  pendP = zeros(1, 3);
 if tauSlew > 0, f = 1 - exp(-dt / tauSlew); else, f = 1; end
@@ -152,7 +166,13 @@ for i = 1:N
     e = e - f * pendV;  pErr = pErr - f * pendP;
     pendV = (1 - f) * pendV;  pendP = (1 - f) * pendP;
     if t(i) >= tUndo - 1e-9, e = e + undoV;  tUndo = Inf; end         % the velocity correction taken back
-    e(3) = e(3) + aErr * dt;                                           % a constant vertical acceleration error
+    if strcmp(biasMode, 'lag')
+        bEstZ = bEstZ + (bTrueZ(i) - bEstZ) * dt / 100;                % the estimate follows the true bias, 100 s lag
+        e(3) = e(3) + (bTrueZ(i) - bEstZ + 0.7 * MG) * dt;            % what the mechanisation carries: the lag plus 0.7 mg
+        biasFb(3) = bEstZ;
+    else
+        e(3) = e(3) + aErr * dt;                                       % a constant vertical acceleration error
+    end
     velNav(i, :) = velTrue(i, :) + e;
     pErrArr(i, :) = pErr;
 end
@@ -171,4 +191,5 @@ for i = 1:N-1
 end
 run = struct('t', t, 'navPos', [lat, lon, h], 'navVel', velNav, 'tKf', tKf, 'biasEst', biasEst, ...
     'tTrue', t, 'trueVel', velTrue, 'biasTrue', [1e-3 -2e-3 5e-3 0 0 0]);
+if strcmp(biasMode, 'lag'), run.biasTrue = [repmat([1e-3 -2e-3], N, 1), bTrueZ, zeros(N, 3)]; end
 end

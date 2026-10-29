@@ -170,9 +170,12 @@ after it, the acceleration the mechanisation carries on that axis, in mg;
 with tTrue and trueVel in the run the same is read from the velocity error,
 free of the vehicle's dynamics, and per block of the window the acceleration
 error is set against the fed-back Z accelerometer bias (biasEst, and biasTrue
-when given): a slope of plus or minus one across the blocks is a bias feedback
-that acts on the vertical acceleration in full, zero one that does not, and
-an estimate that trends away from the truth is a chase.
+when given): the acceleration error regressed on the lag of the estimate
+behind the true bias reads plus or minus one when the bias feedback acts on
+the vertical acceleration in full, zero when it does not, and its intercept
+is what remains with the bias right; the vD error regressed on the
+acceleration error gives the time the filter and the split take to remove
+what the mechanisation puts back.
 From the
 records alone, x- of record k+1 regressed on x+ of record k gives the share of
 each state the bookkeeping keeps after the feedback (1 - GAIN for the host's
@@ -193,8 +196,9 @@ propagated with Phi transposed or without its coupling.
 `tests/test_feedbackCheck.m` covers the applied, half-applied, unapplied,
 offset and slewed cases, the host's split with GAIN 0.4, a split that books
 0.4 but applies 0.16 with Phi transposed, a velocity correction taken back
-0.25 s after the step, and a constant vertical acceleration error with a bias
-estimate running away from a constant truth.
+0.25 s after the step, a constant vertical acceleration error with a bias
+estimate running away from a constant truth, and a true bias that moves with
+an estimate following it at a lag.
 `tools/covPropCheck.m` reads the same spfMeas records and asks whether the
 host's P keeps its cross terms from one 2 Hz epoch to the next: the previous
 P+ is propagated over the interval with the INS error dynamics (no Q), the

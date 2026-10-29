@@ -90,11 +90,40 @@ XM = NaN(K, n);  XP = NaN(K, n);
 hasCov = isfield(spfMeasLog, 'postCov');
 cVB = NaN(K, 3, 3);  cVA = NaN(K, 3, 3);  cPV = NaN(K, 3);       % |correlation| velocity x accel bias, velocity x attitude, position-velocity
 sVel = NaN(K, 3);  sBia = NaN(K, 3);                             % sigma of the velocity and of the accelerometer bias, from postCov
+hasRows = isfield(spfMeasLog, 'obsMatrix') && isfield(spfMeasLog, 'innovation') && isfield(spfMeasLog, 'numMeas');
+askPos = NaN(K, 4);  askVel = NaN(K, 4);  cBias = NaN(K, 1);  cDrift = NaN(K, 1);   % what the rows ask for, and the clock columns
+cVC = NaN(K, 3);  cPC = NaN(K, 3);                               % |correlation| velocity x clock drift, position x clock bias
 for k = 1:K
     s = spfMeasLog(k);
     if numel(s.postState) == n && numel(s.priorState) == n
         XM(k, :) = s.priorState(:)';
         XP(k, :) = s.postState(:)';
+    end
+    if hasRows
+        m = double(s.numMeas);
+        if m >= 5 && size(s.obsMatrix, 2) == n
+            H = s.obsMatrix(1:m, :);  y = s.innovation(1:m);  y = y(:);
+            normV = sqrt(sum(H(:, 4:6).^2, 2));  normP = sqrt(sum(H(:, 1:3).^2, 2));
+            isRr = normV > 0.5;
+            isPr = normP > 0.5 & normV < 0.1 & sum(abs(H(:, 1:3)) > 1e-9, 2) >= 2;     % satellite lines of sight, not the pressure row
+            others = setdiff(10:n, [iAcc, iGyr, iPrs]);
+            if nnz(isPr) >= 5
+                [mx, j] = max(mean(abs(H(isPr, others)), 1));
+                if mx > 0.9
+                    cBias(k) = others(j);
+                    A = [H(isPr, 1:3), H(isPr, cBias(k))];
+                    askPos(k, :) = (A \ y(isPr))';
+                end
+            end
+            if nnz(isRr) >= 5
+                [mx, j] = max(mean(abs(H(isRr, others)), 1));
+                if mx > 0.9
+                    cDrift(k) = others(j);
+                    A = [H(isRr, 4:6), H(isRr, cDrift(k))];
+                    askVel(k, :) = (A \ y(isRr))';
+                end
+            end
+        end
     end
     if hasCov && isequal(size(s.postCov), [n n])
         P = s.postCov;
@@ -105,6 +134,8 @@ for k = 1:K
             cVA(k, :, :) = abs(C(4:6, 7:9));
             cPV(k, :) = abs([C(1, 4), C(2, 5), C(3, 6)]);
             sVel(k, :) = d(4:6)';  sBia(k, :) = d(iAcc)';
+            if isfinite(cDrift(k)), cVC(k, :) = abs(C(4:6, cDrift(k)))'; end
+            if isfinite(cBias(k)),  cPC(k, :) = abs(C(1:3, cBias(k)))'; end
         end
     end
 end
@@ -239,6 +270,23 @@ for a = 1:3
     if any(nz), accSame(a) = 100 * mean(sign(incAccU(nz, a)) == sign(mean(incAccU(nz, a)))); end
 end
 medVB = NaN(3, 3);  medVA = NaN(3, 3);  medPV = NaN(1, 3);  medSV = NaN(1, 3);  medSB = NaN(1, 3);  oneEpoch = NaN(1, 3);
+medVC = NaN(1, 3);  medPC = NaN(1, 3);
+% what the rows ask for against what the filter applies, means over the epochs of the window
+askP = NaN(1, 4);  appP = NaN(1, 4);  askV = NaN(1, 4);  appV = NaN(1, 4);  nAskP = 0;  nAskV = 0;
+if hasRows
+    kp = okRec & all(isfinite(askPos), 2);  kv = okRec & all(isfinite(askVel), 2);
+    nAskP = nnz(kp);  nAskV = nnz(kv);
+    if nAskP >= 10
+        askP = mean(askPos(kp, :), 1);
+        cb = round(median(cBias(kp)));
+        appP = mean([INC(kp, 1:3), INC(kp, cb)], 1);
+    end
+    if nAskV >= 10
+        askV = mean(askVel(kv, :), 1);
+        cd = round(median(cDrift(kv)));
+        appV = mean([INC(kv, 4:6), INC(kv, cd)], 1);
+    end
+end
 dtEp = median(diff(tKf));
 if hasCov
     for a = 1:3
@@ -246,6 +294,10 @@ if hasCov
         v = sBia(okRec, a);  v = v(isfinite(v));  if ~isempty(v), medSB(a) = median(v); end
     end
     oneEpoch = dtEp * medSB ./ medSV;                       % the correlation one epoch of propagation builds from nothing
+    for a = 1:3
+        v = cVC(okRec, a);  v = v(isfinite(v));  if ~isempty(v), medVC(a) = median(v); end
+        v = cPC(okRec, a);  v = v(isfinite(v));  if ~isempty(v), medPC(a) = median(v); end
+    end
     for i = 1:3
         for j = 1:3
             v = cVB(okRec, i, j);  v = v(isfinite(v));  if ~isempty(v), medVB(i, j) = median(v); end
@@ -323,10 +375,30 @@ if hasCov
     end
     fprintf('      (a velocity row near zero on every bias and attitude column is an axis whose error the filter cannot attribute to\n');
     fprintf('      the IMU: no coupling in F for that axis)\n');
+    fprintf('      velocity x clock drift           %8.2f    %8.2f    %8.2f       position x clock bias %6.2f    %6.2f    %6.2f\n', medVC, medPC);
+    fprintf('      (the vertical axis shares its signature with the clock: a high vD x drift value is the drift state taking part\n');
+    fprintf('      of what the Doppler says about the vertical velocity)\n');
     fprintf('      sigma of the velocity %.4f %.4f %.4f m/s and of the accelerometer bias %.3f %.3f %.3f mg (postCov diagonals, medians)\n', medSV, medSB / MG);
     fprintf('      one epoch of propagation builds a velocity x same-axis bias correlation of dt x sigma_b / sigma_v = %.3f %.3f %.3f\n', oneEpoch);
     fprintf('      (a P that carries the term from one epoch to the next reads 0.5 to 0.7 on the vertical pair; one that starts from\n');
     fprintf('      nothing each epoch reads the build-up alone)\n');
+end
+fprintf('   what the rows ask for and what the filter applies, means over the epochs (least squares on the innovations of each epoch,\n');
+fprintf('   the clock column of the rows alongside; the share is the gain the filter gives the axis)\n');
+if nAskP >= 10
+    fprintf('                                             N           E           D       clock\n');
+    fprintf('      range rows ask (m)             %+11.4f %+11.4f %+11.4f %+11.4f   on %d epochs\n', askP, nAskP);
+    fprintf('      filter applies, x+ - x-        %+11.4f %+11.4f %+11.4f %+11.4f\n', appP);
+    fprintf('      share applied                  %11.2f %11.2f %11.2f %11.2f\n', appP ./ askP);
+else
+    fprintf('      range rows: fewer than 10 epochs with a position and clock-bias fit\n');
+end
+if nAskV >= 10
+    fprintf('      rate rows ask (m/s)            %+11.4f %+11.4f %+11.4f %+11.4f   on %d epochs\n', askV, nAskV);
+    fprintf('      filter applies, x+ - x-        %+11.4f %+11.4f %+11.4f %+11.4f\n', appV);
+    fprintf('      share applied                  %11.2f %11.2f %11.2f %11.2f\n', appV ./ askV);
+else
+    fprintf('      rate rows: fewer than 10 epochs with a velocity and clock-drift fit\n');
 end
 fprintf('   state carried between updates (records only): x- of record k+1 on x+ of record k\n');
 fprintf('      share of x+ kept in x-, median over the states of the group\n');
@@ -449,6 +521,7 @@ res = struct('t', tKf, 'incPos', incPos, 'incVel', incVel, 'chgPos', chgPos, 'ch
     'coefPos', coefPos, 'coefVel', coefVel, 'sePos', sePos, 'seVel', seVel, 'rPos', rPos, 'rVel', rVel, ...
     'gainPos', gainPos, 'gainVel', gainVel, 'gainVelLate', gainVelLate, 'rxPos', rxPos, 'rxVel', rxVel, 'chgVelLate', chgVelLate, ...
     'accSame', accSame, 'corrVelBias', medVB, 'corrVelAtt', medVA, 'corrPosVel', medPV, 'sigVel', medSV, 'sigBias', medSB, 'oneEpoch', oneEpoch, ...
+    'corrVelClock', medVC, 'corrPosClock', medPC, 'askPos', askP, 'appliedPos', appP, 'askVel', askV, 'appliedVel', appV, ...
     'meanWaveV', meanWaveV, 'meanWaveP', meanWaveP, 'meanWaveE', meanWaveE, 'slopeV', slopeV, 'jumpV', jumpV, ...
     'slopeE', slopeE, 'jumpE', jumpE, 'aNet', aNet, 'blocks', blk, ...
     'tau', tau, 'profPos', profPos, 'profVel', profVel, 'tStep', tStep, ...

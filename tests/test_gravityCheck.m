@@ -19,7 +19,9 @@ run = struct('truePos', [linspace(0.60, 0.62, 100)', zeros(100, 1), linspace(100
 txt = evalc('rr = gravityCheck(run, 9.81);');
 chk.site    = abs(rr.lat - 0.61) < 1e-9 && abs(rr.h - 200) < 1e-9 && rr.spreadMg > 0 && ...
               abs(rr.hostErrMg - (9.81 - rr.gNormal) / 9.80665e-3) < 1e-9 && ~isempty(strfind(txt, 'the host''s own value'));
-chk.table   = numel(rr.candidateErrMg) == 5 && abs(rr.candidateErrMg(1) - (9.80665 - rr.gNormal) / 9.80665e-3) < 1e-9;
+chk.table   = numel(rr.candidateErrMg) == 6 && abs(rr.candidateErrMg(1) - (9.80665 - rr.gNormal) / 9.80665e-3) < 1e-9;
+txt = evalc('rs = gravityCheck([24.5897 * pi / 180, 43]);');
+chk.badK    = abs(rs.candidateErrMg(6) - 0.582) < 0.01;                 % the a/a constant at 24.59 deg, 43 m
 names = fieldnames(chk);
 for i = 1:numel(names)
     if ~chk.(names{i}), fprintf('   FAILED sub-check: %s\n', names{i}); ok = false; end

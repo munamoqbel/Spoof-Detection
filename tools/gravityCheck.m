@@ -10,8 +10,10 @@ function [res] = gravityCheck(run, gHost)
 %   Normal gravity on the WGS84 ellipsoid (Somigliana) with the free-air height terms:
 %     g(phi, h) = 9.7803253359 (1 + 0.00193185265241 sin^2 phi) / sqrt(1 - 0.00669437999014 sin^2 phi)
 %                 - (3.0877e-6 - 4.4e-9 sin^2 phi) h + 7.2e-13 h^2                               (m/s^2)
-%   A host that carries a constant (9.80665, 9.81, 9.8), or the ellipsoid value without the height terms, differs
-%   from it by an amount the mechanisation integrates as a vertical velocity error between the updates. feedbackCheck
+%   A host that carries a constant (9.80665, 9.81, 9.8), the ellipsoid value without the height terms, or the
+%   Somigliana closed form with its constant built as gp/ge - 1 (the semi-major axis in both places of
+%   k = b gp / (a ge) - 1, which gives 0.0053 in place of 0.0019), differs from it by an amount the mechanisation
+%   integrates as a vertical velocity error between the updates. feedbackCheck
 %   measures that amount as the constant of its vertical budget (the acceleration error left with the bias right);
 %   the table here gives, for each candidate, the Down acceleration error it carries at the site, positive when the
 %   host's gravity is larger than the normal one (the nav then descends too fast). Match the candidate to the
@@ -36,8 +38,10 @@ gN   = normalGravity(lat, h);
 gSea = normalGravity(lat, 0);
 gLo  = normalGravity(latSpan(1), hSpan(2));                   % the smallest normal gravity the run meets
 gHi  = normalGravity(latSpan(2), hSpan(1));                   % the largest
+gBad = somiglianaBadK(lat, h);                                % the closed form with k = gp/ge - 1 (a/a in place of b/a)
 cand = {'9.80665 (standard gravity, a constant)', 9.80665; '9.81 (a constant)', 9.81; '9.8 (a constant)', 9.8; ...
-        'ellipsoid value at the site without the height terms', gSea; '9.780327 (the equator, a constant)', 9.7803253359};
+        'ellipsoid value at the site without the height terms', gSea; '9.780327 (the equator, a constant)', 9.7803253359; ...
+        'Somigliana with k = gp/ge - 1 (a/a in place of b/a in k)', gBad};
 errMg = (cell2mat(cand(:, 2)) - gN) / MG;
 
 fprintf('gravityCheck: site from %s, latitude %.4f deg, height %.0f m (the run spans %.4f to %.4f deg, %.0f to %.0f m)\n', ...
@@ -62,6 +66,13 @@ if nargin >= 2, res.gHost = gHost; end
 end
 
 %------------------------------------------------------------------------
+function [g] = somiglianaBadK(lat, h)
+% the closed form with the constant built from the semi-major axis in both places, k = gp / ge - 1
+s2 = sin(lat)^2;
+k = 9.8321849378 / 9.7803253359 - 1;
+g = 9.7803253359 * (1 + k * s2) / sqrt(1 - 0.00669437999014 * s2) - (3.0877e-6 - 4.4e-9 * s2) * h + 7.2e-13 * h^2;
+end
+
 function [g] = normalGravity(lat, h)
 s2 = sin(lat)^2;
 g = 9.7803253359 * (1 + 0.00193185265241 * s2) / sqrt(1 - 0.00669437999014 * s2) - (3.0877e-6 - 4.4e-9 * s2) * h + 7.2e-13 * h^2;

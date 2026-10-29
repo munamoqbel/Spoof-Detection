@@ -360,8 +360,8 @@ else
     byStateVel = splitAxes(gainVel, sxVel, rxVel, keepVal(2), xpRms(4:6), 1e-4);
     verdict = [verdict, axisVerdicts('position', coefPos, rmsPos, 1e-4, byStatePos)];
     verdict = [verdict, axisVerdicts('velocity', coefVel, rmsVel, 1e-5, byStateVel)];
-    verdict = [verdict, stepVerdicts('position', tPos, coefPos, rmsPos, 1e-4)];
-    verdict = [verdict, stepVerdicts('velocity', tVel, coefVel, rmsVel, 1e-5)];
+    verdict = [verdict, stepVerdicts('position', tPos, coefPos, rmsPos, 1e-4)];     % the velocity profile carries the
+                                                                                    % vehicle's dynamics: no step verdict there
     [vS, nS] = splitVerdicts(gainPos(1, :), keepVal(1), 'position', byStatePos);
     verdict = [verdict, vS];  notes = nS;
     [vS, nS] = splitVerdicts(gainVel, keepVal(2), 'velocity', byStateVel);

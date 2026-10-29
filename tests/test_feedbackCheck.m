@@ -63,7 +63,7 @@ chk.verdictD  = cnt(txtD, 'one epoch ahead of the nav log') == 6;
 txtE = evalc('resE = feedbackCheck(runE, logE);');
 chk.totalE    = near(sum(resE.coefPos, 1), -1, 0.05) && near(resE.coefPos(2, :), -0.92, 0.05);
 chk.stepE     = all(resE.t90(1, :) - resE.t10(1, :) > 0.15) && near(resE.t10(1, :), 0.01, 0.015);
-chk.verdictE  = cnt(txtE, 'slewed feedback') >= 3;
+chk.verdictE  = cnt(txtE, 'slewed feedback') == 3 && cnt(txtE, 'position step is spread') == 3;
 % F: the host's split feedback, GAIN 0.4 booked and applied, residual propagated with Phi
 [runF, logF] = makeRun(t, tKf, velTrue, [1 1 1], 1, 1, 0, 0.4, 0.4, 'right');
 txtF = evalc('resF = feedbackCheck(runF, logF);');

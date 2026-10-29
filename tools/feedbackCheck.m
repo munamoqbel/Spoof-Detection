@@ -380,7 +380,13 @@ else
     verdict = [verdict, vS];  notes = [notes, nS];
     for i = 1:numel(notes), fprintf('   NOTE: %s\n', notes{i}); end
     accD = blk.acc(isfinite(blk.acc(:, 3)), 3);
-    if isfinite(blk.slopeOnBias) && blk.seOnBias < 0.3 && ~isempty(accD) && abs(mean(accD)) > 0.3
+    if isfinite(blk.lagGain) && blk.lagGainSe < 0.4 && ~isempty(accD) && abs(mean(accD)) > 0.3
+        if abs(blk.lagGain) < 0.3
+            verdict{end+1} = sprintf('the fed-back Z accelerometer bias does not act on the vertical acceleration (%+.2f +- %.2f mg per mg of bias lag): the mechanisation''s vertical channel does not use biasEst', blk.lagGain, blk.lagGainSe);
+        elseif abs(blk.lagGain) < 0.7 || abs(blk.lagGain) > 1.3
+            verdict{end+1} = sprintf('the fed-back Z accelerometer bias acts on the vertical acceleration in part (%+.2f +- %.2f mg per mg of bias lag)', blk.lagGain, blk.lagGainSe);
+        end
+    elseif isfinite(blk.slopeOnBias) && blk.seOnBias < 0.3 && ~isempty(accD) && abs(mean(accD)) > 0.3
         if abs(blk.slopeOnBias) < 0.3
             verdict{end+1} = sprintf('the fed-back Z accelerometer bias does not act on the vertical acceleration (%+.2f +- %.2f mg per mg across the blocks): the mechanisation''s vertical channel does not use biasEst', blk.slopeOnBias, blk.seOnBias);
         elseif abs(blk.slopeOnBias) >= 0.7 && abs(blk.slopeOnBias) <= 1.3
@@ -417,8 +423,8 @@ else
     if isfinite(keepVal(1)) && keepVal(1) > 0.2 && all(abs(aPV) < 0.1 * keepVal(1)) && all(abs(aVP) < 0.1)
         verdict{end+1} = 'the position residual does not receive the velocity residual: the residual is carried without the Phi coupling';
     end
-    if hasCov && isfinite(medVB(3, 3)) && isfinite(oneEpoch(3)) && medVB(3, 3) < 0.15 && medVB(3, 3) < 3 * oneEpoch(3)
-        verdict{end+1} = sprintf('the velocity-to-Z-bias term of P is not carried from one epoch to the next: vD x bZ reads %.3f, the build-up of a single epoch is %.3f, a filter that keeps the term reads 0.5 to 0.7; the Z bias is learned over minutes instead of seconds for that reason, not for its Q. covPropCheck(spfMeasLog, tKf, [], [], run) says where the term goes', ...
+    if hasCov && isfinite(medVB(3, 3)) && isfinite(oneEpoch(3)) && medVB(3, 3) < 0.15 && medVB(3, 3) < 5 * oneEpoch(3)
+        verdict{end+1} = sprintf('the velocity-to-Z-bias term of P stays at the build-up of a few epochs: vD x bZ reads %.3f, one epoch builds %.3f, a filter whose velocity Q is the accelerometer noise alone reads 0.5 to 0.7. Either the 2 Hz path drops the term or the velocity Q lets the velocity state absorb the vertical drift the Z bias should take; covPropCheck(spfMeasLog, tKf, [], [], run) separates the two. The Z bias is learned over minutes instead of seconds for that reason', ...
             medVB(3, 3), oneEpoch(3));
     end
     if ~isempty(iPrs) && isfinite(gainPos(3, 3)) && abs(gainPos(3, 3)) > 0.1 && xpRms(iPrs) > 1e-3

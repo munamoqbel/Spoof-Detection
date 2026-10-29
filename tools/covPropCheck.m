@@ -195,9 +195,10 @@ if isfinite(medVertAided) && medVertAided < 0.5 && isfinite(corrVertAided(2)) &&
     fprintf('            %+.3f predicted): the host''s 2 Hz path loses the velocity-to-Z-bias term each epoch, which is why the Z bias is\n', corrVertAided(2));
     fprintf('            learned over minutes instead of seconds. Nothing in Q repairs that; find the line that writes P there\n');
 elseif isfinite(corrVertAided(1)) && abs(corrVertAided(1)) < 0.1 && isfinite(corrVertAided(2)) && abs(corrVertAided(2)) < 0.1
-    fprintf('   VERDICT: the vertical pair vD x bZ reads %+.3f in the logged P+ and %+.3f in the one-step prediction: the previous P+ carries\n', corrVertAided(1), corrVertAided(2));
-    fprintf('            none of it either, so the term never accumulates; a filter that keeps it reads 0.5 to 0.7. The pair is removed\n');
-    fprintf('            somewhere in the 2 Hz path, or the velocity row of F has no Z-bias column\n');
+    fprintf('   VERDICT: the vertical pair vD x bZ reads %+.3f in the logged P+ and %+.3f in the one-step prediction: the rows and the\n', corrVertAided(1), corrVertAided(2));
+    fprintf('            propagation reproduce it, so nothing removes it; it stays small because the velocity Q the filter carries lets the\n');
+    fprintf('            velocity state absorb the vertical drift that the Z bias should take (with the accelerometer noise alone as the\n');
+    fprintf('            velocity Q, the same rows read 0.5 to 0.7). The Z bias is then learned over minutes instead of seconds\n');
 end
 pDiagMatch = NaN;
 if ~isempty(pDiag)

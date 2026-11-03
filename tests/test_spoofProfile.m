@@ -12,10 +12,10 @@ function test_spoofProfile()
 % and against the reference, with the bad slot dropped; the GPS rate rows carry a 0.5, -0.3, 0.1 m/s velocity and a 0.2 m/s
 % drift on top of a 0.3 m/s receiver clock drift, and the Doppler reading must return them from the innovations and from the
 % log's rates against the satellite velocities. Then H: 5 m north on every system (below the 10 m of the stretch finders, and
-% common to all systems, which the per-system offset cannot see) and a 30 m clock step on every system: without a window the
+% common to all systems, which the per-system offset cannot see) and, a minute later, a 30 m clock step on every system: without a window the
 % reference-based finder reports nothing; with the window [tOn tOff] the tables follow it, the fits read 5 m north in the
 % innovations and against the reference with the fix near zero before and after, and the clock line steps by 30 m against its
-% straight line over the minute before. Run from anywhere: octave --no-gui --quiet --eval test_spoofProfile
+% straight line over the minutes before and after. Run from anywhere: octave --no-gui --quiet --eval test_spoofProfile
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'tools'));
 randn('seed', 9);  rand('seed', 9);
@@ -168,16 +168,17 @@ fprintf('--- G: a position spoof on GPS (800 N, -300 E, 100 D, clock 50 m), epoc
 pG = spoofProfile(logG, tKf, loggedG, [], [lat0 lon0 h0], spfLogG);
 [~, ~, ~, nRejG, corrG] = pairingLogUnpack(loggedG);
 
-%% H: 5 m north on every system, epochs 60 to 120, and a 30 m clock step on every system, epochs 150 to 180; 6 slots per system
-dH = [5 0 0];  cH = 30;
-[logH, ~] = makeLog(K, n, mMax, [6 6 6], 1:18, 60, 120, dH, none);
-for k = 150:180, logH{k}.innovation(1:18) = logH{k}.innovation(1:18) + cH; end
+%% H: 5 m north on every system, epochs 60 to 120, and a 30 m clock step on every system, epochs 250 to 280 (a minute away
+% from the position window, so the clean minutes around each window are clean); 300 epochs, 6 slots per system
+dH = [5 0 0];  cH = 30;  KH = 300;  tKfH = 0.5 * (0:KH-1)';
+[logH, ~] = makeLog(KH, n, mMax, [6 6 6], 1:18, 60, 120, dH, false(KH, 1));
+for k = 250:280, logH{k}.innovation(1:18) = logH{k}.innovation(1:18) + cH; end
 usedH = {[1 2 3 5 9 11], [2 4 6 7 10 13], [3 8 10 12 14 15]};
 spoofH = refEcef + (C' * dH')';
-loggedH = loggedF;
-for k = 1:K
-    clk = 1500 + 30 * tKf(k);
-    if k >= 150 && k <= 180, clk = clk + cH; end
+loggedH = repmat(recF, KH, 1);
+for k = 1:KH
+    clk = 1500 + 30 * tKfH(k);
+    if k >= 250 && k <= 280, clk = clk + cH; end
     pK = refEcef;
     if k >= 60 && k <= 120, pK = spoofH; end
     ids = [];
@@ -194,14 +195,14 @@ for k = 1:K
     end
     loggedH(k).sysIdLog = ids;
 end
-fprintf('--- H: 5 m north on every system, epochs 60 to 120, and 30 m of clock on every system, epochs 150 to 180; no window ---\n');
-pH0 = spoofProfile(logH, tKf, loggedH, [], [lat0 lon0 h0]);
-fprintf('--- H with the window %.2f to %.2f s ---\n', tKf(60), tKf(120));
-pH1 = spoofProfile(logH, tKf, loggedH, [], [lat0 lon0 h0], [], [tKf(60) tKf(120)]);
-fprintf('--- H with the window %.2f to %.2f s ---\n', tKf(150), tKf(180));
-pH2 = spoofProfile(logH, tKf, loggedH, [], [lat0 lon0 h0], [], [tKf(150) tKf(180)]);
+fprintf('--- H: 5 m north on every system, epochs 60 to 120, and 30 m of clock on every system, epochs 250 to 280; no window ---\n');
+pH0 = spoofProfile(logH, tKfH, loggedH, [], [lat0 lon0 h0]);
+fprintf('--- H with the window %.2f to %.2f s ---\n', tKfH(60), tKfH(120));
+pH1 = spoofProfile(logH, tKfH, loggedH, [], [lat0 lon0 h0], [], [tKfH(60) tKfH(120)]);
+fprintf('--- H with the window %.2f to %.2f s ---\n', tKfH(250), tKfH(280));
+pH2 = spoofProfile(logH, tKfH, loggedH, [], [lat0 lon0 h0], [], [tKfH(250) tKfH(280)]);
 fprintf('--- H with a window outside the records ---\n');
-pH3 = spoofProfile(logH, tKf, loggedH, [], [lat0 lon0 h0], [], [500 600]);
+pH3 = spoofProfile(logH, tKfH, loggedH, [], [lat0 lon0 h0], [], [500 600]);
 
 okA = abs(pA.onset - tKf(80)) < 1e-9 && abs(pA.tEnd - tKf(140)) < 1e-9 && abs(pA.sizeOnset - 300) < 5 && pA.sysOff == 1 ...
    && pA.nOff(100) == 4 && abs(pA.perSys(100, 1) - 300) < 5 && abs(pA.perSys(100, 2)) < 5 ...
@@ -233,15 +234,15 @@ okG = pG.injSys == 1 && abs(pG.injOnset - tKf(60)) < 1e-9 && abs(pG.injEnd - tKf
    && size(pF.stretchesInn, 1) == 2 && pF.stretchesInn(1, 1) == 1 && pF.stretchesInn(2, 1) == 80 && pF.offSysInn == 1 ...
    && size(pF.stretchesRef, 1) == 1 && nnz(nRejG(:, 2)) == 4 && all(nRejG(65:68, 2) == 1) && nnz(nRejG(:, [1 3])) == 0;
 fH1 = medFin(pH1.fitRef(60:120, :, 1));  fH1i = medFin(pH1.fitInn(60:120, :, 1));  fH1b = medFin(pH1.fitRef(60:120, :, 3));
-fH2 = medFin(pH2.fitRef(150:180, :, 2));  fH2i = medFin(pH2.fitInn(150:180, :, 2));
+fH2 = medFin(pH2.fitRef(250:280, :, 2));  fH2i = medFin(pH2.fitInn(250:280, :, 2));
 okH = isempty(pH0.stretchesRef) && isnan(pH0.injOnset) && isempty(pH0.window) && isempty(pH3.window) && isnan(pH3.injOnset) ...
-   && isequal(pH1.window, [tKf(60) tKf(120)]) && abs(pH1.injOnset - tKf(60)) < 1e-9 && abs(pH1.injEnd - tKf(120)) < 1e-9 ...
+   && isequal(pH1.window, [tKfH(60) tKfH(120)]) && abs(pH1.injOnset - tKfH(60)) < 1e-9 && abs(pH1.injEnd - tKfH(120)) < 1e-9 ...
    && abs(fH1(1) - dH(1)) < 2 && abs(fH1(2)) < 2 && abs(fH1(3)) < 4 && fH1(6) == 6 && abs(fH1b(1) - dH(1)) < 2 && abs(fH1b(2)) < 2 ...
    && abs(fH1i(1) - dH(1)) < 2 && abs(fH1i(2)) < 2 && fH1i(6) == 6 ...
    && max(abs(pH1.fixBefore(:, 1))) < 2 && max(abs(pH1.fixAfter(:, 1))) < 2 && abs(pH1.clockDeparture(1)) < 4 ...
-   && isequal(pH2.window, [tKf(150) tKf(180)]) && abs(pH2.clockDeparture(1) - cH) < 3 && abs(pH2.clockDeparture(2)) < 3 ...
+   && isequal(pH2.window, [tKfH(250) tKfH(280)]) && abs(pH2.clockDeparture(1) - cH) < 3 && pH2.clockDeparture(2) < 3 ...
    && max(abs(fH2(1:2))) < 2 && abs(fH2(4)) < 3 && abs(fH2i(4) - cH) < 3 && max(abs(fH2i(1:2))) < 2 ...
-   && max(max(abs(pH2.inj(150:180, :)))) < 5;
+   && max(max(abs(pH2.inj(250:280, :)))) < 5;
 if okA && okB && okC && okF && okG && okR && okH, fprintf('=== test_spoofProfile PASS ===\n');
 else, fprintf('okA %d okB %d okC %d okF %d okG %d okR %d okH %d\n=== test_spoofProfile FAIL ===\n', okA, okB, okC, okF, okG, okR, okH); end
 end

@@ -146,8 +146,8 @@ agree within 5 m and interpolated across the others.
 
     stretches with a system 10 m or more off ...        (as section 4, on the offset against the reference)
     onset / end / size at onset ... on system 2 (median of the first 3 epochs), largest ...
-    the clock line against its straight line over the minute before (940.00 to 999.50 s, slope +0.02 m/s): median departure +30.1 m
-    within, +0.1 m in the minute after (what every system shares is here, not in the per-system offset: ...)
+    the clock line against its straight line over the minute before and the minute after (240 epochs, slope +0.02 m/s, residual rms
+    0.8 m there): median departure +30.1 m within (what every system shares is here, not in the per-system offset: ...)
     the other systems in this stretch: median offset ...
     on 53 of the 90 epochs of this stretch at least one range lies beyond 100 km ... (g in the timeline)
     on 90 of the 90 epochs the clock is interpolated (gaps up to 29.0 s): ...
@@ -165,12 +165,13 @@ of the system carry the same offset (a clock-type spoof); hundreds of
 metres means every satellite has its own offset (a position-type spoof)
 or only some satellites are spoofed. With a window the onset and end lines
 are one window line. The clock line is fitted with a straight line over the
-minute before the stretch (or the window), and the median departure from
-that line within it and in the minute after is printed: a receiver clock
-drifts smoothly and stays on the line, a clock spoof put on every system
-steps here, and a position spoof put on every system leaves its common
-part here, both invisible to the per-system offset. Block 9 separates
-position from clock per system.
+minute before and the minute after the stretch (or the window), and the
+median departure from that line within it is printed with the residual
+rms of the line on those clean minutes (the noise of this reading): a
+receiver clock drifts smoothly and stays on the line, a clock spoof put on
+every system steps here, and a position spoof put on every system leaves
+its common part here, both invisible to the per-system offset. Block 9
+separates position from clock per system.
 
     t [s]  system 1 [m] (slots)  system 2 [m] (slots)  system 3 [m] (slots)   clock [m]  spread 2 [m]
     236.06        +708.9 ( 1)         +335.1 ( 3)         +433.7 ( 1)      -4.5i        429.6
@@ -195,6 +196,14 @@ each system, with the receiver clock and the system bias removed: the
 position and clock the spoofed ranges describe, relative to the truth. The
 "moves within" line is the spread of the fitted position over the stretch:
 a few metres is a fixed false position, hundreds of metres a moving one.
+With a window the per-epoch table is printed for every system with a fit,
+and a line per system gives the step at the window edges: the medians of
+the first ten epochs within minus the last ten before, and the last ten
+within minus the first ten after. Adjacent epochs share whatever slow
+error the reference has (a time offset between the reference and the
+receiver shows as an along-track error that drifts with the velocity), so
+an injection on the window reads at full size here while the before and
+after medians a minute away may not match.
 
     the fix before the stretch and after it, medians N E D clock [m] ...
                  before, 176.09 to 235.56 s                 after, 281.04 to 340.08 s

@@ -249,12 +249,15 @@ and the timeline says whether the log holds ranges the host did not use or
 flagged with corrValid false. A seventh argument, a window `[tOn tOff]`
 in seconds, makes the tables, the before/after medians and the timeline
 follow that window whatever the stretch finders found, so an injection
-below 10 m is read back where it was put; and because the per-system
-offset cannot see what every system shares, the tool also prints the
-clock line against its straight line over the minute before, where a
-clock spoof put on every system steps, while the per-system fix separates
-position from clock. `docs/SPOOFPROFILE_PRINTOUT.md` walks through
-the printout block by block. The Doppler rows get the same reading: the
+below 10 m is read back where it was put, with the per-epoch fits of
+every system and the step at the window edges (medians of ten epochs on
+each side, so a slow error of the reference cancels); and because the
+per-system offset cannot see what every system shares, the tool also
+prints the clock line against its straight line over the minute before
+and the minute after, where a clock spoof put on every system steps,
+while the per-system fix separates position from clock.
+`docs/SPOOFPROFILE_PRINTOUT.md` walks through the printout block by
+block. The Doppler rows get the same reading: the
 velocity and clock drift the range-rate rows ask for, and against a
 stationary reference the log's range rates minus the line-of-sight
 satellite velocity, so a spoof that moves the position without the
@@ -272,6 +275,26 @@ outside. Together they run the matrix on the clean twin: the host calls
 spoofScenario once per epoch and spoofInject once per constellation to
 spoof, after the corrected ranges are formed and before the rows are
 built, and spoofProfile reads the injection back from the ranges.
+
+`tools/spoofInjectCheck.m` is the direct check that the injection reached
+the host's ranges: the spoofed run's pairing log against its clean twin's
+(the same inputs replayed without the injection), epoch by epoch. The
+epochs are matched on the satellite positions in the slots, so a shift of
+the time base between the two runs does not matter, and each used slot's
+range minus the clean twin's is the injection and nothing else: no
+receiver error, no reference error, no filter in the way. A least-squares
+fix on those differences per system reads the injected position and clock
+offset back exactly, the range rates give the velocity and drift, and with
+the scenario struct the tool prints what was intended next to what the
+ranges carry, the epochs where an offset was intended and nothing changed
+(a constellation the injection missed), and the epochs that changed while
+nothing was intended (the logs are not twins, or the host's ranges depend
+on its own state). spoofProfile's reading against the reference is clouded
+by whatever the reference has of its own (a time offset to the receiver
+shows as an along-track error, a system with uncorrected atmosphere as a
+D-clock pair), so this is the check to run first after wiring an injection.
+`tools/pairingLogRates.m` reads the range rates and satellite velocities
+out of the pairing log for both tools.
 
 `runCompare` ends the outage at the first logged P that falls by more than
 30% inside the given interval (the first update back, or a reset): the

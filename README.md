@@ -296,6 +296,19 @@ D-clock pair), so this is the check to run first after wiring an injection.
 `tools/pairingLogRates.m` reads the range rates and satellite velocities
 out of the pairing log for both tools.
 
+`tools/matrixRow.m` and `tools/matrixTable.m` turn one spoofed run into
+one row of the matrix table. From the gate log: the latch delay from tOn,
+the monitor and axis that fired and its ratio, the largest SS and CPI
+ratio while the spoof was on and on the clean armed epochs, the hand-back
+delay from tOff, the coast length, the vetoes, the false alarms (latches
+outside the window and the hand-back) and the fault counts. From the nav
+solution against the truth, with the mean error over the minute before
+tOn taken out: the error at the latch, the largest horizontal excursion
+until the hand-back, the error at tOff and its mean over the window (how
+far the nav followed), and the error and the sigma carried at the
+hand-back. matrixTable prints the rows as one table, a dash where a run
+has no such number.
+
 `runCompare` ends the outage at the first logged P that falls by more than
 30% inside the given interval (the first update back, or a reset): the
 drift, the trace fit and the budget stop there, so a tReacq given too late

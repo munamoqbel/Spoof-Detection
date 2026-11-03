@@ -23,14 +23,15 @@ function [res] = spoofInjectCheck(loggedSpoofed, loggedClean, tKf, tRef, posRef,
 %   (first and last changed epoch per system), medFit and medRate [nSys x 4] (medians over the changed epochs),
 %   nMissing [1 x nSys] (epochs with an offset intended and no changed slot), nOutside [1 x nSys] (epochs with a
 %   changed slot and nothing intended), shift (median of kClean minus the spoofed index).
-%   A slot counts as changed when its range differs by more than 1 mm or its rate by more than 0.1 mm/s.
+%   A slot counts as changed when its range differs by more than 1 cm or its rate by more than 1 mm/s.
 %   MATLAB desktop tool, not codegen. Runs under Octave.
 
 if nargin < 4, tRef = []; end
 if nargin < 5, posRef = []; end
 if nargin < 6, scn = []; end
-TOL_CHANGE = 1e-3;                                           % m: a range that differs by more than this changed
-TOL_RATE   = 1e-4;                                           % m/s: the same for a range rate
+TOL_CHANGE = 1e-2;                                           % m: a range that differs by more than this changed (a correction that
+                                                             % depends on the host's own state moves a range by millimetres, not this)
+TOL_RATE   = 1e-3;                                           % m/s: the same for a range rate
 TOL_MATCH  = 1.0;                                            % m: satellite positions within this are the same sky
 SEARCH     = 50;                                             % epochs: how far from the same index the twin is searched
 [prS, satS, sysS] = pairingLogUnpack(loggedSpoofed);

@@ -1,4 +1,4 @@
-function [prof] = spoofProfile(spfMeasLog, tKf, sysId, tRef, posRef, spfLog)
+function [prof] = spoofProfile(spfMeasLog, tKf, sysId, tRef, posRef, spfLog, tWin)
 %SPOOFPROFILE  What a spoofed run did to the measurements, from the saved spfMeas records and the pairing log.
 %   prof = spoofProfile(spfMeasLog, tKf)          per epoch the range rows split into two groups where a gap in
 %                                                 their innovations is wider than the group spread; the group
@@ -27,6 +27,12 @@ function [prof] = spoofProfile(spfMeasLog, tKf, sysId, tRef, posRef, spfLog)
 %                                                 describe (a least-squares fix on them), relative to the reference
 %   prof = spoofProfile(..., spfLog)              the gate log from SPF_logAppend as well: the timeline around the
 %                                                 spoof carries the gate mode under the row set, and the events
+%   prof = spoofProfile(..., spfLog, tWin)        a window [tOn tOff] in s on tKf: the tables of blocks 5 to 7, 9 and 10,
+%                                                 the before/after medians and the timeline follow this window instead
+%                                                 of the strongest stretch, whatever the stretch finders found. An
+%                                                 injection below 10 m, or one put on every system (the per-system
+%                                                 offset cannot see what every system shares: it goes into the clock
+%                                                 line), is read back where it was put
 %   The Doppler rows are read the same way: the velocity and clock drift the range-rate rows ask for, relative to
 %   the host's prediction, and against a stationary reference the range rate minus the line-of-sight satellite
 %   velocity, with the receiver clock drift read where two systems agree and interpolated elsewhere. A spoofer that
@@ -60,7 +66,9 @@ function [prof] = spoofProfile(spfMeasLog, tKf, sysId, tRef, posRef, spfLog)
 %   agree with the sign reversed, 0 otherwise), nRecNoRows and nLogNoSlots (epochs of the timeline window where
 %   the record has no range row but the log has used slots, and the reverse), stretchesInn and stretchesRef
 %   ([kStart kEnd nOff] per stretch; off epochs closer than 20 epochs form one stretch, the tables and the
-%   timeline follow the strongest).
+%   timeline follow the strongest), window ([tOn tOff] as used, empty without one), clockDeparture ([within after]:
+%   the clock line against its straight line over the minute before the stretch or window, medians within it and
+%   in the minute after; a clock spoof put on every system steps here).
 %   MATLAB desktop tool, not codegen. Runs under Octave.
 
 if iscell(spfMeasLog), spfMeasLog = [spfMeasLog{:}]; end
@@ -71,6 +79,14 @@ if nargin < 3, sysId = []; end
 if nargin < 4, tRef = []; end
 if nargin < 5, posRef = []; end
 if nargin < 6, spfLog = []; end
+if nargin < 7, tWin = []; end
+useWin = false;  kW1 = [];  kW2 = [];  winUsed = [];
+if numel(tWin) == 2
+    kW1 = find(tKf >= min(tWin), 1);  kW2 = find(tKf <= max(tWin), 1, 'last');
+    useWin = ~isempty(kW1) && ~isempty(kW2) && kW2 >= kW1;
+end
+span = 'the strongest stretch';
+if useWin, span = 'the window';  winUsed = [tKf(kW1), tKf(kW2)]; end
 fromLog = isstruct(sysId) || iscell(sysId);
 prSlot = [];  satSlot = [];  sysSlot = [];
 nRejSlot = [];  corrOffSlot = [];
@@ -196,6 +212,13 @@ end
 section(2, 'the records and the systems of their rows');
 fprintf('spoofProfile: %d epochs; range rows per epoch median %d; an offset group is 2 rows or more, %d m or more from the rest\n', ...
     K, round(median(nRange(nRange > 0))), MIN_GAP);
+if useWin
+    fprintf('   window %.2f to %.2f s (epochs %d to %d): the tables of 5 to 7, 9 and 10, the before/after medians and the timeline follow it,\n', ...
+        tKf(kW1), tKf(kW2), kW1, kW2);
+    fprintf('   whatever the stretch finders find (an injection below %d m, or one put on every system, is read back here)\n', MIN_GAP);
+elseif numel(tWin) == 2
+    fprintf('   WARNING: the window %.2f to %.2f s holds no epoch of the records (%.2f to %.2f s): ignored\n', min(tWin), max(tWin), tKf(1), tKf(end));
+end
 if haveSys && fromLog
     nWith = nnz(nRange > 0);
     fprintf('   row systems from the pairing log: the used range slots in slot order; their count matched the record''s range rows on %d of %d epochs\n', ...
@@ -239,18 +262,24 @@ if haveSys
     offInn = any(abs(perSys) >= MIN_GAP, 2);
     [stInn, iS] = stretches(offInn, max(abs(perSys), [], 2), STRETCH_GAP);
     section(4, 'stretches where a system is off, in the innovations');
-    if isempty(stInn)
+    if isempty(stInn) && ~useWin
         fprintf('   no epoch where a system''s mean range innovation is %d m or more on 3 epochs: nothing off in the innovations (5 to 7 skipped)\n', MIN_GAP);
     else
-        printStretches(tKf, stInn, iS, offInn, perSys, sysIds, MIN_GAP, gapS, 'innovation');
-        kA = stInn(iS, 1);  kB = stInn(iS, 2);
-        section(5, 'mean range innovation per system over the strongest stretch, with the host''s row set');
-        fprintf('   mean range innovation per system over the strongest stretch, %.2f s (epoch %d) to %.2f s (epoch %d)\n', tKf(kA), kA, tKf(kB), kB);
+        if isempty(stInn)
+            fprintf('   no epoch where a system''s mean range innovation is %d m or more on 3 epochs: nothing off in the innovations; the tables follow the window\n', MIN_GAP);
+        else
+            printStretches(tKf, stInn, ifelse(useWin, 0, iS), offInn, perSys, sysIds, MIN_GAP, gapS, 'innovation');
+        end
+        if useWin, kA = kW1;  kB = kW2;  else, kA = stInn(iS, 1);  kB = stInn(iS, 2); end
+        section(5, sprintf('mean range innovation per system over %s, with the host''s row set', span));
+        fprintf('   mean range innovation per system over %s, %.2f s (epoch %d) to %.2f s (epoch %d)\n', span, tKf(kA), kA, tKf(kB), kB);
         fprintf('   (the first 8 epochs in a row, then spread to the end; a system without rows is a gap in the host''s row set):\n');
         printCourse(tKf, perSys, nPerSys, sysIds, kA, kB, {}, {});
         rowSets(nPerSys, perSys, sysIds, kA, kB, 'innovation');
         cnt = sum(abs(perSys(kA:kB, :)) >= MIN_GAP, 1);
-        [~, jS] = max(cnt);  offSysInn = sysIds(jS);
+        [~, jS] = max(cnt);
+        if cnt(jS) == 0, [~, jS] = max(abs(medianRows(perSys(kA:kB, :)))); end   % nothing reaches MIN_GAP here: the system farthest off
+        offSysInn = sysIds(jS);
         for j = 1:nSys
             for k = 1:K, fitInn(k, :, j) = fitRows(spfMeasLog(k), rowsOf{k, j}); end
         end
@@ -281,6 +310,7 @@ end
 inj = [];  nSlots = [];  spread = [];  clock = NaN(K, 1);  clockGap = NaN(K, 1);  isb = [];
 injSys = NaN;  injOnset = NaN;  injEnd = NaN;  injSize = NaN;  injMax = NaN;  nBadSlot = 0;  fitRef = NaN(K, 6, nSys);  offRef = false(K, 1);
 stRef = zeros(0, 3);  kI = NaN;  kE = NaN;  jSref = 0;  fixBefore = NaN(nSys, 4);  fixAfter = NaN(nSys, 4);  badEp = false(K, 1);
+clockDeparture = NaN(1, 2);
 fitRateRef = NaN(K, 6, nSys);  rateDrift = NaN(K, 1);  rateBefore = NaN(nSys, 4);  rateAfter = NaN(nSys, 4);
 if ~isempty(posRef)
     section(8, 'against the reference position: the offset per system');
@@ -367,20 +397,43 @@ if ~isempty(posRef)
         end
         offRef = any(abs(inj) >= MIN_GAP, 2);
         [stRef, iR] = stretches(offRef, max(abs(inj), [], 2), STRETCH_GAP);
-        if isempty(stRef)
+        if isempty(stRef) && ~useWin
             fprintf('   no stretch with a system %d m or more off the reference on 3 epochs (9 and 10 skipped)\n', MIN_GAP);
         else
-            printStretches(tKf, stRef, iR, offRef, inj, sysIds, MIN_GAP, gapS, 'offset');
-            kI = stRef(iR, 1);  kE = stRef(iR, 2);
+            if isempty(stRef)
+                fprintf('   no stretch with a system %d m or more off the reference on 3 epochs; the tables follow the window\n', MIN_GAP);
+            else
+                printStretches(tKf, stRef, ifelse(useWin, 0, iR), offRef, inj, sysIds, MIN_GAP, gapS, 'offset');
+            end
+            if useWin, kI = kW1;  kE = kW2;  else, kI = stRef(iR, 1);  kE = stRef(iR, 2); end
             injOnset = tKf(kI);  injEnd = tKf(kE);
             seg = kI:kE;
             cnt = sum(abs(inj(seg, :)) >= MIN_GAP, 1);
-            [~, jS] = max(cnt);  injSys = sysIds(jS);  jSref = jS;
+            [~, jS] = max(cnt);
+            if cnt(jS) == 0, [~, jS] = max(abs(medianRows(inj(seg, :)))); end   % nothing reaches MIN_GAP here: the system farthest off
+            injSys = sysIds(jS);  jSref = jS;
             injSize = medianFinite(inj(kI:min(kI + 2, K), jS));
             v = inj(seg, jS);  [~, iM] = max(abs(v));  injMax = v(iM);
-            fprintf('   onset        %10.2f s (epoch %d), the strongest stretch\n', injOnset, kI);
-            fprintf('   end          %10.2f s (epoch %d), %.1f s long\n', injEnd, kE, injEnd - injOnset);
+            if useWin
+                fprintf('   window       %10.2f s (epoch %d) to %.2f s (epoch %d), %.1f s long\n', injOnset, kI, injEnd, kE, injEnd - injOnset);
+            else
+                fprintf('   onset        %10.2f s (epoch %d), the strongest stretch\n', injOnset, kI);
+                fprintf('   end          %10.2f s (epoch %d), %.1f s long\n', injEnd, kE, injEnd - injOnset);
+            end
             fprintf('   size at onset %+9.1f m on system %d (median of the first 3 epochs), largest %+.1f m\n', injSize, injSys, injMax);
+            % the clock line against its straight line over the minute before: what every system shares (the receiver clock, a clock
+            % spoof put on every system, the common part of a position spoof put on every system) is here, not in the per-system offset
+            b = max(1, kI - nW):kI - 1;  okB = b(isfinite(clock(b)));  aW = kE + 1:min(K, kE + nW);
+            if numel(okB) >= 2
+                pC = polyfit(tKf(okB) - tKf(kI), clock(okB), 1);
+                clockDeparture = [medianFinite(clock(seg) - polyval(pC, tKf(seg) - tKf(kI))), medianFinite(clock(aW) - polyval(pC, tKf(aW) - tKf(kI)))];
+                fprintf('   the clock line against its straight line over the minute before (%.2f to %.2f s, slope %+.2f m/s): median departure %+.1f m\n', ...
+                    tKf(okB(1)), tKf(okB(end)), pC(1), clockDeparture(1));
+                fprintf('   within, %+.1f m in the minute after (what every system shares is here, not in the per-system offset: the receiver clock, a\n', clockDeparture(2));
+                fprintf('   clock spoof put on every system, the common part of a position spoof put on every system; 9 separates position from clock)\n');
+            else
+                fprintf('   fewer than 2 clock readings in the minute before: no clock departure\n');
+            end
             others = setdiff(1:nSys, jS);
             if ~isempty(others)
                 fprintf('   the other systems in this stretch: median offset%s\n', sprintf(' system %d %+.1f m;', [sysIds(others); medianRows(inj(seg, others))]));
@@ -536,7 +589,7 @@ kF = min([kA, kI]);  kL = max([kB, kE]);
 if haveSys && isfinite(kF)
     section(12, 'timeline: what the receiver gave, what the host built, what the gate did');
     k1 = max(1, kF - 20);  k2 = min(K, kL + 20);
-    fprintf('   timeline around the strongest stretch, %.2f s (epoch %d) to %.2f s (epoch %d), one character per epoch, 50 per line: the record''s row set (rows)\n', tKf(k1), k1, tKf(k2), k2);
+    fprintf('   timeline around %s, %.2f s (epoch %d) to %.2f s (epoch %d), one character per epoch, 50 per line: the record''s row set (rows)\n', span, tKf(k1), k1, tKf(k2), k2);
     fprintf('   (. = no range rows, A = all %d systems, a digit = that system alone, x = some systems)', nSys);
     if fromLog, fprintf(', the log''s used slots under it where they differ (log; g = a range beyond %.0f km in the log)', BAD_RES / 1e3); end
     modes = [];
@@ -633,7 +686,7 @@ prof = struct('t', tKf, 'nRange', nRange, 'nOff', nOff, 'offset', offset, 'meanO
     'injSys', injSys, 'injOnset', injOnset, 'injEnd', injEnd, 'injSize', injSize, 'injMax', injMax, 'nBadSlot', nBadSlot, 'fitRef', fitRef, ...
     'fixBefore', fixBefore, 'fixAfter', fixAfter, 'badEpochs', badEp, ...
     'fitRateInn', fitRateInn, 'perSysRate', perSysR, 'nPerSysRate', nPerSysR, 'fitRateRef', fitRateRef, 'rateDrift', rateDrift, ...
-    'rateBefore', rateBefore, 'rateAfter', rateAfter);
+    'rateBefore', rateBefore, 'rateAfter', rateAfter, 'window', winUsed, 'clockDeparture', clockDeparture);
 end
 
 %------------------------------------------------------------------------

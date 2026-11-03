@@ -246,7 +246,14 @@ set around the spoof with the log's used slots and the gate mode under it
 when the gate log is given. Off epochs closer than 10 s form one stretch;
 every stretch is listed, the tables and the timeline follow the strongest,
 and the timeline says whether the log holds ranges the host did not use or
-flagged with corrValid false. `docs/SPOOFPROFILE_PRINTOUT.md` walks through
+flagged with corrValid false. A seventh argument, a window `[tOn tOff]`
+in seconds, makes the tables, the before/after medians and the timeline
+follow that window whatever the stretch finders found, so an injection
+below 10 m is read back where it was put; and because the per-system
+offset cannot see what every system shares, the tool also prints the
+clock line against its straight line over the minute before, where a
+clock spoof put on every system steps, while the per-system fix separates
+position from clock. `docs/SPOOFPROFILE_PRINTOUT.md` walks through
 the printout block by block. The Doppler rows get the same reading: the
 velocity and clock drift the range-rate rows ask for, and against a
 stationary reference the log's range rates minus the line-of-sight

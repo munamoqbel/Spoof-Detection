@@ -5,6 +5,13 @@ its reading in the order below, each block under a separator line that
 carries the block's number and title as used here. Every block is answering
 one question; the question is given first, then the lines of that block and
 how to read them.
+A seventh argument, the window `[tOn tOff]` in seconds on tKf, makes the
+tables of blocks 5 to 7, 9 and 10, the before/after medians and the
+timeline follow that window instead of the strongest stretch, whatever the
+stretch finders found (block 2 then says so). This is how an injection
+below the 10 m of the finders, or one put on every system, is read back
+where it was put: the per-system offset of block 8 cannot see what every
+system shares (it goes into the clock line), the fits of block 9 can.
 Units are metres and seconds unless the header says m/s. "Epoch" is one 2 Hz
 gate call; "record" is the spfMeas the gate received at that epoch; "log" is
 the host's pairing log (the receiver's ranges per slot); "row" is one
@@ -139,6 +146,8 @@ agree within 5 m and interpolated across the others.
 
     stretches with a system 10 m or more off ...        (as section 4, on the offset against the reference)
     onset / end / size at onset ... on system 2 (median of the first 3 epochs), largest ...
+    the clock line against its straight line over the minute before (940.00 to 999.50 s, slope +0.02 m/s): median departure +30.1 m
+    within, +0.1 m in the minute after (what every system shares is here, not in the per-system offset: ...)
     the other systems in this stretch: median offset ...
     on 53 of the 90 epochs of this stretch at least one range lies beyond 100 km ... (g in the timeline)
     on 90 of the 90 epochs the clock is interpolated (gaps up to 29.0 s): ...
@@ -154,7 +163,14 @@ epochs no two systems agreed, so the clock there rests on its line. The
 spread line is the key to the spoof's kind: at code noise all satellites
 of the system carry the same offset (a clock-type spoof); hundreds of
 metres means every satellite has its own offset (a position-type spoof)
-or only some satellites are spoofed.
+or only some satellites are spoofed. With a window the onset and end lines
+are one window line. The clock line is fitted with a straight line over the
+minute before the stretch (or the window), and the median departure from
+that line within it and in the minute after is printed: a receiver clock
+drifts smoothly and stays on the line, a clock spoof put on every system
+steps here, and a position spoof put on every system leaves its common
+part here, both invisible to the per-system offset. Block 9 separates
+position from clock per system.
 
     t [s]  system 1 [m] (slots)  system 2 [m] (slots)  system 3 [m] (slots)   clock [m]  spread 2 [m]
     236.06        +708.9 ( 1)         +335.1 ( 3)         +433.7 ( 1)      -4.5i        429.6

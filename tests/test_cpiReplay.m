@@ -3,7 +3,8 @@ function test_cpiReplay()
 % tools/cpiReplay on synthetic spfMeas records (8 range rows, 8 rate rows, a pressure row; S = H P H' + R with a 1 m
 % position sigma): a 12 m north offset in the range rows on epochs 30 to 45 must be read back as dHat 12 m with the
 % sigma of the projection, xi = (12 - B)/sigma, the window sums must equal SPF_cpiMonitor's and the gate log's when
-% the log holds them, and must not when the log holds other numbers. Run from the repo root (the stand-in matrixInv):
+% the log holds them, and must not when the log holds other numbers. With R inflated nine-fold on the spoofed range rows the
+% record mode must read the larger sigma and the nominal mode must give the clean sigma and sums back. Run from the repo root (the stand-in matrixInv):
 % octave --no-gui --quiet --eval test_cpiReplay
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'tools'));  addpath(fullfile(here, '..', 'deploy'));  addpath(fullfile(here, '..'));
@@ -41,6 +42,16 @@ fprintf('--- 12 m north on epochs 30 to 45, B = [5 5 8], the log from the monito
 r1 = cpiReplay(log, tKf, spfLog, [tKf(25) tKf(50)], B);
 fprintf('--- the same against a log holding half the numbers, B from CST_spfParam ---\n');
 r2 = cpiReplay(log, tKf, spfOther, [tKf(25) tKf(50)]);
+%% the host inflating R nine-fold on the range rows of the spoofed epochs: the record mode reads it, the nominal mode undoes it
+logI = log;
+for k = 30:45
+    Ri = R;  Ri(1:8, 1:8) = 9 * R(1:8, 1:8);  Si = H * P * H' + Ri;
+    logI{k}.innovationCov(1:17, 1:17) = Si;  logI{k}.measNoiseCov(1:17, 1:17) = Ri;
+end
+fprintf('--- R inflated nine-fold on the spoofed range rows, read with the record''s R ---\n');
+r3 = cpiReplay(logI, tKf, spfLog, [tKf(25) tKf(50)], B);
+fprintf('--- the same with the nominal R put back ---\n');
+r4 = cpiReplay(logI, tKf, spfLog, [tKf(25) tKf(50)], B, 'nominal');
 f = H(:, 1);  s2 = f' * (S \ f);  sigExp = 1 / sqrt(s2);  sigRexp = 1 / sqrt(f' * (R \ f));
 xiExp = (12 - 5) / sigExp;
 qExp = sum(r1.xi(36:45, 1).^2) / T;
@@ -49,6 +60,10 @@ ok1 = abs(r1.dHat(35, 1) - 12) < 0.3 && isfinite(r1.dHat(35, 2)) && abs(r1.sig(3
    && r1.qReplay(25, 1) == 0 && r1.xi(20, 1) == 0 && r1.matches == 1 && abs(r1.sigP(35, 1) - 1) < 1e-9 && isequal(r1.window, [tKf(25) tKf(50)]) ...
    && abs(r1.dHat(20, 1)) < 0.3;
 ok2 = r2.matches == 0 && abs(r2.xi(35, 1) - 12 / sigExp) < 0.1 && abs(r2.dHat(35, 1) - 12) < 0.3;   % B = 0 from the deploy constants
-if ok1 && ok2, fprintf('=== test_cpiReplay PASS ===\n');
-else, fprintf('ok1 %d ok2 %d\n=== test_cpiReplay FAIL ===\n', ok1, ok2); end
+ok3 = r3.sig(35, 1) > 2.5 * sigExp && r3.xi(35, 1) < 0.5 * xiExp && abs(r3.sig(20, 1) - sigExp) < 1e-9 ...
+   && abs(r4.sig(35, 1) - sigExp) < 1e-6 && abs(r4.xi(35, 1) - xiExp) < 0.1 && abs(r4.sigR(35, 1) - sigRexp) < 1e-6 ...
+   && abs(r4.rNominal(1) - 25) < 1e-9 && abs(r4.rNominal(2) - 0.01) < 1e-9 && isnan(r4.matches) && strcmp(r4.rMode, 'nominal') ...
+   && r4.qReplay(45, 1) > 2 * r3.qReplay(45, 1) && abs(r4.qReplay(45, 1) - r1.qReplay(45, 1)) < 1e-6;
+if ok1 && ok2 && ok3, fprintf('=== test_cpiReplay PASS ===\n');
+else, fprintf('ok1 %d ok2 %d ok3 %d\n=== test_cpiReplay FAIL ===\n', ok1, ok2, ok3); end
 end

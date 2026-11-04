@@ -317,7 +317,12 @@ from SPF_cpiMonitor itself and the gate log's value at the same epoch, and
 the position sigma the host carries. It says whether the gate was fed
 these records (the replay matches the log), how large the offset read is
 and for how many epochs it stays above B, and whether the host's P
-inflates S and so desensitises the monitor.
+inflates S and so desensitises the monitor. With the mode 'nominal' it
+puts the nominal R back (the run median per row type, S rebuilt as
+S minus the logged R plus the nominal R) and replays the monitor as the
+gate would read it had the host handed it S with its nominal R, so the
+effect of a host that scales R on large innovations is measured on the
+spoofed runs and on the clean run without any change to the host.
 
 `runCompare` ends the outage at the first logged P that falls by more than
 30% inside the given interval (the first update back, or a reset): the

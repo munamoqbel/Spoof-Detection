@@ -10,7 +10,10 @@ function [row] = matrixRow(spfLog, tKf, run, scn, name)
 %   What is read: the gate mode through the window; the first latch at or after tOn (its delay from tOn, the
 %   monitor and axis that fired, its ratio); the largest SS and CPI ratio from tOn to the hand-back (or the end), and
 %   the largest on the clean armed epochs (before tOn, and from a minute after the hand-back); the nav error at the
-%   latch, its largest horizontal excursion from tOn to the hand-back, the error at tOff (how far the nav followed)
+%   latch, its largest horizontal excursion from tOn to the hand-back, the error at tOff (how far the nav followed); the
+%   latch counted is the first between tOn and a minute after tOff (the step back at tOff latches too), later ones there
+%   are re-latches, latches elsewhere are false alarms, and the clean epochs run from a minute after the later of tOff
+%   and the last hand-back of the window
 %   and its mean over the window after 10 s; the hand-back (its delay from tOff, the coast length, the vetoes, the
 %   error and the sigma carried at the hand-back); false alarms (latches outside the window and the hand-back);
 %   faults (inputFault, solveFault, clamped, budget exceeded). After a latch, the re-validation through the coast: per
@@ -41,7 +44,9 @@ latches = ev('evLatch');  handbacks = ev('evHandback');  vetoes = ev('evVeto'); 
 fprintf('matrixRow: %s, %s %g %s on %.2f to %.2f s (scenario), records to %.2f s', name, scn.kind, scn.size, unitOf(scn.kind), tOn, tOff, tEnd);
 if any(armed), fprintf('; armed from %.2f s\n', tKf(find(armed, 1))); else, fprintf('; never armed\n'); end
 %% the latch and the hand-back
-kL = latches(find(tKf(latches) >= tOn, 1));
+winL = latches(tKf(latches) >= tOn & tKf(latches) <= tOff + CLEAN_AFTER);   % latches the spoof accounts for: the step back at tOff latches too
+kL = [];  relatch = [];
+if ~isempty(winL), kL = winL(1);  relatch = winL(2:end); end
 latchDelay = NaN;  monitor = 'none';  axisName = '-';  ratioAtLatch = NaN;  kH = [];  handbackDelay = NaN;  coastLen = NaN;  nVeto = 0;
 if ~isempty(kL)
     latchDelay = tKf(kL) - tOn;
@@ -61,20 +66,23 @@ if ~isempty(kL)
     end
 end
 if isempty(kH), kStop = n; else, kStop = kH; end
-inSpan = (1:n)' >= find(tKf >= tOn, 1) & (1:n)' <= kStop;            % tOn to the hand-back (or the end)
+kOff = find(tKf <= tOff, 1, 'last');
+inSpan = (1:n)' >= find(tKf >= tOn, 1) & (1:n)' <= max(kStop, kOff);   % tOn to the later of tOff and the hand-back (or the end)
 maxSsIn = NaN;  maxCpiIn = NaN;  axSs = '-';  axCpi = '-';
 if any(inSpan)
     [maxSsIn, i] = max(max(ssR(inSpan, :), [], 1));  axSs = 'NED';  axSs = axSs(i);
     [maxCpiIn, i] = max(max(cpiR(inSpan, :), [], 1));  axCpi = 'NED';  axCpi = axCpi(i);
 end
+% the clean epochs: before tOn, and from a minute after the later of tOff and the last hand-back the window accounts for;
+% none after it while a latch of the window is still open at the end
+hbW = handbacks(tKf(handbacks) >= tOn & tKf(handbacks) <= tOff + 2 * CLEAN_AFTER);
+tQuiet = max([tOff, tKf(hbW)']);
+openLatch = ~isempty(winL) && (isempty(handbacks) || max(handbacks) < max(winL));
 clean = armed & tKf < tOn;
-if ~isempty(kH), clean = clean | (armed & tKf > tKf(kH) + CLEAN_AFTER);
-elseif isempty(kL), clean = clean | (armed & tKf > tOff + CLEAN_AFTER); end
+if ~openLatch, clean = clean | (armed & tKf > tQuiet + CLEAN_AFTER); end
 maxSsClean = NaN;  maxCpiClean = NaN;
 if any(clean), maxSsClean = max(max(ssR(clean, :)));  maxCpiClean = max(max(cpiR(clean, :))); end
-falseL = latches(tKf(latches) < tOn | (~isempty(kH) & tKf(latches) > tKf(max([kH 1]))));
-if isempty(kL), falseL = latches(tKf(latches) < tOn | tKf(latches) > tOff + CLEAN_AFTER); end
-falseL = setdiff(falseL, kL);
+falseL = setdiff(latches, winL);                                       % latches outside tOn to a minute after tOff
 faults = [nnz(spfLog.inputFault(1:n)), nnz(spfLog.solveFault(1:n)), nnz(spfLog.clamped(1:n)), nnz(spfLog.budgetOut(1:n))];
 %% the mode timeline from 10 s before tOn to 10 s after the hand-back (or tOff)
 if isempty(kH), tStop = tOff; else, tStop = tKf(kH); end
@@ -97,11 +105,18 @@ else
     else
         kP = probs(find(probs > kL & probs <= kH, 1));
         if isempty(kP), sP = ''; else, sP = sprintf('probation at %.2f s, ', tKf(kP)); end
-        fprintf('; coast %.1f s; %s%d vetoes; hand-back at %.2f s, %.1f s after tOff\n', coastLen, sP, nVeto, tKf(kH), handbackDelay);
+        if handbackDelay < 0
+            fprintf('; coast %.1f s; %s%d vetoes; hand-back at %.2f s, %.1f s BEFORE tOff: into the spoof\n', coastLen, sP, nVeto, tKf(kH), -handbackDelay);
+        else
+            fprintf('; coast %.1f s; %s%d vetoes; hand-back at %.2f s, %.1f s after tOff\n', coastLen, sP, nVeto, tKf(kH), handbackDelay);
+        end
+    end
+    if ~isempty(relatch)
+        fprintf('   re-latched %d time(s) within the window and the minute after it, at%s\n', numel(relatch), sprintf(' %.2f s', tKf(relatch)));
     end
     fprintf('   timeline (mode and the time it starts): %s\n', timeline);
 end
-fprintf('   largest ratio from tOn to the hand-back or the end: SS %.2f (%s), CPI %.2f (%s); on the clean armed epochs SS %.2f, CPI %.2f\n', ...
+fprintf('   largest ratio from tOn to the later of tOff and the hand-back: SS %.2f (%s), CPI %.2f (%s); on the clean armed epochs SS %.2f, CPI %.2f\n', ...
     maxSsIn, axSs, maxCpiIn, axCpi, maxSsClean, maxCpiClean);
 %% the re-validation through the coast: what let the gate hand back
 revalComputed = NaN;  revalPassed = NaN;  rowsCoast = NaN;  rowsBefore = NaN;  qRatioCoast = NaN;  tFirstPass = NaN;  probationInSpoof = false;
@@ -193,7 +208,7 @@ row = struct('name', name, 'kind', scn.kind, 'size', scn.size, 'tOn', tOn, 'tOff
     'handbackDelay', handbackDelay, 'coastLen', coastLen, 'nVeto', nVeto, 'errAtHandback', errAtHandback, ...
     'sigmaAtHandback', sigmaAtHandback, 'falseAlarms', numel(falseL), 'tFalse', tKf(falseL)', 'faults', faults, 'timeline', timeline, ...
     'revalComputed', revalComputed, 'revalPassed', revalPassed, 'rowsCoast', rowsCoast, 'rowsBefore', rowsBefore, ...
-    'qRatioCoast', qRatioCoast, 'tFirstPass', tFirstPass, 'probationInSpoof', probationInSpoof);
+    'qRatioCoast', qRatioCoast, 'tFirstPass', tFirstPass, 'probationInSpoof', probationInSpoof, 'nRelatch', numel(relatch));
 end
 
 %------------------------------------------------------------------------

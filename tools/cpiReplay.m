@@ -1,4 +1,4 @@
-function [res] = cpiReplay(spfMeasLog, tKf, spfLog, tWin, nominalBias, rMode)
+function [res] = cpiReplay(spfMeasLog, tKf, spfLog, tWin, nominalBias, rMode, minRows)
 %CPIREPLAY  The CPI monitor replayed on the saved spfMeas records: what its projection reads, epoch by epoch, against the gate log.
 %   res = cpiReplay(spfMeasLog, tKf, spfLog, tWin)               B from CST_spfParam on the path (the host's values)
 %   res = cpiReplay(spfMeasLog, tKf, spfLog, tWin, nominalBias)  B per NED position axis (m)
@@ -9,6 +9,11 @@ function [res] = cpiReplay(spfMeasLog, tKf, spfLog, tWin, nominalBias, rMode)
 %                                                 have read had the host handed it S with the nominal R, while the
 %                                                 host's own update kept its scaled R. Rows the host rejected are not
 %                                                 in the records, so this replay is conservative for a spoofed run
+%   res = cpiReplay(..., rMode, minRows)          an epoch with fewer range rows than minRows does not count (xi = 0,
+%                                                 the window sum from SPF_cpiMonitor sees it as an epoch without rows):
+%                                                 the few satellites left in a partial outage carry reflected signals
+%                                                 or the gap's drift, and a one-axis projection on three rows turns one
+%                                                 bad row into tens of metres; this measures the rule offline
 %   spfLog may be [] (no comparison with the log); tWin [tOn tOff] in s on tKf, the minute before it is the baseline.
 %   Per epoch and monitored axis, from the record's innovation gamma, S and H: dHat = f' S^-1 gamma / (f' S^-1 f), the
 %   offset the CPI projection reads on the axis (m); sig = 1 / sqrt(f' S^-1 f), the sigma of that reading (m); sigR =
@@ -29,6 +34,7 @@ if nargin < 3, spfLog = []; end
 if nargin < 4 || isempty(tWin), tWin = [tKf(1) tKf(end)]; end
 if nargin < 5 || isempty(nominalBias), nominalBias = CST_spfParam.NOMINAL_BIAS; end
 if nargin < 6 || isempty(rMode), rMode = 'record'; end
+if nargin < 7 || isempty(minRows), minRows = 0; end
 useNom = strcmpi(rMode, 'nominal');
 BEFORE = 60;                                                 % s: the baseline minute before the window
 MATCH_TOL = 0.02;                                            % in q/T_N: replay and log closer than this agree
@@ -51,10 +57,16 @@ if useNom
     end
     for c = 1:3, rNom(c) = medF(acc{c}); end
 end
+nRangeRows = zeros(K, 1);
+for k = 1:K
+    m = double(spfMeasLog(k).numMeas);
+    if m >= 1, nRangeRows(k) = nnz(rowTypes(spfMeasLog(k).obsMatrix(1:m, :)) == 1); end
+end
+counts = nRangeRows >= minRows;                              % epochs the CPI may count
 for k = kAll'
     s = spfMeasLog(k);  m = double(s.numMeas);
     for a = 1:nA, sigP(k, a) = sqrt(max(s.postCov(axes(a), axes(a)), 0)); end
-    if m < 1, continue; end
+    if m < 1 || ~counts(k), continue; end
     H = s.obsMatrix(1:m, :);  y = s.innovation(1:m);
     [S, R] = covOf(s, m, useNom, rNom);
     if ~all(isfinite(S(:))) || ~all(isfinite(y)), continue; end
@@ -79,6 +91,7 @@ for k = kAll(kAll >= N)'
     for i = 1:N
         s = spfMeasLog(idx(i));  mi = double(s.numMeas);
         innB(:, i) = s.innovation(:);  covB(:, :, i) = s.innovationCov;  obsB(:, :, i) = s.obsMatrix;  numB(i) = mi;
+        if ~counts(idx(i)), numB(i) = 0; end                 % an epoch below the row floor counts as one without rows
         if useNom && mi >= 1, covB(1:mi, 1:mi, i) = covOf(s, mi, useNom, rNom); end
     end
     for a = 1:nA
@@ -99,6 +112,10 @@ if useNom
     fprintf('   R NOMINAL: per row type the run median of the logged R, range rows %.2f m, rate rows %.3f m/s, other rows %.2f; S rebuilt as\n', ...
         sqrt(rNom(1)), sqrt(rNom(2)), sqrt(rNom(3)));
     fprintf('   S - R_logged + R_nominal: what the gate reads when the host hands it S with the nominal R (the log column keeps the host''s R)\n');
+end
+if minRows > 0
+    fprintf('   ROW FLOOR: an epoch with fewer than %d range rows does not count; %d of the %d epochs of the window and the minute before are below it\n', ...
+        minRows, nnz(~counts(kAll)), numel(kAll));
 end
 fprintf('   per epoch and axis: dHat = the offset the CPI projection reads (m), sig = its sigma 1/sqrt(f'' S^-1 f) (m), xi = (|dHat| - B)/sig floored\n');
 fprintf('   at 0; q/T_N = the ten epochs ending here, from SPF_cpiMonitor (alarm at 1); log = the gate log''s cpiRatio there; sigP = the host''s sqrt(P+)\n');
@@ -170,7 +187,8 @@ else
     fprintf('   NOTE: S is R-dominated on the window (sigma %.2f x what R alone gives): the host''s P does not desensitise the monitor here\n', max(sigRatio));
 end
 res = struct('t', tKf, 'dHat', dHat, 'sig', sig, 'sigR', sigR, 'xi', xi, 'qReplay', qReplay, 'qLog', qLog, 'sigP', sigP, ...
-    'matches', matches, 'window', [tKf(kW(1)) tKf(kW(end))], 'axes', axes, 'rMode', rMode, 'rNominal', rNom);
+    'matches', matches, 'window', [tKf(kW(1)) tKf(kW(end))], 'axes', axes, 'rMode', rMode, 'rNominal', rNom, ...
+    'minRows', minRows, 'nRangeRows', nRangeRows);
 end
 
 %------------------------------------------------------------------------

@@ -4,7 +4,8 @@ function test_cpiReplay()
 % position sigma): a 12 m north offset in the range rows on epochs 30 to 45 must be read back as dHat 12 m with the
 % sigma of the projection, xi = (12 - B)/sigma, the window sums must equal SPF_cpiMonitor's and the gate log's when
 % the log holds them, and must not when the log holds other numbers. With R inflated nine-fold on the spoofed range rows the
-% record mode must read the larger sigma and the nominal mode must give the clean sigma and sums back. Run from the repo root (the stand-in matrixInv):
+% record mode must read the larger sigma and the nominal mode must give the clean sigma and sums back. Epochs cut to three
+% range rows with one 30 m row must read tens of metres without a row floor and nothing with a floor of 6. Run from the repo root (the stand-in matrixInv):
 % octave --no-gui --quiet --eval test_cpiReplay
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'tools'));  addpath(fullfile(here, '..', 'deploy'));  addpath(fullfile(here, '..'));
@@ -52,6 +53,18 @@ fprintf('--- R inflated nine-fold on the spoofed range rows, read with the recor
 r3 = cpiReplay(logI, tKf, spfLog, [tKf(25) tKf(50)], B);
 fprintf('--- the same with the nominal R put back ---\n');
 r4 = cpiReplay(logI, tKf, spfLog, [tKf(25) tKf(50)], B, 'nominal');
+%% a row floor: epochs 30 to 45 cut to 3 range rows (one bad row of 30 m among them) must not count with a floor of 6
+logF = log;
+for k = 30:45
+    r = logF{k};  keep = [1 2 3 9 10 11 17];                 % 3 ranges, 3 rates, the pressure row
+    Hk = zeros(mMax, n);  Hk(1:7, :) = r.obsMatrix(keep, :);  yk = zeros(mMax, 1);  yk(1:7) = r.innovation(keep);  yk(1) = 30;
+    Sk = zeros(mMax);  Sk(1:7, 1:7) = r.innovationCov(keep, keep);  Rk = zeros(mMax);  Rk(1:7, 1:7) = r.measNoiseCov(keep, keep);
+    logF{k}.obsMatrix = Hk;  logF{k}.innovation = yk;  logF{k}.innovationCov = Sk;  logF{k}.measNoiseCov = Rk;  logF{k}.numMeas = 7;
+end
+fprintf('--- three range rows with one 30 m row, no floor ---\n');
+r5 = cpiReplay(logF, tKf, [], [tKf(25) tKf(50)], B);
+fprintf('--- the same with a floor of 6 range rows ---\n');
+r6 = cpiReplay(logF, tKf, [], [tKf(25) tKf(50)], B, 'record', 6);
 f = H(:, 1);  s2 = f' * (S \ f);  sigExp = 1 / sqrt(s2);  sigRexp = 1 / sqrt(f' * (R \ f));
 xiExp = (12 - 5) / sigExp;
 qExp = sum(r1.xi(36:45, 1).^2) / T;
@@ -64,6 +77,9 @@ ok3 = r3.sig(35, 1) > 2.5 * sigExp && r3.xi(35, 1) < 0.5 * xiExp && abs(r3.sig(2
    && abs(r4.sig(35, 1) - sigExp) < 1e-6 && abs(r4.xi(35, 1) - xiExp) < 0.1 && abs(r4.sigR(35, 1) - sigRexp) < 1e-6 ...
    && abs(r4.rNominal(1) - 25) < 1e-9 && abs(r4.rNominal(2) - 0.01) < 1e-9 && isnan(r4.matches) && strcmp(r4.rMode, 'nominal') ...
    && r4.qReplay(45, 1) > 2 * r3.qReplay(45, 1) && abs(r4.qReplay(45, 1) - r1.qReplay(45, 1)) < 1e-6;
-if ok1 && ok2 && ok3, fprintf('=== test_cpiReplay PASS ===\n');
-else, fprintf('ok1 %d ok2 %d ok3 %d\n=== test_cpiReplay FAIL ===\n', ok1, ok2, ok3); end
+ok4 = r5.nRangeRows(35) == 3 && r5.nRangeRows(20) == 8 && max(max(r5.qReplay(30:50, 1:2))) > 1 && max(max(abs(r5.dHat(30:45, 1:2)))) > 10 ...   % the bad row leaks on the axis its geometry favours
+   && r6.minRows == 6 && all(r6.xi(30:45, 1) == 0) && all(isnan(r6.dHat(30:45, 1))) && max(r6.qReplay(30:50, 1)) == 0 && r6.qReplay(29, 1) == 0 ...
+   && abs(r6.dHat(20, 1)) < 0.3;
+if ok1 && ok2 && ok3 && ok4, fprintf('=== test_cpiReplay PASS ===\n');
+else, fprintf('ok1 %d ok2 %d ok3 %d ok4 %d\n=== test_cpiReplay FAIL ===\n', ok1, ok2, ok3, ok4); end
 end

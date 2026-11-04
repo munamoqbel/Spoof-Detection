@@ -322,7 +322,10 @@ puts the nominal R back (the run median per row type, S rebuilt as
 S minus the logged R plus the nominal R) and replays the monitor as the
 gate would read it had the host handed it S with its nominal R, so the
 effect of a host that scales R on large innovations is measured on the
-spoofed runs and on the clean run without any change to the host.
+spoofed runs and on the clean run without any change to the host. A
+minimum range-row count makes epochs below it not count, the rule that
+keeps a partial outage's few reflected rows from reading as tens of
+metres in the one-axis projection, measured the same way.
 
 `runCompare` ends the outage at the first logged P that falls by more than
 30% inside the given interval (the first update back, or a reset): the

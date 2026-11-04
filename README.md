@@ -309,6 +309,16 @@ far the nav followed), and the error and the sigma carried at the
 hand-back. matrixTable prints the rows as one table, a dash where a run
 has no such number.
 
+`tools/cpiReplay.m` replays the CPI monitor on the saved spfMeas records
+over a window and prints, per epoch and axis, the offset the CPI
+projection reads in metres, the sigma of that reading (and what R alone
+would give), the deadband-floored normalised value, the ten-epoch sum
+from SPF_cpiMonitor itself and the gate log's value at the same epoch, and
+the position sigma the host carries. It says whether the gate was fed
+these records (the replay matches the log), how large the offset read is
+and for how many epochs it stays above B, and whether the host's P
+inflates S and so desensitises the monitor.
+
 `runCompare` ends the outage at the first logged P that falls by more than
 30% inside the given interval (the first update back, or a reset): the
 drift, the trace fit and the budget stop there, so a tReacq given too late

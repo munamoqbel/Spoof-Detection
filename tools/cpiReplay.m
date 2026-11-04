@@ -1,0 +1,151 @@
+function [res] = cpiReplay(spfMeasLog, tKf, spfLog, tWin, nominalBias)
+%CPIREPLAY  The CPI monitor replayed on the saved spfMeas records: what its projection reads, epoch by epoch, against the gate log.
+%   res = cpiReplay(spfMeasLog, tKf, spfLog, tWin)               B from CST_spfParam on the path (the host's values)
+%   res = cpiReplay(spfMeasLog, tKf, spfLog, tWin, nominalBias)  B per NED position axis (m)
+%   spfLog may be [] (no comparison with the log); tWin [tOn tOff] in s on tKf, the minute before it is the baseline.
+%   Per epoch and monitored axis, from the record's innovation gamma, S and H: dHat = f' S^-1 gamma / (f' S^-1 f), the
+%   offset the CPI projection reads on the axis (m); sig = 1 / sqrt(f' S^-1 f), the sigma of that reading (m); sigR =
+%   1 / sqrt(f' R^-1 f), the same with R alone (what the sigma would be if the host carried no position uncertainty in
+%   S); xi = (|dHat| - B) / sig floored at zero, as SPF_cpiMonitor forms it; q/T_N of the ten epochs ending at the
+%   epoch from SPF_cpiMonitor itself; the gate log's cpiRatio at the same epoch; and sigP = sqrt(P+) on the axis, the
+%   position sigma the host carries. Prints the table over the window, the medians over the minute before and over
+%   the window, whether the replay matches the log (then the gate was fed these records), and what sets the reading:
+%   how large the offset read is, how many epochs it stays above B, and whether S is R or the host's P.
+%   Result: t, dHat, sig, sigR, xi, qReplay, qLog [K x nAxes], sigP [K x nAxes], matches, window, axes.
+%   Needs SPF_cpiMonitor, CST_spfParam and the host's matrixInv on the path. MATLAB desktop tool, not codegen. Runs under Octave.
+
+if iscell(spfMeasLog), spfMeasLog = [spfMeasLog{:}]; end
+K = numel(spfMeasLog);
+if nargin < 2 || isempty(tKf), tKf = 0.5 * (0:K-1)'; end
+tKf = tKf(:);
+if nargin < 3, spfLog = []; end
+if nargin < 4 || isempty(tWin), tWin = [tKf(1) tKf(end)]; end
+if nargin < 5 || isempty(nominalBias), nominalBias = CST_spfParam.NOMINAL_BIAS; end
+BEFORE = 60;                                                 % s: the baseline minute before the window
+MATCH_TOL = 0.02;                                            % in q/T_N: replay and log closer than this agree
+N = double(CST_spfParam.WINDOW_LENGTH);  T = CST_spfParam.CPI_THRESHOLD;
+axes = double(CST_spfParam.MONITORED_AXES);  nA = numel(axes);  letters = 'NED';
+kW = find(tKf >= min(tWin) & tKf <= max(tWin));
+kB = find(tKf >= min(tWin) - BEFORE & tKf < min(tWin));
+if isempty(kW), error('cpiReplay:window', 'the window %g to %g s holds no epoch of the records (%.2f to %.2f s)', tWin, tKf(1), tKf(end)); end
+kAll = [kB; kW];
+dHat = NaN(K, nA);  sig = NaN(K, nA);  sigR = NaN(K, nA);  xi = zeros(K, nA);  sigP = NaN(K, nA);  qReplay = NaN(K, nA);  qLog = NaN(K, nA);
+maxMeas = size(spfMeasLog(1).innovation, 1);  nState = size(spfMeasLog(1).obsMatrix, 2);
+for k = kAll'
+    s = spfMeasLog(k);  m = double(s.numMeas);
+    for a = 1:nA, sigP(k, a) = sqrt(max(s.postCov(axes(a), axes(a)), 0)); end
+    if m < 1, continue; end
+    H = s.obsMatrix(1:m, :);  y = s.innovation(1:m);  S = s.innovationCov(1:m, 1:m);  R = s.measNoiseCov(1:m, 1:m);
+    if ~all(isfinite(S(:))) || ~all(isfinite(y)), continue; end
+    Sy = S \ y;
+    for a = 1:nA
+        f = H(:, axes(a));
+        if ~any(f), continue; end
+        s2 = f' * (S \ f);
+        if s2 > 0 && isfinite(s2)
+            g = f' * Sy;
+            dHat(k, a) = g / s2;  sig(k, a) = 1 / sqrt(s2);
+            xi(k, a) = max(abs(g) / sqrt(s2) - nominalBias(axes(a)) * sqrt(s2), 0);
+        end
+        r2 = f' * (R \ f);
+        if r2 > 0 && isfinite(r2), sigR(k, a) = 1 / sqrt(r2); end
+    end
+end
+%% the window sums from SPF_cpiMonitor itself: the ten epochs ending at each epoch
+for k = kAll(kAll >= N)'
+    idx = k - N + 1:k;
+    innB = zeros(maxMeas, N);  covB = zeros(maxMeas, maxMeas, N);  obsB = zeros(maxMeas, nState, N);  numB = zeros(N, 1);
+    for i = 1:N
+        s = spfMeasLog(idx(i));
+        innB(:, i) = s.innovation(:);  covB(:, :, i) = s.innovationCov;  obsB(:, :, i) = s.obsMatrix;  numB(i) = double(s.numMeas);
+    end
+    for a = 1:nA
+        [~, q] = SPF_cpiMonitor(innB, covB, obsB, numB, axes(a), nominalBias(axes(a)));
+        qReplay(k, a) = q / T;
+    end
+end
+haveLog = ~isempty(spfLog) && isstruct(spfLog) && isfield(spfLog, 'cpiRatio');
+if haveLog
+    nL = min([size(spfLog.cpiRatio, 1), double(spfLog.count), K]);
+    kk = kAll(kAll <= nL);
+    qLog(kk, 1:min(nA, size(spfLog.cpiRatio, 2))) = spfLog.cpiRatio(kk, 1:min(nA, size(spfLog.cpiRatio, 2)));
+end
+%% print
+fprintf('cpiReplay: %d records; window %.2f to %.2f s (epochs %d to %d), the minute before as the baseline; N = %d epochs, T_N = %.2f, B = [%s] m\n', ...
+    K, tKf(kW(1)), tKf(kW(end)), kW(1), kW(end), N, T, strtrim(sprintf('%g ', nominalBias(axes))));
+fprintf('   per epoch and axis: dHat = the offset the CPI projection reads (m), sig = its sigma 1/sqrt(f'' S^-1 f) (m), xi = (|dHat| - B)/sig floored\n');
+fprintf('   at 0; q/T_N = the ten epochs ending here, from SPF_cpiMonitor (alarm at 1); log = the gate log''s cpiRatio there; sigP = the host''s sqrt(P+)\n');
+pick = unique([kW(1:min(8, numel(kW)))', kW(round(linspace(1, numel(kW), min(10, numel(kW)))))']);
+fprintf('   %8s', 't [s]');
+for a = 1:nA, fprintf(' | %s %6s %5s %5s %6s %6s %5s', letters(a), 'dHat', 'sig', 'xi', 'q/T_N', 'log', 'sigP'); end
+fprintf('\n');
+for k = pick
+    fprintf('   %8.2f', tKf(k));
+    for a = 1:nA
+        fprintf(' | %s %6s %5s %5s %6s %6s %5s', ' ', num(dHat(k, a), '%+6.1f'), num(sig(k, a), '%5.2f'), num(xi(k, a), '%5.2f'), ...
+            num(qReplay(k, a), '%6.3f'), num(qLog(k, a), '%6.3f'), num(sigP(k, a), '%5.2f'));
+    end
+    fprintf('\n');
+end
+fprintf('   medians, the minute before (%d epochs) then the window (%d epochs):\n', numel(kB), numel(kW));
+fprintf('   %-9s', '');
+for a = 1:nA, fprintf(' | %s %6s %5s %5s %6s %5s %5s', letters(a), 'dHat', 'sig', 'sigR', 'xi', 'sigP', ''); end
+fprintf('\n');
+for side = 1:2
+    if side == 1, idx = kB;  lab = 'before'; else, idx = kW;  lab = 'window'; end
+    fprintf('   %-9s', lab);
+    for a = 1:nA
+        fprintf(' | %s %6s %5s %5s %6s %5s %5s', ' ', num(medF(dHat(idx, a)), '%+6.1f'), num(medF(sig(idx, a)), '%5.2f'), num(medF(sigR(idx, a)), '%5.2f'), ...
+            num(medF(xi(idx, a)), '%6.2f'), num(medF(sigP(idx, a)), '%5.2f'), '');
+    end
+    fprintf('\n');
+end
+%% the verdicts
+matches = NaN;
+if haveLog
+    both = kW(all(isfinite(qReplay(kW, :)) & isfinite(qLog(kW, :)), 2));
+    if ~isempty(both)
+        dq = max(abs(qReplay(both, :) - qLog(both, :)), [], 2);
+        matches = max(dq) < MATCH_TOL;
+        if matches
+            fprintf('   VERDICT: the replay matches the log on %d of %d epochs (largest difference %.3f): the gate was fed these records\n', numel(both), numel(both), max(dq));
+        else
+            fprintf('   VERDICT: the replay differs from the log on %d of %d epochs (largest difference %.3f, first at %.2f s): the gate''s buffers do not\n', ...
+                nnz(dq >= MATCH_TOL), numel(both), max(dq), tKf(both(find(dq >= MATCH_TOL, 1))));
+            fprintf('            hold these records'' innovations (another vector, another S, or windows that skip epochs)\n');
+        end
+    else
+        fprintf('   no epoch of the window has both a replayed and a logged q/T_N: no comparison\n');
+    end
+end
+for a = 1:nA
+    [dMax, i] = max(abs(dHat(kW, a)) - medF(abs(dHat(kB, a))) * 0);          % the largest reading in the window
+    kM = kW(i);
+    above = nnz(abs(dHat(kW, a)) > nominalBias(axes(a)));
+    [qMax, j] = max(qReplay(kW, a));
+    fprintf('   %s: the projection reads up to %+.1f m (at %.2f s) and stays beyond B = %g m on %d of %d epochs; sigma %.2f m there (%.2f m from R alone,\n', ...
+        letters(a), dHat(kM, a), tKf(kM), nominalBias(axes(a)), above, numel(kW), sig(kM, a), sigR(kM, a));
+    fprintf('      the host''s position sigma %.2f m); xi peaks at %.2f; the ten-epoch sum peaks at q/T_N = %.3f', sigP(kM, a), max(xi(kW, a)), qMax);
+    if isfinite(qMax) && ~isempty(j), fprintf(' (window ending %.2f s)', tKf(kW(j))); end
+    fprintf('\n');
+end
+sigRatio = medF(sig(kW, :)) ./ medF(sigR(kW, :));
+if any(sigRatio > 1.5)
+    fprintf('   NOTE: the sigma of the reading is %.1f x what R alone gives (medians over the window): S = H P H'' + R carries the host''s position\n', max(sigRatio));
+    fprintf('         sigma, and the CPI is normalised by S, so a P the host carries above its true error desensitises the monitor by that factor\n');
+else
+    fprintf('   NOTE: S is R-dominated on the window (sigma %.2f x what R alone gives): the host''s P does not desensitise the monitor here\n', max(sigRatio));
+end
+res = struct('t', tKf, 'dHat', dHat, 'sig', sig, 'sigR', sigR, 'xi', xi, 'qReplay', qReplay, 'qLog', qLog, 'sigP', sigP, ...
+    'matches', matches, 'window', [tKf(kW(1)) tKf(kW(end))], 'axes', axes);
+end
+
+%------------------------------------------------------------------------
+function [s] = num(x, fmt)
+if isnan(x), s = '-'; else, s = sprintf(fmt, x); end
+end
+
+function [m] = medF(x)
+x = x(isfinite(x));
+if isempty(x), m = NaN; else, m = median(x); end
+end

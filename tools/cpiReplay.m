@@ -119,13 +119,13 @@ if haveLog
     end
 end
 for a = 1:nA
-    [dMax, i] = max(abs(dHat(kW, a)) - medF(abs(dHat(kB, a))) * 0);          % the largest reading in the window
+    [xiMax, i] = max(xi(kW, a));                                              % the epoch that counted most
     kM = kW(i);
     above = nnz(abs(dHat(kW, a)) > nominalBias(axes(a)));
     [qMax, j] = max(qReplay(kW, a));
-    fprintf('   %s: the projection reads up to %+.1f m (at %.2f s) and stays beyond B = %g m on %d of %d epochs; sigma %.2f m there (%.2f m from R alone,\n', ...
-        letters(a), dHat(kM, a), tKf(kM), nominalBias(axes(a)), above, numel(kW), sig(kM, a), sigR(kM, a));
-    fprintf('      the host''s position sigma %.2f m); xi peaks at %.2f; the ten-epoch sum peaks at q/T_N = %.3f', sigP(kM, a), max(xi(kW, a)), qMax);
+    fprintf('   %s: the reading counts most at %.2f s, %+.1f m with sigma %.2f m (%.2f m from R alone, the host''s position sigma %.2f m), xi %.2f;\n', ...
+        letters(a), tKf(kM), dHat(kM, a), sig(kM, a), sigR(kM, a), sigP(kM, a), xiMax);
+    fprintf('      the reading stays beyond B = %g m on %d of %d epochs; the ten-epoch sum peaks at q/T_N = %.3f', nominalBias(axes(a)), above, numel(kW), qMax);
     if isfinite(qMax) && ~isempty(j), fprintf(' (window ending %.2f s)', tKf(kW(j))); end
     fprintf('\n');
 end

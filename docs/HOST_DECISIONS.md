@@ -13,7 +13,7 @@ feedback gain (0.4). "Mode" is the gate mode **after** this epoch's call to
 | `xPrior` | `activeKF.states` captured before calling `kfUpdate` (extrapolated at 100 Hz) |
 | `xPost` | `kfUpdate` output: `activeKF.states + K*y` |
 | `PPrior`, `PPost` | `activeKF.covariance` before, `kfUpdate` covariance after |
-| `y`, `H`, `R`, `numMeas` | innovation `z - h(xPrior)`, Jacobian, measurement noise, valid rows as the filter used them (pressure row included; `numMeas = 1` on a GNSS outage) |
+| `y`, `H`, `R`, `numMeas` | innovation `z - h(xPrior)`, Jacobian, the NOMINAL measurement noise, all the rows the host built (pressure row included; `numMeas = 1` on a GNSS outage with the baro row alone, 0 with none). A host that scales R on large innovations or rejects rows for its own update passes those beside the nominal pair (`setKfMeasBoth`, `kfMeasFromUpdateBoth`): the monitors read the nominal pair only (section 8) |
 | increment | `xPost - xPrior = K*y`: the only thing the monitors consume |
 | separation | sum of Phi-propagated increments since a reference epoch = host solution minus the coast of that reference |
 | anchor | last alarm-free closed window: `separation` (kept live) and coast covariance |
@@ -153,3 +153,31 @@ Covered by `tests/test_error_handlers.m`. On a host update flagged `failed`, pas
   through the warm-up): not needed on the jammed data set, where the host's
   own reset already re-initialises the gate; relevant only for outages that
   end below the host's reset limit.
+
+## 8. The measurement noise the gate reads
+
+The CPI normalises each epoch's innovation by S = H P H' + R and the
+re-validation compares the GNSS rows with the coast through H P_C H' + R.
+Both are tests against the null hypothesis, so their R is the noise the
+design assumes under no spoof, not the weight the host chose for its own
+update. A host that scales R up on large innovations normalises a spoof
+innovation to about one sigma before the gate sees it, and a host that
+rejects the rows with the largest innovations removes the evidence. Measured
+on the vehicle data (`tools/cpiReplay`, `tools/matrixRow`): a 10 m step on
+every constellation read 0.09 of the CPI threshold with the host's R and
+0.30 with the nominal one (no latch either way, as designed); a 20 m step
+read 0.85 with the host's R and crossed the threshold at its second epoch
+with the nominal one; a 30 m step latched after 4.8 s with the host's R,
+and in COAST the re-validation passed on 48 of 48 epochs with q at 0.42 of
+its threshold on a nearly full row set, handing the nav back into the spoof
+24 s after the latch; with the nominal R the same residuals give q near
+twice the threshold. Decision: the gate's `innovationCov` and
+`measNoiseCov` carry the nominal R on all the rows the host built, taken
+before the host's spike handling; the host's own S and R travel beside them
+(`innovationCovHost`, `measNoiseCovHost`) for the record. The host's update
+keeps its scaling and its rejections. With the nominal R the gate also sees
+the receiver's own events whole; on 55 minutes of the clean vehicle run the
+CPI then needs an epoch floor of 8 range rows (reflections in a partial
+outage read as tens of metres on a one-axis projection) and reads two
+recording slips of one epoch as 16 m jumps; the real near misses stay
+below 0.65 of the threshold (`tools/cpiReplay` with the mode `nominal`).

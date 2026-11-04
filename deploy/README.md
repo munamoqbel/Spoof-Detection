@@ -24,6 +24,14 @@ set on the path. The root copies keep the long design notes.
 Not included, the simulation provides its own: `CST_gnssHybrid`
 (`NO_STATES`, `MAX_MEASURES`) and `matrixInv` (`[inv, invalid] = matrixInv(A)`).
 
+The S and R the gate reads (`innovationCov`, `measNoiseCov`) carry the
+nominal measurement noise on all the rows the host built. A host that
+scales R up on large innovations or leaves rows out of its own update
+hands the gate the nominal pair and its own pair beside it through
+`STRUCT_SPF.setKfMeasBoth` or `kfMeasFromUpdateBoth` (`innovationCovHost`,
+`measNoiseCovHost`, kept for the record, never read by a monitor); with
+`setKfMeas` / `kfMeasFromUpdate` the two pairs are the same matrices.
+
 Use: copy the folder contents next to the host code. Keep the root copies
 off the simulation path; they are the annotated reference (design notes,
 paper equation mapping, exception-handler rationale). Any change goes into

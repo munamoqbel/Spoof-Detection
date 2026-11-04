@@ -39,6 +39,8 @@ tests = { ...
     'test_spoofInjectCheck', '=== test_spoofInjectCheck PASS ===';
     'test_matrixRow',        '=== test_matrixRow PASS ===';
     'test_cpiReplay',        '=== test_cpiReplay PASS ===';
+    'test_measNoiseCheck',   '=== test_measNoiseCheck PASS ===';
+    'test_kfMeasBoth',       '=== test_kfMeasBoth PASS ===';
     'test_feedbackCheck',    '=== test_feedbackCheck PASS ===';
     'test_gravityCheck',     '=== test_gravityCheck PASS ==='};
 

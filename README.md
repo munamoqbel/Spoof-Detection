@@ -314,6 +314,18 @@ rejected the rows carrying the spoof) or with q far below its threshold
 on a full row set (S carrying an R the host scaled up). matrixTable
 prints the rows as one table, a dash where a run has no such number.
 
+`tools/measNoiseCheck.m` shows the measurement noise the gate was handed,
+epoch by epoch over a window: the range rows in the record, the largest
+sqrt(R) against the run's nominal, the rows whose R is scaled and the
+innovation there, and with records from `STRUCT_SPF.setKfMeasBoth` or
+`kfMeasFromUpdateBoth` the host's own R beside the gate's and the rows the
+host left out. Its verdict says whether the gate's R is scaled in the
+window (the host hands the gate the R it applies, the old interface) or
+stays at the nominal while the host's is scaled (the interface change is
+in). On the vehicle data the host scales R on a spoofed epoch from 5 m to
+up to 15 m per row, which is what kept a 20 m step below the CPI threshold
+and re-validated a 30 m coast into the spoof.
+
 `tools/cpiReplay.m` replays the CPI monitor on the saved spfMeas records
 over a window and prints, per epoch and axis, the offset the CPI
 projection reads in metres, the sigma of that reading (and what R alone
@@ -322,7 +334,9 @@ from SPF_cpiMonitor itself and the gate log's value at the same epoch, and
 the position sigma the host carries. It says whether the gate was fed
 these records (the replay matches the log), how large the offset read is
 and for how many epochs it stays above B, and whether the host's P
-inflates S and so desensitises the monitor. With the mode 'nominal' it
+inflates S and so desensitises the monitor. With the mode 'host' and
+records that carry the host's pair it replays what the gate would have
+read on the old interface. With the mode 'nominal' it
 puts the nominal R back (the run median per row type, S rebuilt as
 S minus the logged R plus the nominal R) and replays the monitor as the
 gate would read it had the host handed it S with its nominal R, so the

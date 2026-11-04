@@ -30,17 +30,47 @@ classdef STRUCT_SPF
             numMeasClamped = (double(numMeas) > double(CST_spfParam.MAX_MEAS));
             numMeasUsed    = uint8(min(double(numMeas), double(CST_spfParam.MAX_MEAS)));
 
+            % one S: the host applies what the gate reads
+            kfMeas = STRUCT_SPF.setKfMeasBoth(innovation, innovationCov, obsMatrix, ...
+                measNoiseCov, numMeas, priorState, postState, postCov, ...
+                innovationCov, measNoiseCov);
+        end
+
+        function [kfMeas] = setKfMeasBoth(innovation, innovationCov, obsMatrix, ...
+                measNoiseCov, numMeas, priorState, postState, postCov, ...
+                innovationCovHost, measNoiseCovHost)
+            % The S and R the gate reads (innovationCov, measNoiseCov) carry
+            % the NOMINAL measurement noise, the noise the design assumes under
+            % no spoof, on all the rows the host built. A host that scales R
+            % up on large innovations (its spike handling) or rejects rows for
+            % its own update would otherwise normalise a spoof innovation to
+            % one sigma before the gate saw it: on the vehicle data a 20 m
+            % step read 0.85 of the CPI threshold with the host's R and 1.37
+            % at its second epoch with the nominal R, and the re-validation
+            % in COAST passed on 30 m residuals (q at 0.42 of its threshold)
+            % and handed the nav back into the spoof. The host's own S and R
+            % travel beside the gate's for the record (innovationCovHost,
+            % measNoiseCovHost; a row the host did not apply at a very large
+            % variance); no monitor reads them. The host's own update keeps
+            % its scaling and its rejections.
+
+            % Exception handler: never index past the fixed MAX_MEAS layout
+            numMeasClamped = (double(numMeas) > double(CST_spfParam.MAX_MEAS));
+            numMeasUsed    = uint8(min(double(numMeas), double(CST_spfParam.MAX_MEAS)));
+
             % Define structure (rows/cols 1:numMeas are valid)
             kfMeas = struct( ...
-                'innovation',     innovation, ...      % y = z - h(xPrior)      [MAX_MEAS x 1]
-                'innovationCov',  innovationCov, ...   % S = H P H' + R         [MAX_MEAS x MAX_MEAS]
-                'obsMatrix',      obsMatrix, ...       % H(x)                   [MAX_MEAS x n]
-                'measNoiseCov',   measNoiseCov, ...    % R                      [MAX_MEAS x MAX_MEAS]
-                'numMeas',        numMeasUsed, ...     % valid rows this epoch (0 = no GNSS), <= MAX_MEAS
-                'numMeasClamped', logical(numMeasClamped), ... % host passed more rows than MAX_MEAS
-                'priorState',     priorState, ...      % x_bar into the update  [n x 1]
-                'postState',      postState, ...       % x+ out of the update   [n x 1]
-                'postCov',        postCov);            % P+                     [n x n]
+                'innovation',        innovation, ...        % y = z - h(xPrior)      [MAX_MEAS x 1]
+                'innovationCov',     innovationCov, ...     % S = H P H' + R, nominal R  [MAX_MEAS x MAX_MEAS]
+                'obsMatrix',         obsMatrix, ...         % H(x)                   [MAX_MEAS x n]
+                'measNoiseCov',      measNoiseCov, ...      % R nominal              [MAX_MEAS x MAX_MEAS]
+                'numMeas',           numMeasUsed, ...       % rows the host built this epoch (0 = no GNSS), <= MAX_MEAS
+                'numMeasClamped',    logical(numMeasClamped), ... % host passed more rows than MAX_MEAS
+                'priorState',        priorState, ...        % x_bar into the update  [n x 1]
+                'postState',         postState, ...         % x+ out of the update   [n x 1]
+                'postCov',           postCov, ...           % P+                     [n x n]
+                'innovationCovHost', innovationCovHost, ... % S as the host applied it  [MAX_MEAS x MAX_MEAS]
+                'measNoiseCovHost',  measNoiseCovHost);     % R as the host applied it  [MAX_MEAS x MAX_MEAS]
         end
 
         function [kfMeas] = kfMeasFromUpdate(innovation, obsMatrix, measNoiseCov, ...
@@ -80,6 +110,42 @@ classdef STRUCT_SPF
 
             kfMeas = STRUCT_SPF.setKfMeas(innovationP, innovationCov, obsMatrixP, ...
                 measNoiseP, numMeas, priorState, postState, postCov);
+        end
+
+        function [kfMeas] = kfMeasFromUpdateBoth(innovation, obsMatrix, measNoiseCov, ...
+                measNoiseCovHost, numMeas, priorState, priorCov, postState, postCov)
+            % As kfMeasFromUpdate, with the host's own R beside the nominal
+            % one: both S are formed from the same P_bar on the same rows, so
+            % the record shows exactly what the host's scaling changed.
+
+            mMax = double(CST_spfParam.MAX_MEAS);
+            n    = CST_gnssHybrid.NO_STATES;
+            m    = min(double(numMeas), mMax);    % exception handler: rows beyond MAX_MEAS are dropped
+
+            innovationP = zeros(mMax, 1);
+            obsMatrixP  = zeros(mMax, n);
+            measNoiseP  = zeros(mMax, mMax);
+            measNoiseHP = zeros(mMax, mMax);
+            for rowIdx = 1:m                       % element loops, not slices (Coder)
+                innovationP(rowIdx) = innovation(rowIdx);
+                for colIdx = 1:n
+                    obsMatrixP(rowIdx, colIdx) = obsMatrix(rowIdx, colIdx);
+                end
+                for colIdx = 1:m
+                    measNoiseP(rowIdx, colIdx)  = measNoiseCov(rowIdx, colIdx);
+                    measNoiseHP(rowIdx, colIdx) = measNoiseCovHost(rowIdx, colIdx);
+                end
+            end
+
+            HPH = obsMatrixP * priorCov * obsMatrixP';
+            S  = HPH + measNoiseP;
+            SH = HPH + measNoiseHP;
+            innovationCov     = (S + S') / 2;
+            innovationCovHost = (SH + SH') / 2;
+
+            kfMeas = STRUCT_SPF.setKfMeasBoth(innovationP, innovationCov, obsMatrixP, ...
+                measNoiseP, numMeas, priorState, postState, postCov, ...
+                innovationCovHost, measNoiseHP);
         end
 
         function [kfMeas] = zeroKfMeas

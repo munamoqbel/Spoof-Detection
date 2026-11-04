@@ -70,6 +70,19 @@
 %             extra H*xPrior term is added.                          [numMeas x 1]
 %   H       = H(xPrior)       Jacobian                                [numMeas x 60]
 %   R       = diag(measurementZ)^2                                    [numMeas x numMeas]
+%             THE NOMINAL R: the measurement noise the design assumes under
+%             no spoof. A host that scales R up on large innovations (its
+%             spike handling) or leaves rows out of its own update hands the
+%             gate the nominal R on ALL the rows it built, taken before that
+%             logic runs, and its own R beside it:
+%               kfMeas = STRUCT_SPF.kfMeasFromUpdateBoth(y, H, R_nominal, R_host, numMeas, xPrior, PPrior, xPost, PPost);
+%             (or setKfMeasBoth with both S; a row the host did not apply at
+%             a very large variance in R_host). The monitors read the nominal
+%             pair only; the host's pair travels for the record. Measured on
+%             the vehicle data: with the host's R a 20 m step read 0.85 of the
+%             CPI threshold and a 30 m coast re-validated into the spoof (q at
+%             0.42 of its threshold); with the nominal R the 20 m step latches
+%             at its second epoch and the re-validation holds.
 %   numMeas                   valid rows this epoch (0 = no GNSS)
 %   NOT needed from kfUpdate: S. The gate forms S = H*P_bar*H' + R from
 %   P_bar = activeKF.covariance as it goes INTO kfUpdate (extrapolated at

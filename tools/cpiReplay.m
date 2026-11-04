@@ -9,6 +9,9 @@ function [res] = cpiReplay(spfMeasLog, tKf, spfLog, tWin, nominalBias, rMode, mi
 %                                                 have read had the host handed it S with the nominal R, while the
 %                                                 host's own update kept its scaled R. Rows the host rejected are not
 %                                                 in the records, so this replay is conservative for a spoofed run
+%   res = cpiReplay(..., nominalBias, 'host')     records from setKfMeasBoth / kfMeasFromUpdateBoth: the monitor replayed
+%                                                 on the S and R the host applied (innovationCovHost, measNoiseCovHost)
+%                                                 instead of the gate's: what the gate would have read on the old interface
 %   res = cpiReplay(..., rMode, minRows)          an epoch with fewer range rows than minRows does not count (xi = 0,
 %                                                 the window sum from SPF_cpiMonitor sees it as an epoch without rows):
 %                                                 the few satellites left in a partial outage carry reflected signals
@@ -38,6 +41,10 @@ if nargin < 5 || isempty(nominalBias), nominalBias = CST_spfParam.NOMINAL_BIAS; 
 if nargin < 6 || isempty(rMode), rMode = 'record'; end
 if nargin < 7 || isempty(minRows), minRows = 0; end
 useNom = strcmpi(rMode, 'nominal');
+useHost = strcmpi(rMode, 'host');
+if useHost && ~isfield(spfMeasLog, 'measNoiseCovHost')
+    error('cpiReplay:host', 'the records carry no measNoiseCovHost: the mode ''host'' needs records from setKfMeasBoth / kfMeasFromUpdateBoth');
+end
 BEFORE = 60;                                                 % s: the baseline minute before the window
 MATCH_TOL = 0.02;                                            % in q/T_N: replay and log closer than this agree
 N = double(CST_spfParam.WINDOW_LENGTH);  T = CST_spfParam.CPI_THRESHOLD;
@@ -70,7 +77,7 @@ for k = kAll'
     for a = 1:nA, sigP(k, a) = sqrt(max(s.postCov(axes(a), axes(a)), 0)); end
     if m < 1 || ~counts(k), continue; end
     H = s.obsMatrix(1:m, :);  y = s.innovation(1:m);
-    [S, R] = covOf(s, m, useNom, rNom);
+    [S, R] = covOf(s, m, useNom, rNom, useHost);
     if ~all(isfinite(S(:))) || ~all(isfinite(y)), continue; end
     Sy = S \ y;
     for a = 1:nA
@@ -94,7 +101,7 @@ for k = kAll(kAll >= N)'
         s = spfMeasLog(idx(i));  mi = double(s.numMeas);
         innB(:, i) = s.innovation(:);  covB(:, :, i) = s.innovationCov;  obsB(:, :, i) = s.obsMatrix;  numB(i) = mi;
         if ~counts(idx(i)), numB(i) = 0; end                 % an epoch below the row floor counts as one without rows
-        if useNom && mi >= 1, covB(1:mi, 1:mi, i) = covOf(s, mi, useNom, rNom); end
+        if (useNom || useHost) && mi >= 1, covB(1:mi, 1:mi, i) = covOf(s, mi, useNom, rNom, useHost); end
     end
     for a = 1:nA
         [~, q] = SPF_cpiMonitor(innB, covB, obsB, numB, axes(a), nominalBias(axes(a)));
@@ -110,6 +117,9 @@ end
 %% print
 fprintf('cpiReplay: %d records; window %.2f to %.2f s (epochs %d to %d), the minute before as the baseline; N = %d epochs, T_N = %.2f, B = [%s] m\n', ...
     K, tKf(kW(1)), tKf(kW(end)), kW(1), kW(end), N, T, strtrim(sprintf('%g ', nominalBias(axes))));
+if useHost
+    fprintf('   R HOST: the monitor replayed on the S and R the host applied (innovationCovHost, measNoiseCovHost): what the gate would read on the old interface\n');
+end
 if useNom
     fprintf('   R NOMINAL: per row type the run median of the logged R, range rows %.2f m, rate rows %.3f m/s, other rows %.2f; S rebuilt as\n', ...
         sqrt(rNom(1)), sqrt(rNom(2)), sqrt(rNom(3)));
@@ -217,9 +227,11 @@ res = struct('t', tKf, 'dHat', dHat, 'sig', sig, 'sigR', sigR, 'xi', xi, 'qRepla
 end
 
 %------------------------------------------------------------------------
-function [S, R] = covOf(s, m, useNom, rNom)
-% the live blocks of S and R of one record; with useNom, R replaced by the nominal R of each row's type and S rebuilt
+function [S, R] = covOf(s, m, useNom, rNom, useHost)
+% the live blocks of S and R of one record; with useHost the pair the host applied; with useNom, R replaced by the
+% nominal R of each row's type and S rebuilt
 S = s.innovationCov(1:m, 1:m);  R = s.measNoiseCov(1:m, 1:m);
+if useHost, S = s.innovationCovHost(1:m, 1:m);  R = s.measNoiseCovHost(1:m, 1:m); end
 if useNom
     Rn = diag(rNom(rowTypes(s.obsMatrix(1:m, :))));
     S = S - R + Rn;  R = Rn;

@@ -23,7 +23,9 @@ function [res] = cpiReplay(spfMeasLog, tKf, spfLog, tWin, nominalBias, rMode, mi
 %   position sigma the host carries. Prints the table over the window, the medians over the minute before and over
 %   the window, whether the replay matches the log (then the gate was fed these records), and what sets the reading:
 %   how large the offset read is, how many epochs it stays above B, and whether S is R or the host's P.
-%   Result: t, dHat, sig, sigR, xi, qReplay, qLog [K x nAxes], sigP [K x nAxes], matches, window, axes.
+%   Result: t, dHat, sig, sigR, xi, qReplay, qLog [K x nAxes], sigP [K x nAxes], matches, window, axes, rMode,
+%   rNominal, minRows, nRangeRows, peaks (a cell per axis of [t q] for every run of the ten-epoch sum above 0.25 in
+%   the window, one peak per run: the near misses, not only the largest).
 %   Needs SPF_cpiMonitor, CST_spfParam and the host's matrixInv on the path. MATLAB desktop tool, not codegen. Runs under Octave.
 
 if iscell(spfMeasLog), spfMeasLog = [spfMeasLog{:}]; end
@@ -179,6 +181,29 @@ for a = 1:nA
     if isfinite(qMax) && ~isempty(j), fprintf(' (window ending %.2f s)', tKf(kW(j))); end
     fprintf('\n');
 end
+% every run of the ten-epoch sum above PEAK_MIN, one peak per run: the near misses, not only the largest
+PEAK_MIN = 0.25;
+peaks = cell(1, nA);
+for a = 1:nA
+    q = qReplay(kW, a);  q(~isfinite(q)) = 0;
+    pk = zeros(0, 2);  i = 1;
+    while i <= numel(q)
+        if q(i) >= PEAK_MIN
+            j = i;
+            while j < numel(q) && q(j + 1) >= PEAK_MIN, j = j + 1; end
+            [v, m] = max(q(i:j));  pk(end+1, :) = [tKf(kW(i + m - 1)), v]; %#ok<AGROW>
+            i = j + 1;
+        else
+            i = i + 1;
+        end
+    end
+    peaks{a} = pk;
+    if isempty(pk)
+        fprintf('   %s: no run of the ten-epoch sum above %.2f in the window\n', letters(a), PEAK_MIN);
+    else
+        fprintf('   %s: runs of the ten-epoch sum above %.2f (time of the peak, value):%s\n', letters(a), PEAK_MIN, sprintf(' %.2f s %.3f;', pk'));
+    end
+end
 sigRatio = medF(sig(kW, :)) ./ medF(sigR(kW, :));
 if any(sigRatio > 1.5)
     fprintf('   NOTE: the sigma of the reading is %.1f x what R alone gives (medians over the window): S = H P H'' + R carries the host''s position\n', max(sigRatio));
@@ -188,7 +213,7 @@ else
 end
 res = struct('t', tKf, 'dHat', dHat, 'sig', sig, 'sigR', sigR, 'xi', xi, 'qReplay', qReplay, 'qLog', qLog, 'sigP', sigP, ...
     'matches', matches, 'window', [tKf(kW(1)) tKf(kW(end))], 'axes', axes, 'rMode', rMode, 'rNominal', rNom, ...
-    'minRows', minRows, 'nRangeRows', nRangeRows);
+    'minRows', minRows, 'nRangeRows', nRangeRows, 'peaks', {peaks});
 end
 
 %------------------------------------------------------------------------

@@ -325,7 +325,10 @@ effect of a host that scales R on large innovations is measured on the
 spoofed runs and on the clean run without any change to the host. A
 minimum range-row count makes epochs below it not count, the rule that
 keeps a partial outage's few reflected rows from reading as tens of
-metres in the one-axis projection, measured the same way.
+metres in the one-axis projection, measured the same way. Per axis it
+lists every run of the ten-epoch sum above a quarter of the threshold
+with its time and value, so the near misses of a clean run are read
+along with the largest.
 
 `runCompare` ends the outage at the first logged P that falls by more than
 30% inside the given interval (the first update back, or a reset): the

@@ -17,6 +17,9 @@ L.ssRatio(203:206, 1) = [0.8 1.0 1.2 1.3];  L.ssAlarm(206) = true;  L.alarmAxis(
 L.ssRatio(100, 2) = 1.1;  L.ssAlarm(100) = true;  L.alarmAxis(100, 2) = true;
 L.cpiRatio(230, 1) = 0.9;
 L.sigmaPos(:, :) = 3;  L.sigmaPos(279, :) = [12 11 20];
+L.numMeas(:) = 14;  L.numMeas(206:250) = 9;                                 % the host rejects rows through the coast
+L.revalDone(206:278) = true;  L.revalThr(206:278) = 36;  L.qReval(206:250) = 100;  L.qReval(251:278) = 10;   % 10 passes from 125 s
+L.dwell(251:260) = 1:10;
 L.inputFault(300) = true;
 % the nav run: truth stationary, the nav 2 m north and 1 m east of it, pulled 20 m further north by the spoof
 t = (0:0.01:199.99)';
@@ -50,6 +53,13 @@ ok2 = isnan(r2.latchDelay) && strcmp(r2.monitor, 'none') && isnan(r2.handbackDel
    && abs(r2.meanErrIn(1) - (2 - base2)) < 1e-6 && abs(r2.errAtOff(1) - (2 - base2)) < 1e-6 && strcmp(r2.name, 'step 5') ...
    && abs(r2.maxSsClean - 1.3) < 1e-9;
 ok3 = abs(r3.latchDelay - 2.5) < 1e-9 && all(isnan(r3.errAtLatch)) && isnan(r3.maxHorizIn) && isequal(r3.sigmaAtHandback, [12 11 20]);
-if ok1 && ok2 && ok3, fprintf('=== test_matrixRow PASS ===\n');
-else, fprintf('ok1 %d ok2 %d ok3 %d\n=== test_matrixRow FAIL ===\n', ok1, ok2, ok3); end
+okC = r1.revalComputed == 73 && r1.revalPassed == 28 && r1.rowsCoast == 9 && r1.rowsBefore == 14 && abs(r1.tFirstPass - tKf(251)) < 1e-9 ...
+   && ~r1.probationInSpoof && abs(r1.qRatioCoast - 100 / 36) < 1e-9 && isnan(r2.revalPassed);
+% the same log read for a scenario that ends after the probation: a hand-back into the spoof, with fewer rows
+scn3 = struct('kind', 'step', 'tOn', 100, 'tOff', 160, 'size', 20, 'dirNed', [1 0 0]);
+fprintf('--- the probation opening while the spoof is on ---\n');
+r4 = matrixRow(L, tKf, [], scn3, 'into the spoof');
+okC = okC && r4.probationInSpoof && abs(r4.handbackDelay - (139 - 160)) < 1e-9;
+if ok1 && ok2 && ok3 && okC, fprintf('=== test_matrixRow PASS ===\n');
+else, fprintf('ok1 %d ok2 %d ok3 %d okC %d\n=== test_matrixRow FAIL ===\n', ok1, ok2, ok3, okC); end
 end

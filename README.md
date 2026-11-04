@@ -306,8 +306,13 @@ solution against the truth, with the mean error over the minute before
 tOn taken out: the error at the latch, the largest horizontal excursion
 until the hand-back, the error at tOff and its mean over the window (how
 far the nav followed), and the error and the sigma carried at the
-hand-back. matrixTable prints the rows as one table, a dash where a run
-has no such number.
+hand-back. After a latch it prints the re-validation through the coast,
+per epoch the rows the host handed over, the chi-square against its
+threshold, pass and dwell, and says whether the probation opened while
+the spoof was still on, with fewer rows than before the latch (the host
+rejected the rows carrying the spoof) or with q far below its threshold
+on a full row set (S carrying an R the host scaled up). matrixTable
+prints the rows as one table, a dash where a run has no such number.
 
 `tools/cpiReplay.m` replays the CPI monitor on the saved spfMeas records
 over a window and prints, per epoch and axis, the offset the CPI

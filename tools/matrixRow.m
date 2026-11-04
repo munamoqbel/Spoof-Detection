@@ -13,10 +13,17 @@ function [row] = matrixRow(spfLog, tKf, run, scn, name)
 %   latch, its largest horizontal excursion from tOn to the hand-back, the error at tOff (how far the nav followed)
 %   and its mean over the window after 10 s; the hand-back (its delay from tOff, the coast length, the vetoes, the
 %   error and the sigma carried at the hand-back); false alarms (latches outside the window and the hand-back);
-%   faults (inputFault, solveFault, clamped, budget exceeded).
+%   faults (inputFault, solveFault, clamped, budget exceeded). After a latch, the re-validation through the coast: per
+%   epoch the rows the host handed over, the chi-square q against its threshold, pass or not and the dwell, with the
+%   first pass and whether the probation opened while the spoof was still on (a hand-back into the spoof: the
+%   re-validation passed on the rows and S the host handed over, fewer rows than before the latch when the host
+%   rejected the rows carrying the spoof, or q far below its threshold on a full row set when S carries an R the
+%   host scaled up on large innovations).
 %   Result: name, kind, size, tOn, tOff, tEnd, latchDelay, monitor, axis, ratioAtLatch, maxSsIn, maxCpiIn,
 %   maxSsClean, maxCpiClean, errAtLatch [1 x 3], maxHorizIn, errAtOff [1 x 3], meanErrIn [1 x 3], handbackDelay,
-%   coastLen, nVeto, errAtHandback [1 x 3], sigmaAtHandback [1 x 3], falseAlarms, tFalse, faults [1 x 4], timeline.
+%   coastLen, nVeto, errAtHandback [1 x 3], sigmaAtHandback [1 x 3], falseAlarms, tFalse, faults [1 x 4], timeline,
+%   revalComputed, revalPassed, rowsCoast, rowsBefore (medians), qRatioCoast (median q over its threshold on the
+%   computed coast epochs), tFirstPass, probationInSpoof.
 %   MATLAB desktop tool, not codegen. Runs under Octave.
 
 if nargin < 5 || isempty(name), name = sprintf('%s %g', scn.kind, scn.size); end
@@ -96,6 +103,58 @@ else
 end
 fprintf('   largest ratio from tOn to the hand-back or the end: SS %.2f (%s), CPI %.2f (%s); on the clean armed epochs SS %.2f, CPI %.2f\n', ...
     maxSsIn, axSs, maxCpiIn, axCpi, maxSsClean, maxCpiClean);
+%% the re-validation through the coast: what let the gate hand back
+revalComputed = NaN;  revalPassed = NaN;  rowsCoast = NaN;  rowsBefore = NaN;  qRatioCoast = NaN;  tFirstPass = NaN;  probationInSpoof = false;
+if ~isempty(kL) && isfield(spfLog, 'qReval')
+    minMeas = 4;
+    try, minMeas = double(CST_spfParam.REVAL_MIN_MEAS); catch, minMeas = 4; end %#ok<CTCH>
+    segC = kL:kStop;
+    q = spfLog.qReval(segC);  thr = spfLog.revalThr(segC);  rows = spfLog.numMeas(segC);  done = logical(spfLog.revalDone(segC));
+    pass = done & q >= 0 & q < thr & rows >= minMeas;
+    revalComputed = nnz(done);  revalPassed = nnz(pass);
+    rowsCoast = median(rows);
+    bef = max(1, kL - 120):kL - 1;
+    if ~isempty(bef), rowsBefore = median(spfLog.numMeas(bef)); end
+    okQ = done & thr > 0;
+    if any(okQ), qRatioCoast = median(q(okQ) ./ thr(okQ)); end
+    fprintf('   re-validation through the coast, %d epochs from the latch to the hand-back or the end: computed on %d, passed on %d; rows the host handed\n', ...
+        numel(segC), revalComputed, revalPassed);
+    fprintf('   over median %d (the minute before the latch %d); q at %.2f of its threshold (median of the computed epochs)\n', round(rowsCoast), round(rowsBefore), qRatioCoast);
+    iP = find(pass, 1);
+    if ~isempty(iP)
+        tFirstPass = tKf(segC(iP));
+        fprintf('   first pass at %.2f s, %.1f s after the latch', tFirstPass, tFirstPass - tKf(kL));
+        if tFirstPass < tOff, fprintf(', while the spoof was on'); end
+        fprintf('\n');
+    end
+    kP = probs(find(probs > kL & probs <= kStop, 1));
+    probationInSpoof = ~isempty(kP) && tKf(kP) < tOff;
+    pick = unique([segC(1:min(8, numel(segC))), segC(round(linspace(1, numel(segC), min(10, numel(segC)))))]);
+    fprintf('   course (the first 8 epochs in a row, then spread to the end):\n');
+    fprintf('   %10s %5s %5s %9s %8s %5s %5s\n', 't [s]', 'mode', 'rows', 'q', 'thr', 'pass', 'dwell');
+    letters2 = '?NCP';
+    for k = pick
+        i = k - kL + 1;
+        fprintf('   %10.2f %5s %5d %9.1f %8.1f %5s %5d\n', tKf(k), letters2(min(max(round(mode(k)) + 1, 1), 4)), rows(i), q(i), thr(i), ifelse(pass(i), 'yes', '-'), spfLog.dwell(k));
+    end
+    if probationInSpoof
+        fprintf('   VERDICT: the probation opened at %.2f s while the spoof was on (tOff %.2f s): the re-validation passed on the rows and S the host\n', tKf(kP), tOff);
+        fprintf('            handed over, a hand-back into the spoof');
+        if rowsCoast < 0.8 * rowsBefore
+            fprintf('; the host handed fewer rows during the coast (%d against %d): the rows carrying the spoof were\n            rejected before the gate saw them\n', round(rowsCoast), round(rowsBefore));
+        elseif qRatioCoast < 0.5
+            fprintf('; q sat at %.2f of its threshold on a full row set: S = H P_C H'' + R carries an R the host scaled up on the\n            large innovations\n', qRatioCoast);
+        else
+            fprintf('\n');
+        end
+    elseif ~isempty(kP)
+        fprintf('   the probation opened at %.2f s, %.1f s after tOff: the re-validation held through the spoof\n', tKf(kP), tKf(kP) - tOff);
+    elseif ~isempty(kH)
+        fprintf('   NOTE: a hand-back at %.2f s without a probation start in the log\n', tKf(kH));
+    else
+        fprintf('   no probation and no hand-back by the end of the records\n');
+    end
+end
 %% the nav error
 errAtLatch = NaN(1, 3);  maxHorizIn = NaN;  errAtOff = NaN(1, 3);  meanErrIn = NaN(1, 3);  errAtHandback = NaN(1, 3);  sigmaAtHandback = NaN(1, 3);
 if ~isempty(kH), sigmaAtHandback = spfLog.sigmaPos(kH, :); end
@@ -132,7 +191,9 @@ row = struct('name', name, 'kind', scn.kind, 'size', scn.size, 'tOn', tOn, 'tOff
     'maxSsIn', maxSsIn, 'maxCpiIn', maxCpiIn, 'maxSsClean', maxSsClean, 'maxCpiClean', maxCpiClean, ...
     'errAtLatch', errAtLatch, 'maxHorizIn', maxHorizIn, 'errAtOff', errAtOff, 'meanErrIn', meanErrIn, ...
     'handbackDelay', handbackDelay, 'coastLen', coastLen, 'nVeto', nVeto, 'errAtHandback', errAtHandback, ...
-    'sigmaAtHandback', sigmaAtHandback, 'falseAlarms', numel(falseL), 'tFalse', tKf(falseL)', 'faults', faults, 'timeline', timeline);
+    'sigmaAtHandback', sigmaAtHandback, 'falseAlarms', numel(falseL), 'tFalse', tKf(falseL)', 'faults', faults, 'timeline', timeline, ...
+    'revalComputed', revalComputed, 'revalPassed', revalPassed, 'rowsCoast', rowsCoast, 'rowsBefore', rowsBefore, ...
+    'qRatioCoast', qRatioCoast, 'tFirstPass', tFirstPass, 'probationInSpoof', probationInSpoof);
 end
 
 %------------------------------------------------------------------------

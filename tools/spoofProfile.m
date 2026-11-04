@@ -293,6 +293,7 @@ if haveSys
             fprintf('   per epoch for system %d:\n', sysIds(j));
             printFit(tKf, fitInn(:, :, j), kA, kB);
         end
+        printBeforeAfter(tKf, fitInn, sysIds, kA, kB, nW, 'm');
         % the Doppler rows: the velocity and clock drift they ask for, relative to the host's prediction
         for j = 1:nSys
             for k = 1:K, fitRateInn(k, :, j) = fitRateRows(spfMeasLog(k), rateRowsOf{k, j}); end

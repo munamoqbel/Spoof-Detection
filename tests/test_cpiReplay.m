@@ -31,7 +31,8 @@ for k = 1:K
 end
 B = [5 5 8];
 % a gate log whose cpiRatio is SPF_cpiMonitor on these records, and one that holds other numbers
-spfLog = SPF_logInit(K);  spfLog.count = K;
+spfLog = SPF_logInit(K);  spfLog.count = K;  spfLog.mode(:) = 1;  spfLog.armed(:) = true;
+spfLog.mode(48:50) = 2;                                                     % three COAST epochs: not compared
 N = double(CST_spfParam.WINDOW_LENGTH);  T = CST_spfParam.CPI_THRESHOLD;
 for k = N:K
     innB = zeros(mMax, N);  covB = zeros(mMax, mMax, N);  obsB = zeros(mMax, n, N);  numB = zeros(N, 1);

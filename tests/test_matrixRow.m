@@ -16,7 +16,7 @@ L.ssRatio = 0.3 + 0.1 * rand(K, 3);  L.cpiRatio = 0.2 + 0.1 * rand(K, 3);
 L.ssRatio(203:206, 1) = [0.8 1.0 1.2 1.3];  L.ssAlarm(206) = true;  L.alarmAxis(206, 1) = true;
 L.ssRatio(100, 2) = 1.1;  L.ssAlarm(100) = true;  L.alarmAxis(100, 2) = true;
 L.cpiRatio(230, 1) = 0.9;
-L.sigmaPos(:, :) = 3;  L.sigmaPos(279, :) = [12 11 20];
+L.sigmaPos(:, :) = 3;  L.sigmaPos(279, :) = [12 11 20];  L.pl(:) = 10;  L.pl(279) = 25;
 L.numMeas(:) = 14;  L.numMeas(206:250) = 9;                                 % the host rejects rows through the coast
 L.revalDone(206:278) = true;  L.revalThr(206:278) = 36;  L.qReval(206:250) = 100;  L.qReval(251:278) = 10;   % 10 passes from 125 s
 L.dwell(251:260) = 1:10;
@@ -59,7 +59,7 @@ okC = r1.revalComputed == 73 && r1.revalPassed == 28 && r1.rowsCoast == 9 && r1.
 scn3 = struct('kind', 'step', 'tOn', 100, 'tOff', 160, 'size', 20, 'dirNed', [1 0 0]);
 fprintf('--- the probation opening while the spoof is on ---\n');
 r4 = matrixRow(L, tKf, [], scn3, 'into the spoof');
-okC = okC && r4.probationInSpoof && abs(r4.handbackDelay - (139 - 160)) < 1e-9;
+okC = okC && r4.probationInSpoof && abs(r4.handbackDelay - (139 - 160)) < 1e-9 && r4.plAtHandback == 25 && r1.plAtHandback == 25;
 if ok1 && ok2 && ok3 && okC, fprintf('=== test_matrixRow PASS ===\n');
 else, fprintf('ok1 %d ok2 %d ok3 %d okC %d\n=== test_matrixRow FAIL ===\n', ok1, ok2, ok3, okC); end
 end

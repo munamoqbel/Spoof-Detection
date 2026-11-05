@@ -48,6 +48,7 @@ winL = latches(tKf(latches) >= tOn & tKf(latches) <= tOff + CLEAN_AFTER);   % la
 kL = [];  relatch = [];
 if ~isempty(winL), kL = winL(1);  relatch = winL(2:end); end
 latchDelay = NaN;  monitor = 'none';  axisName = '-';  ratioAtLatch = NaN;  kH = [];  handbackDelay = NaN;  coastLen = NaN;  nVeto = 0;
+plAtHandback = NaN;
 if ~isempty(kL)
     latchDelay = tKf(kL) - tOn;
     look = max(1, kL - 1):kL;
@@ -61,6 +62,7 @@ if ~isempty(kL)
     if ~isempty(kH)
         handbackDelay = tKf(kH) - tOff;  coastLen = tKf(kH) - tKf(kL);
         nVeto = nnz(vetoes > kL & vetoes < kH);
+        if isfield(spfLog, 'pl'), plAtHandback = spfLog.pl(kH); end
     else
         coastLen = tEnd - tKf(kL);  nVeto = nnz(vetoes > kL);
     end
@@ -106,10 +108,12 @@ else
         kP = probs(find(probs > kL & probs <= kH, 1));
         if isempty(kP), sP = ''; else, sP = sprintf('probation at %.2f s, ', tKf(kP)); end
         if handbackDelay < 0
-            fprintf('; coast %.1f s; %s%d vetoes; hand-back at %.2f s, %.1f s BEFORE tOff: into the spoof\n', coastLen, sP, nVeto, tKf(kH), -handbackDelay);
+            fprintf('; coast %.1f s; %s%d vetoes; hand-back at %.2f s, %.1f s BEFORE tOff: into the spoof', coastLen, sP, nVeto, tKf(kH), -handbackDelay);
         else
-            fprintf('; coast %.1f s; %s%d vetoes; hand-back at %.2f s, %.1f s after tOff\n', coastLen, sP, nVeto, tKf(kH), handbackDelay);
+            fprintf('; coast %.1f s; %s%d vetoes; hand-back at %.2f s, %.1f s after tOff', coastLen, sP, nVeto, tKf(kH), handbackDelay);
         end
+        if isfinite(plAtHandback), fprintf('; PL %.1f m at the hand-back', plAtHandback); end
+        fprintf('\n');
     end
     if ~isempty(relatch)
         fprintf('   re-latched %d time(s) within the window and the minute after it, at%s\n', numel(relatch), sprintf(' %.2f s', tKf(relatch)));
@@ -155,6 +159,10 @@ if ~isempty(kL) && isfield(spfLog, 'qReval')
     if probationInSpoof
         fprintf('   VERDICT: the probation opened at %.2f s while the spoof was on (tOff %.2f s): the re-validation passed on the rows and S the host\n', tKf(kP), tOff);
         fprintf('            handed over, a hand-back into the spoof');
+        if isfinite(plAtHandback) && any(strcmp(scn.kind, {'step', 'clock'})) && plAtHandback >= abs(scn.size)
+            fprintf('; the %g m injected sit inside the protection level (%.1f m at the hand-back): the coast covariance\n', abs(scn.size), plAtHandback);
+            fprintf('            H P_C H'' + R had grown to where the offset reads as noise, which the design tolerates as an error within the PL');
+        end
         if rowsCoast < 0.8 * rowsBefore
             fprintf('; the host handed fewer rows during the coast (%d against %d): the rows carrying the spoof were\n            rejected before the gate saw them\n', round(rowsCoast), round(rowsBefore));
         elseif qRatioCoast < 0.5
@@ -208,7 +216,8 @@ row = struct('name', name, 'kind', scn.kind, 'size', scn.size, 'tOn', tOn, 'tOff
     'handbackDelay', handbackDelay, 'coastLen', coastLen, 'nVeto', nVeto, 'errAtHandback', errAtHandback, ...
     'sigmaAtHandback', sigmaAtHandback, 'falseAlarms', numel(falseL), 'tFalse', tKf(falseL)', 'faults', faults, 'timeline', timeline, ...
     'revalComputed', revalComputed, 'revalPassed', revalPassed, 'rowsCoast', rowsCoast, 'rowsBefore', rowsBefore, ...
-    'qRatioCoast', qRatioCoast, 'tFirstPass', tFirstPass, 'probationInSpoof', probationInSpoof, 'nRelatch', numel(relatch));
+    'qRatioCoast', qRatioCoast, 'tFirstPass', tFirstPass, 'probationInSpoof', probationInSpoof, 'nRelatch', numel(relatch), ...
+    'plAtHandback', plAtHandback);
 end
 
 %------------------------------------------------------------------------

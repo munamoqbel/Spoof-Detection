@@ -158,26 +158,33 @@ for side = 1:2
 end
 %% the verdicts
 matches = NaN;
+% the log carries the CPI on the NOMINAL armed epochs only (the monitors stand down in COAST and PROBATION)
+cmpEp = kW(all(isfinite(qReplay(kW, :)) & isfinite(qLog(kW, :)), 2));
+if haveLog && isfield(spfLog, 'mode'), cmpEp = cmpEp(round(spfLog.mode(cmpEp)) == 1); end
+if haveLog && isfield(spfLog, 'armed'), cmpEp = cmpEp(logical(spfLog.armed(cmpEp))); end
 if haveLog && useNom
-    both = kW(all(isfinite(qReplay(kW, :)) & isfinite(qLog(kW, :)), 2));
+    both = cmpEp;
     if ~isempty(both)
         fprintf('   with the nominal R the largest ten-epoch sum over the window is %.3f (N %.3f, E %.3f, D %.3f); the log, with the host''s R, %.3f\n', ...
             max(max(qReplay(both, :))), max(qReplay(both, :)), max(max(qLog(both, :))));
     end
 elseif haveLog
-    both = kW(all(isfinite(qReplay(kW, :)) & isfinite(qLog(kW, :)), 2));
+    both = cmpEp;
     if ~isempty(both)
         dq = max(abs(qReplay(both, :) - qLog(both, :)), [], 2);
         matches = max(dq) < MATCH_TOL;
         if matches
-            fprintf('   VERDICT: the replay matches the log on %d of %d epochs (largest difference %.3f): the gate was fed these records\n', numel(both), numel(both), max(dq));
+            fprintf('   VERDICT: the replay matches the log on the %d NOMINAL armed epochs of the window (largest difference %.3f): the gate was fed\n', numel(both), max(dq));
+            fprintf('            these records');
+            if numel(both) < numel(kW), fprintf('; on the other %d epochs the gate was in COAST or PROBATION, where the log carries no CPI', numel(kW) - numel(both)); end
+            fprintf('\n');
         else
             fprintf('   VERDICT: the replay differs from the log on %d of %d epochs (largest difference %.3f, first at %.2f s): the gate''s buffers do not\n', ...
                 nnz(dq >= MATCH_TOL), numel(both), max(dq), tKf(both(find(dq >= MATCH_TOL, 1))));
             fprintf('            hold these records'' innovations (another vector, another S, or windows that skip epochs)\n');
         end
     else
-        fprintf('   no epoch of the window has both a replayed and a logged q/T_N: no comparison\n');
+        fprintf('   no NOMINAL armed epoch of the window has both a replayed and a logged q/T_N: no comparison\n');
     end
 end
 for a = 1:nA

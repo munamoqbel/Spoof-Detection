@@ -143,12 +143,11 @@ Covered by `tests/test_error_handlers.m`. On a host update flagged `failed`, pas
   reckoning itself. Each cycle still costs a coast and widens the coarse
   re-validation gate.
 - `MAX_ANCHOR_AGE` is a startup-only guard today.
-- Warm-up arming uses a fixed protection-level limit (`ARM_PL_MAX`); a
-  convergence test on the filter's own covariance rate could replace it.
-  `ARM_EPOCHS` is 10 in the repository (simulation references); the host
-  runs with 120 (60 s) because its post-reset bias convergence takes that
-  long (see `docs/CONCEPTS.md` section 6). A row dropout pauses the count;
-  only a PL above `ARM_PL_MAX` restarts it.
+- Warm-up arming: `ARM_EPOCHS` qualifying epochs (rows, a PL below
+  `ARM_PL_MAX`) on which the monitors, run in shadow, would not have
+  alarmed (section 10). `ARM_EPOCHS` is 10 in the repository (simulation
+  references); the host runs with 120 (60 s). A row dropout pauses the
+  count; a PL above `ARM_PL_MAX` or a shadow alarm restarts it.
 - Outage re-arm (disarm after a long GNSS outage so re-acquisition goes
   through the warm-up): not needed on the jammed data set, where the host's
   own reset already re-initialises the gate; relevant only for outages that
@@ -219,3 +218,20 @@ real coast whose drift stays below about 13 m, some 100 s on this INS;
 beyond that the gate stays in COAST until the budget and the host's reset.
 The CPI margin is logged through the coast (cpiRatio), so the plots show
 how far the coast is from re-admission.
+
+## 10. Arming on the monitors' silence
+
+On every vehicle run the gate latched at 83.1 s, 7 s after it armed, on
+the start transient of 82.6 to 84.6 s (both constellations 12 m off for
+five epochs while the heading was still 4 degrees off; it converges at the
+first manoeuvre near 200 s). The host's alignment flag is true from the
+start and cannot carry the heading, so `navActive` cannot hold the gate
+off, and a longer `ARM_EPOCHS` would be tied to this trajectory. The
+monitors therefore run in shadow through the warm-up: windows open and
+close as in NOMINAL, the margins are logged (the grey part of the plots),
+nothing latches and the alarm flags stay down, and a shadow alarm restarts
+the arming count. The gate arms only after `ARM_EPOCHS` epochs on which it
+would not have alarmed, whatever the cause of a transient, and the pool
+carries over into NOMINAL so the first windows after the arming are
+already old. On this data the 83 s transient restarts the count and the
+gate arms near 143 s; the manoeuvre at 200 s alarmed in no run.

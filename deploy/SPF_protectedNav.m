@@ -36,7 +36,8 @@
 % ASSUMPTIONS AND LIMITATIONS:
 % - Warm-up: after a (re)initialisation the monitors arm only after
 %   ARM_EPOCHS NOMINAL epochs with REVAL_MIN_MEAS rows and a protection
-%   level below ARM_PL_MAX; a level above restarts the count, a row
+%   level below ARM_PL_MAX on which the monitors, run in shadow, would
+%   not have alarmed; a level above or a shadow alarm restarts the count, a row
 %   dropout pauses it; arming is sticky.
 % - A latch falls back to the anchor only when the anchor is at most
 %   MAX_ANCHOR_AGE old; otherwise the current solution is frozen and
@@ -79,7 +80,11 @@ switch sys.mode
         sys.coastCov = kfMeas.postCov;
         sys.probSep  = zeros(numStates, 1);
 
-        % 1b. warm-up: a PL above ARM_PL_MAX restarts the count, a row dropout pauses it
+        % 1b. warm-up: a PL above ARM_PL_MAX restarts the count, a row dropout pauses it, and the monitors run in
+        %     shadow (windows open and close as in NOMINAL, the margins logged, nothing latches and the alarm flags stay
+        %     down): a shadow alarm restarts the count, so the gate arms only after ARM_EPOCHS epochs on which it
+        %     would not have alarmed
+        armedBefore = sys.armed;
         if (~sys.armed)
             sigmaPosMax = 0.0;
             for idx = 1:numel(CST_spfParam.MONITORED_AXES)
@@ -88,20 +93,30 @@ switch sys.mode
             end
             plInside   = (CST_spfParam.K_MISSED_DETECTION * sigmaPosMax < CST_spfParam.ARM_PL_MAX);   % Eq. 51 term
             enoughRows = (kfMeas.numMeas >= CST_spfParam.REVAL_MIN_MEAS);
-            if (~plInside)
+            [sys.pool, report] = SPF_monitorPool(sys.pool, kfMeas, propTel);
+            info.maxProtectionLevel = report.maxProtectionLevel;
+            info.ssRatio            = report.ssRatio;
+            info.cpiRatio           = report.cpiRatio;
+            info.solveFault         = report.solveFault;
+            if (report.anyAlarm)
                 sys.armCount = 0;
-            elseif (enoughRows)
-                sys.armCount = sys.armCount + 1;
+                sys.pool     = STRUCT_SPF.closeAllWindows(sys.pool);
+            else
+                if (~plInside)
+                    sys.armCount = 0;
+                elseif (enoughRows)
+                    sys.armCount = sys.armCount + 1;
+                end
+                sys.pool = STRUCT_SPF.openWindow(sys.pool, kfMeas);
             end
             if (sys.armCount >= double(CST_spfParam.ARM_EPOCHS))
                 sys.armed = true;
             end
         end
 
-        if (~sys.armed)
-            % not armed: no windows, no alarms, the anchor follows the solution
+        if (~armedBefore)
+            % a warm-up epoch, the arming one included: no latch, the anchor follows the solution
             sys.anchor = STRUCT_SPF.setAnchor(true, zeros(numStates, 1), kfMeas.postCov, uint32(epoch));
-            sys.pool   = STRUCT_SPF.closeAllWindows(sys.pool);
         else
             % 2. monitor bank on the host increments
             [sys.pool, report] = SPF_monitorPool(sys.pool, kfMeas, propTel);

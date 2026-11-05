@@ -69,7 +69,19 @@ switch sys.mode
         %          level below ARM_PL_MAX). A protection level above the limit
         %          restarts the count (filter diverging or coasting); a short
         %          row dropout with the PL still inside only pauses it.
-        %          Sticky once armed.
+        %          The monitors run in SHADOW meanwhile: windows open and
+        %          close as in NOMINAL and the margins are logged, but nothing
+        %          latches and the alarm flags stay down (unarmed: no alarm,
+        %          no latch, the host contract). A shadow alarm restarts the
+        %          count, so the gate arms only after ARM_EPOCHS epochs on
+        %          which it would not have alarmed: a transient the host's
+        %          covariance does not admit (a heading still converging, a
+        %          constellation joining the solution, a reacquisition)
+        %          delays the arming instead of latching right after it
+        %          (measured on the vehicle data: a latch at 83 s, 7 s after
+        %          the arming, on the start transient of 82.6 to 84.6 s).
+        %          Sticky once armed; the pool carries over into NOMINAL.
+        armedBefore = sys.armed;
         if (~sys.armed)
             sigmaPosMax = 0.0;
             for idx = 1:numel(CST_spfParam.MONITORED_AXES)
@@ -78,21 +90,32 @@ switch sys.mode
             end
             plInside   = (CST_spfParam.K_MISSED_DETECTION * sigmaPosMax < CST_spfParam.ARM_PL_MAX);
             enoughRows = (kfMeas.numMeas >= CST_spfParam.REVAL_MIN_MEAS);
-            if (~plInside)
-                sys.armCount = 0;                     % restart
-            elseif (enoughRows)
-                sys.armCount = sys.armCount + 1;      % qualifying epoch
-            end % ELSE: dropout with the PL inside: pause, keep the count
+            [sys.pool, report] = SPF_monitorPool(sys.pool, kfMeas, propTel);
+            info.maxProtectionLevel = report.maxProtectionLevel;
+            info.ssRatio            = report.ssRatio;
+            info.cpiRatio           = report.cpiRatio;
+            info.solveFault         = report.solveFault;
+            if (report.anyAlarm)
+                sys.armCount = 0;                     % a shadow alarm: restart
+                sys.pool     = STRUCT_SPF.closeAllWindows(sys.pool);
+            else
+                if (~plInside)
+                    sys.armCount = 0;                 % restart
+                elseif (enoughRows)
+                    sys.armCount = sys.armCount + 1;  % qualifying epoch
+                end % ELSE: dropout with the PL inside: pause, keep the count
+                sys.pool = STRUCT_SPF.openWindow(sys.pool, kfMeas);
+            end
             if (sys.armCount >= double(CST_spfParam.ARM_EPOCHS))
                 sys.armed = true;
             end % ELSE is trivial
         end % ELSE: already armed
 
-        if (~sys.armed)
-            % not armed: no windows, no alarms; the anchor follows the
-            % current solution so it is fresh when the monitors start
+        if (~armedBefore)
+            % a warm-up epoch, the arming one included (its pool pass is done
+            % above): no latch; the anchor follows the current solution so it
+            % is fresh when the monitors start
             sys.anchor = STRUCT_SPF.setAnchor(true, zeros(numStates, 1), kfMeas.postCov, uint32(epoch));
-            sys.pool   = STRUCT_SPF.closeAllWindows(sys.pool);
         else
             % ---- 2. monitor bank on the host increments ----
             [sys.pool, report] = SPF_monitorPool(sys.pool, kfMeas, propTel);

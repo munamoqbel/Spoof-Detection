@@ -321,7 +321,10 @@ the coast cannot vouch against stays refused for as long as it lasts
 instead of being admitted once the coast's own uncertainty has grown over
 it, and the dwell also needs the CPI of the innovations against the coast
 below T_N, so what the monitors would latch on is not re-admitted;
-`docs/HOST_DECISIONS.md` section 9 has the measurement behind it.
+`docs/HOST_DECISIONS.md` section 9 has the measurement behind it. Through
+the warm-up the monitors run in shadow and a shadow alarm restarts the
+arming count, so a start transient delays the arming instead of latching
+right after it (section 10).
 
 `tools/measNoiseCheck.m` shows the measurement noise the gate was handed,
 epoch by epoch over a window: the range rows in the record, the largest

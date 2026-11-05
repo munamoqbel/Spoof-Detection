@@ -43,6 +43,11 @@ coast below T_N, so what the monitors would latch on is not re-admitted
 coast budget and the host's reset. The budget and the nav's own sigma use
 the unbounded covariance.
 
+Through the warm-up the monitors run in shadow: windows open and close as
+in NOMINAL, the margins are logged, nothing latches and the alarm flags
+stay down, and a shadow alarm restarts the arming count, so the gate arms
+only after `ARM_EPOCHS` epochs on which it would not have alarmed.
+
 Use: copy the folder contents next to the host code. Keep the root copies
 off the simulation path; they are the annotated reference (design notes,
 paper equation mapping, exception-handler rationale). Any change goes into

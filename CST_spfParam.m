@@ -18,8 +18,14 @@
 % REVAL_MIN_MEAS rows and a protection level below ARM_PL_MAX. A protection
 % level above the limit restarts the count; a row dropout with the level
 % still inside only pauses it (so an outage, whose PL grows past the limit,
-% restarts the count, a few-epoch dropout does not). Until armed no window
-% opens, no latch is possible and the anchor follows the current solution.
+% restarts the count, a few-epoch dropout does not). Until armed no latch
+% is possible and the anchor follows the current solution. The monitors
+% run in shadow meanwhile (windows open and close as in NOMINAL, the
+% margins are logged, the alarm flags stay down) and a shadow alarm
+% restarts the count, so the gate arms only after ARM_EPOCHS epochs on
+% which it would not have alarmed: a transient the host's covariance does
+% not admit (a heading still converging, a constellation joining the
+% solution) delays the arming instead of latching right after it.
 % Arming is sticky (an outage does not disarm; a re-initialisation does).
 % info.armed reports the state. The host runs ARM_EPOCHS = 120 (60 s): its
 % bias convergence after a protective reset takes that long; 10 is the

@@ -221,12 +221,21 @@ for a = 1:nA
         fprintf('   %s: runs of the ten-epoch sum above %.2f (time of the peak, value):%s\n', letters(a), PEAK_MIN, sprintf(' %.2f s %.3f;', pk'));
     end
 end
-sigRatio = medF(sig(kW, :)) ./ medF(sigR(kW, :));
+nomW = kW;
+if haveLog && isfield(spfLog, 'mode'), nomW = kW(round(spfLog.mode(kW)) == 1); end
+if isempty(nomW), nomW = kW; end
+sigRatio = medF(sig(nomW, :)) ./ medF(sigR(nomW, :));
 if any(sigRatio > 1.5)
-    fprintf('   NOTE: the sigma of the reading is %.1f x what R alone gives (medians over the window): S = H P H'' + R carries the host''s position\n', max(sigRatio));
-    fprintf('         sigma, and the CPI is normalised by S, so a P the host carries above its true error desensitises the monitor by that factor\n');
+    fprintf('   NOTE: the sigma of the reading is %.1f x what R alone gives (medians over the NOMINAL epochs of the window): S = H P H'' + R carries the\n', max(sigRatio));
+    fprintf('         host''s position sigma, and the CPI is normalised by S, so a P the host carries above its true error desensitises the monitor by that factor\n');
 else
-    fprintf('   NOTE: S is R-dominated on the window (sigma %.2f x what R alone gives): the host''s P does not desensitise the monitor here\n', max(sigRatio));
+    fprintf('   NOTE: S is R-dominated on the NOMINAL epochs of the window (sigma %.2f x what R alone gives): the host''s P does not desensitise the monitor here\n', max(sigRatio));
+end
+if haveLog && numel(nomW) < numel(kW)
+    cw = setdiff(kW, nomW);
+    fprintf('   on the %d COAST / PROBATION epochs of the window the record''s S carries the host''s coast covariance unbounded (position sigma up to\n', numel(cw));
+    fprintf('   %.1f m): the replay''s sums there are what the gate would read without the bound; the gate''s CPI against the bounded coast is the log column\n', ...
+        max(max(sigP(cw, :))));
 end
 res = struct('t', tKf, 'dHat', dHat, 'sig', sig, 'sigR', sigR, 'xi', xi, 'qReplay', qReplay, 'qLog', qLog, 'sigP', sigP, ...
     'matches', matches, 'window', [tKf(kW(1)) tKf(kW(end))], 'axes', axes, 'rMode', rMode, 'rNominal', rNom, ...

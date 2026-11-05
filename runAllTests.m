@@ -42,6 +42,7 @@ tests = { ...
     'test_measNoiseCheck',   '=== test_measNoiseCheck PASS ===';
     'test_kfMeasBoth',       '=== test_kfMeasBoth PASS ===';
     'test_coastBound',       '=== test_coastBound PASS ===';
+    'test_shadowArm',        '=== test_shadowArm PASS ===';
     'test_feedbackCheck',    '=== test_feedbackCheck PASS ===';
     'test_gravityCheck',     '=== test_gravityCheck PASS ==='};
 

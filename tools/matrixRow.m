@@ -26,7 +26,9 @@ function [row] = matrixRow(spfLog, tKf, run, scn, name)
 %   maxSsClean, maxCpiClean, errAtLatch [1 x 3], maxHorizIn, errAtOff [1 x 3], meanErrIn [1 x 3], handbackDelay,
 %   coastLen, nVeto, errAtHandback [1 x 3], sigmaAtHandback [1 x 3], falseAlarms, tFalse, faults [1 x 4], timeline,
 %   revalComputed, revalPassed, rowsCoast, rowsBefore (medians), qRatioCoast (median q over its threshold on the
-%   computed coast epochs), tFirstPass, probationInSpoof.
+%   computed coast epochs), tFirstPass, probationInSpoof, plAtHandback, coastCpiMin and coastCpiMed (the CPI against
+%   the coast while the spoof was on, a gate that logs it). The SS and CPI maxima are taken on NOMINAL epochs and the
+%   latch epochs; the coast's own CPI is reported apart.
 %   MATLAB desktop tool, not codegen. Runs under Octave.
 
 if nargin < 5 || isempty(name), name = sprintf('%s %g', scn.kind, scn.size); end
@@ -70,18 +72,26 @@ end
 if isempty(kH), kStop = n; else, kStop = kH; end
 kOff = find(tKf <= tOff, 1, 'last');
 inSpan = (1:n)' >= find(tKf >= tOn, 1) & (1:n)' <= max(kStop, kOff);   % tOn to the later of tOff and the hand-back (or the end)
+nomOrLatch = (mode == 1) | ismember((1:n)', latches);                  % the monitors on the host: NOMINAL epochs and the latch epochs
 maxSsIn = NaN;  maxCpiIn = NaN;  axSs = '-';  axCpi = '-';
-if any(inSpan)
-    [maxSsIn, i] = max(max(ssR(inSpan, :), [], 1));  axSs = 'NED';  axSs = axSs(i);
-    [maxCpiIn, i] = max(max(cpiR(inSpan, :), [], 1));  axCpi = 'NED';  axCpi = axCpi(i);
+if any(inSpan & nomOrLatch)
+    [maxSsIn, i] = max(max(ssR(inSpan & nomOrLatch, :), [], 1));  axSs = 'NED';  axSs = axSs(i);
+    [maxCpiIn, i] = max(max(cpiR(inSpan & nomOrLatch, :), [], 1));  axCpi = 'NED';  axCpi = axCpi(i);
+end
+% the CPI of the innovations against the coast while the spoof was on: the dwell holds while it is above 1
+cpiMax = max(cpiR, [], 2);
+coastEp = (mode == 2) & tKf >= tOn & tKf <= tOff & cpiMax > 0;
+coastCpiMin = NaN;  coastCpiMed = NaN;  tCoastMin = NaN;
+if any(coastEp)
+    kc = find(coastEp);  [coastCpiMin, i] = min(cpiMax(kc));  tCoastMin = tKf(kc(i));  coastCpiMed = median(cpiMax(kc));
 end
 % the clean epochs: before tOn, and from a minute after the later of tOff and the last hand-back the window accounts for;
 % none after it while a latch of the window is still open at the end
 hbW = handbacks(tKf(handbacks) >= tOn & tKf(handbacks) <= tOff + 2 * CLEAN_AFTER);
 tQuiet = max([tOff, tKf(hbW)']);
 openLatch = ~isempty(winL) && (isempty(handbacks) || max(handbacks) < max(winL));
-clean = armed & tKf < tOn;
-if ~openLatch, clean = clean | (armed & tKf > tQuiet + CLEAN_AFTER); end
+clean = armed & nomOrLatch & tKf < tOn;
+if ~openLatch, clean = clean | (armed & nomOrLatch & tKf > tQuiet + CLEAN_AFTER); end
 maxSsClean = NaN;  maxCpiClean = NaN;
 if any(clean), maxSsClean = max(max(ssR(clean, :)));  maxCpiClean = max(max(cpiR(clean, :))); end
 falseL = setdiff(latches, winL);                                       % latches outside tOn to a minute after tOff
@@ -120,8 +130,14 @@ else
     end
     fprintf('   timeline (mode and the time it starts): %s\n', timeline);
 end
-fprintf('   largest ratio from tOn to the later of tOff and the hand-back: SS %.2f (%s), CPI %.2f (%s); on the clean armed epochs SS %.2f, CPI %.2f\n', ...
-    maxSsIn, axSs, maxCpiIn, axCpi, maxSsClean, maxCpiClean);
+fprintf('   largest ratio on the NOMINAL epochs from tOn to the later of tOff and the hand-back: SS %.2f (%s), CPI %.2f (%s); on the clean armed\n', ...
+    maxSsIn, axSs, maxCpiIn, axCpi);
+fprintf('   NOMINAL epochs SS %.2f, CPI %.2f\n', maxSsClean, maxCpiClean);
+if isfinite(coastCpiMin)
+    fprintf('   CPI against the coast while the spoof was on: min %.2f (at %.2f s), median %.2f over %d coast epochs with a closed window (the dwell\n', ...
+        coastCpiMin, tCoastMin, coastCpiMed, nnz(coastEp));
+    fprintf('   holds while it is above 1)\n');
+end
 %% the re-validation through the coast: what let the gate hand back
 revalComputed = NaN;  revalPassed = NaN;  rowsCoast = NaN;  rowsBefore = NaN;  qRatioCoast = NaN;  tFirstPass = NaN;  probationInSpoof = false;
 if ~isempty(kL) && isfield(spfLog, 'qReval')
@@ -219,7 +235,7 @@ row = struct('name', name, 'kind', scn.kind, 'size', scn.size, 'tOn', tOn, 'tOff
     'sigmaAtHandback', sigmaAtHandback, 'falseAlarms', numel(falseL), 'tFalse', tKf(falseL)', 'faults', faults, 'timeline', timeline, ...
     'revalComputed', revalComputed, 'revalPassed', revalPassed, 'rowsCoast', rowsCoast, 'rowsBefore', rowsBefore, ...
     'qRatioCoast', qRatioCoast, 'tFirstPass', tFirstPass, 'probationInSpoof', probationInSpoof, 'nRelatch', numel(relatch), ...
-    'plAtHandback', plAtHandback);
+    'plAtHandback', plAtHandback, 'coastCpiMin', coastCpiMin, 'coastCpiMed', coastCpiMed);
 end
 
 %------------------------------------------------------------------------

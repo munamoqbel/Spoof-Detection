@@ -41,6 +41,7 @@ tests = { ...
     'test_cpiReplay',        '=== test_cpiReplay PASS ===';
     'test_measNoiseCheck',   '=== test_measNoiseCheck PASS ===';
     'test_kfMeasBoth',       '=== test_kfMeasBoth PASS ===';
+    'test_coastBound',       '=== test_coastBound PASS ===';
     'test_feedbackCheck',    '=== test_feedbackCheck PASS ===';
     'test_gravityCheck',     '=== test_gravityCheck PASS ==='};
 

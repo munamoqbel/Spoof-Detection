@@ -148,6 +148,36 @@ classdef STRUCT_SPF
                 innovationCovHost, measNoiseHP);
         end
 
+        function [coastCovBound] = boundCoastCov(coastCov)
+            % The coast covariance as the re-admission tests may use it. The
+            % re-validation (H P_C H' + R) and the first probation window
+            % (sigma_SS from P_C) loosen as the coast ages; past the point
+            % where k sigma_C covers a spoof offset the paper's recovery
+            % re-admits the GNSS as an error within the protection level
+            % (measured: a 30 m step re-admitted 57 s after the latch at a
+            % coast sigma of 6 m). Here no monitored position sigma exceeds
+            % COAST_SIGMA_MAX: the matrix is scaled by congruence (d P d'),
+            % which keeps it symmetric positive semi-definite and lets the
+            % cross terms follow the bounded axes. The coast budget and the
+            % nav's own sigma keep using the unbounded P_C.
+            n = CST_gnssHybrid.NO_STATES;
+            axes = CST_spfParam.MONITORED_AXES;
+            sigmaMax = CST_spfParam.COAST_SIGMA_MAX;
+            scale = ones(n, 1);
+            for idx = 1:numel(axes)
+                axisIdx = axes(idx);
+                if (coastCov(axisIdx, axisIdx) > sigmaMax * sigmaMax)
+                    scale(axisIdx) = sigmaMax / sqrt(coastCov(axisIdx, axisIdx));
+                end % ELSE: within the bound: the axis is left as it is
+            end
+            coastCovBound = zeros(n, n);
+            for rowIdx = 1:n                       % element loops: deterministic, no temporaries for Coder
+                for colIdx = 1:n
+                    coastCovBound(rowIdx, colIdx) = scale(rowIdx) * scale(colIdx) * coastCov(rowIdx, colIdx);
+                end
+            end
+        end
+
         function [kfMeas] = zeroKfMeas
             m = double(CST_spfParam.MAX_MEAS);
             n = CST_gnssHybrid.NO_STATES;

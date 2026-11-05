@@ -65,6 +65,7 @@ classdef CST_spfParam
         ARM_EPOCHS = uint8(10);                           % qualifying epochs before the monitors arm (host: 120)
         ARM_PL_MAX = 100.0;                               % m: qualifying when K_MISSED_DETECTION * sigma_pos < it
         PROBATION_LENGTH = uint8(18);                     % quiet epochs -> hand-back
+        COAST_SIGMA_MAX = 3.0;                            % m: the coast position sigma the re-admission tests may use at most
         MAX_ANCHOR_AGE = uint32(234);                     % epochs: an older anchor is refused at a latch
         MAX_MEAS = CST_gnssHybrid.MAX_MEASURES;           % rows per epoch, the host's bound
 

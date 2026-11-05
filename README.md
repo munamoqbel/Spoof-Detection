@@ -314,6 +314,13 @@ rejected the rows carrying the spoof) or with q far below its threshold
 on a full row set (S carrying an R the host scaled up). matrixTable
 prints the rows as one table, a dash where a run has no such number.
 
+The re-admission tests of the gate, the re-validation in COAST and the
+first probation window, use the coast covariance bounded by
+`CST_spfParam.COAST_SIGMA_MAX` (`STRUCT_SPF.boundCoastCov`), so a spoof
+the coast cannot vouch against stays refused for as long as it lasts
+instead of being admitted once the coast's own uncertainty has grown over
+it; `docs/HOST_DECISIONS.md` section 9 has the measurement behind it.
+
 `tools/measNoiseCheck.m` shows the measurement noise the gate was handed,
 epoch by epoch over a window: the range rows in the record, the largest
 sqrt(R) against the run's nominal, the rows whose R is scaled and the

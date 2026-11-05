@@ -162,6 +162,7 @@ switch sys.mode
         sys.coastCount = sys.coastCount + 1;
         sys.coastCov   = Phi * sys.coastCov * Phi' + Q;
         sys.coastCov   = (sys.coastCov + sys.coastCov') / 2;
+        coastCovBound  = STRUCT_SPF.boundCoastCov(sys.coastCov);   % the coast as the re-admission tests may use it
 
         % ---- 2. test the (untrusted) GNSS against the coast ----
         %         HOST CONTRACT: the operational KF is not updated in COAST
@@ -170,7 +171,7 @@ switch sys.mode
         sys.probSep = zeros(numStates, 1);
         coastMinusPrior = zeros(numStates, 1);
         [passed, q_value, revalFault] = SPF_revalidation(kfMeas.innovation, kfMeas.obsMatrix, ...
-            kfMeas.measNoiseCov, kfMeas.numMeas, coastMinusPrior, sys.coastCov);
+            kfMeas.measNoiseCov, kfMeas.numMeas, coastMinusPrior, coastCovBound);
         info.qReval = q_value;
         info.revalComputed = true;
         info.solveFault = revalFault;
@@ -188,6 +189,16 @@ switch sys.mode
             sys.dwellCount     = 0;
             sys.probSep        = zeros(numStates, 1);   % trial starts ON the coast
             sys.pool           = STRUCT_SPF.closeAllWindows(sys.pool);
+            % The first probation window opens on the COAST, separation zero,
+            % covariance the bounded coast covariance: the trial's first update
+            % then counts in that window's separation. Without it a trial that
+            % jumps onto a spoof in one update (a wide coast covariance against
+            % 14 rows at 5 m absorbs 85 % at once) is seen by no window, since
+            % the windows of the probation open on the trial's post-update
+            % solution, and the probation only watches what the trial does after.
+            kfMeasOpen         = kfMeas;
+            kfMeasOpen.postCov = coastCovBound;
+            sys.pool           = STRUCT_SPF.openWindow(sys.pool, kfMeasOpen);
             sys.mode           = CST_spfMode.PROBATION;
             % order the host to start its TRIAL as a copy of the coasting KF
             kfCommand = STRUCT_SPF.setCommand(true);
@@ -201,11 +212,12 @@ switch sys.mode
         sys.coastCount = sys.coastCount + 1;
         sys.coastCov   = Phi * sys.coastCov * Phi' + Q;
         sys.coastCov   = (sys.coastCov + sys.coastCov') / 2;
+        coastCovBound  = STRUCT_SPF.boundCoastCov(sys.coastCov);   % the coast as the re-admission tests may use it
 
         % ---- 2. diagnostic: GNSS-vs-coast on the trial's innovation ----
         coastMinusPrior = -(Phi * sys.probSep);
         [~, q_value, revalFault] = SPF_revalidation(kfMeas.innovation, kfMeas.obsMatrix, ...
-            kfMeas.measNoiseCov, kfMeas.numMeas, coastMinusPrior, sys.coastCov);
+            kfMeas.measNoiseCov, kfMeas.numMeas, coastMinusPrior, coastCovBound);
         info.qReval = q_value;
         info.revalComputed = true;
         info.solveFault = revalFault;

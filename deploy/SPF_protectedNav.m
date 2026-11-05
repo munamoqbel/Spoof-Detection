@@ -42,7 +42,10 @@
 %   MAX_ANCHOR_AGE old; otherwise the current solution is frozen and
 %   info.anchorMissing is raised.
 % - resetInhibit asks the host not to apply its protective reset while
-%   the gate holds GNSS off or alarms; coastBudgetExceeded (coast PL
+%   the gate holds GNSS off or alarms; the re-validation and the first
+%   probation window use the coast covariance bounded by COAST_SIGMA_MAX
+%   (STRUCT_SPF.boundCoastCov), so a spoof larger than the bound stays
+%   refused however long the coast; coastBudgetExceeded (coast PL
 %   above ARM_PL_MAX, or COAST_BUDGET_EPOCHS passed) says the gate can
 %   no longer certify a re-validation and the host may reset.
 %
@@ -162,12 +165,13 @@ switch sys.mode
         sys.coastCount = sys.coastCount + 1;
         sys.coastCov   = Phi * sys.coastCov * Phi' + Q;
         sys.coastCov   = (sys.coastCov + sys.coastCov') / 2;
+        coastCovBound  = STRUCT_SPF.boundCoastCov(sys.coastCov);   % the coast as the re-admission tests may use it
 
         % 2. the raw GNSS against the coast; the operational KF is not updated, so prior = coast
         sys.probSep = zeros(numStates, 1);
         coastMinusPrior = zeros(numStates, 1);
         [passed, q_value, revalFault] = SPF_revalidation(kfMeas.innovation, kfMeas.obsMatrix, ...
-            kfMeas.measNoiseCov, kfMeas.numMeas, coastMinusPrior, sys.coastCov);
+            kfMeas.measNoiseCov, kfMeas.numMeas, coastMinusPrior, coastCovBound);
         info.qReval = q_value;
         info.revalComputed = true;
         info.solveFault = revalFault;
@@ -185,6 +189,11 @@ switch sys.mode
             sys.dwellCount     = 0;
             sys.probSep        = zeros(numStates, 1);
             sys.pool           = STRUCT_SPF.closeAllWindows(sys.pool);
+            % the first probation window opens on the coast with the bounded covariance, so the trial's first
+            % update counts in its separation (otherwise a trial that jumps onto a spoof in one update is seen by nothing)
+            kfMeasOpen         = kfMeas;
+            kfMeasOpen.postCov = coastCovBound;
+            sys.pool           = STRUCT_SPF.openWindow(sys.pool, kfMeasOpen);
             sys.mode           = CST_spfMode.PROBATION;
             kfCommand = STRUCT_SPF.setCommand(true);
         end
@@ -197,11 +206,12 @@ switch sys.mode
         sys.coastCount = sys.coastCount + 1;
         sys.coastCov   = Phi * sys.coastCov * Phi' + Q;
         sys.coastCov   = (sys.coastCov + sys.coastCov') / 2;
+        coastCovBound  = STRUCT_SPF.boundCoastCov(sys.coastCov);   % the coast as the re-admission tests may use it
 
         % 2. diagnostic: the GNSS against the coast on the trial's innovation
         coastMinusPrior = -(Phi * sys.probSep);
         [~, q_value, revalFault] = SPF_revalidation(kfMeas.innovation, kfMeas.obsMatrix, ...
-            kfMeas.measNoiseCov, kfMeas.numMeas, coastMinusPrior, sys.coastCov);
+            kfMeas.measNoiseCov, kfMeas.numMeas, coastMinusPrior, coastCovBound);
         info.qReval = q_value;
         info.revalComputed = true;
         info.solveFault = revalFault;

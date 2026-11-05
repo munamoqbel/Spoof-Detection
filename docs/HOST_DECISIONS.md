@@ -181,3 +181,33 @@ CPI then needs an epoch floor of 8 range rows (reflections in a partial
 outage read as tens of metres on a one-axis projection) and reads two
 recording slips of one epoch as 16 m jumps; the real near misses stay
 below 0.65 of the threshold (`tools/cpiReplay` with the mode `nominal`).
+
+## 9. Re-admission bounded by COAST_SIGMA_MAX
+
+Run 5 of the vehicle matrix (30 m step on every constellation, the gate
+handed S with the nominal R): latch at 600.78 s, 0.8 s after onset, the
+coast pure (the innovation projection stayed at 31 to 35 m), and yet the
+re-validation passed on all rows at 644.87 s and the probation committed
+at 658.01 s, 42 s before the spoof ended. The chi-square compares the rows
+with the coast through H P_C H' + R, and the coast sigma had grown from
+1.0 m at the latch to about 6 m; 30 m then reads as 1.5 sigma per row. The
+probation did not veto because the trial, starting from that covariance,
+absorbed 85 % of the offset in its first update, before any window was
+open, and sat still afterwards. In the paper's terms the offset was inside
+the protection level, about 60 m at that moment, and the recovery admits
+an error within the PL. For a gate whose purpose is to keep the nav off a
+spoof that is not acceptable, so the re-admission tests use the coast
+covariance bounded by `COAST_SIGMA_MAX` (3 m, `STRUCT_SPF.boundCoastCov`,
+a congruence scaling that keeps the matrix positive semi-definite), and
+the first probation window opens on the coast with that covariance so the
+trial's first update counts. With 5 m range rows the re-validation then
+refuses any offset above about 24 m for as long as it lasts, the probation
+vetoes a trial that jumps by more than k_FA sigma_SS + B, about 17 m, and
+clean GNSS is still re-admitted after a real coast whose drift stays below
+those figures, two to three minutes on this INS. Beyond that the gate
+stays in COAST until the coast budget (unbounded P_C, as before) and the
+host's reset, which is what the host does after a jam today. Offsets
+below about 17 m are admitted; the CPI latches from about 20 m on this
+host, so what the gate detects it can also hold. A cumulative
+position-domain re-validation (the CPI statistic against the coast over
+the dwell) would bring the hold down to about 14 m; deferred.

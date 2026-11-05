@@ -40,6 +40,22 @@
 % small: after that many COAST + PROBATION epochs the flag is raised
 % whatever sigma_C says. It is set long (600 s) so that it never cuts a
 % spoof the PL budget would still cover.
+% - COAST_SIGMA_MAX (metres, per monitored position axis):
+% The re-validation compares the GNSS rows with the coast through
+% H P_C H' + R and the probation compares the trial's move with the coast
+% through sigma_SS, so both loosen as the coast covariance P_C grows: once
+% k sigma_C covers a spoof offset the paper's recovery admits the GNSS as
+% an error within the protection level. Measured on the vehicle data, a
+% 30 m step on every constellation was re-admitted 57 s after the latch
+% with the coast sigma at 6 m, the nav then following the spoof. The gate
+% therefore bounds the coast covariance the re-admission tests may use:
+% STRUCT_SPF.boundCoastCov scales P_C by congruence so that no monitored
+% position sigma exceeds COAST_SIGMA_MAX. With 3 m and 5 m range rows the
+% re-validation refuses any offset above about 24 m for as long as it
+% lasts and still re-admits clean GNSS after a real coast whose drift stays
+% below that (two to three minutes on the vehicle INS); beyond it the gate
+% stays in COAST until the coast budget and the host's reset. The budget
+% itself and the nav's own sigma keep using the unbounded P_C.
 % - REVAL_MIN_MEAS:
 % Minimum valid rows for a re-validation pass. The host's measurement
 % vector always carries the pressure-altitude row, so numMeas >= 1 even in
@@ -111,6 +127,8 @@ classdef CST_spfParam
         ARM_PL_MAX = 100.0;                       % m; qualifying epoch: numMeas >= REVAL_MIN_MEAS and
                                                   % K_MISSED_DETECTION * sigma_pos(P+) < ARM_PL_MAX
         PROBATION_LENGTH = uint8(18);             % quiet epochs -> commit
+        COAST_SIGMA_MAX = 3.0;                    % m: the coast position sigma the re-admission tests
+                                                  % (re-validation, first probation window) may use at most
         MAX_ANCHOR_AGE = uint32(234);             % epochs, 0.5 s each
         MAX_MEAS = CST_gnssHybrid.MAX_MEASURES;   % max measurement rows per epoch (host class, uint8(51))
 

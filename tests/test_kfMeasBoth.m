@@ -63,7 +63,8 @@ end
 
 same = isequal(res{1}.st, res{2}.st) && isequal(res{1}.xn, res{2}.xn) && isequal(res{1}.det, res{2}.det) ...
     && isequal(res{1}.hb, res{2}.hb) && isequal(res{1}.cpi, res{2}.cpi);
-cpiA = max(res{1}.cpi(scn.spoof_start:scn.spoof_end));  cpiC = max(res{3}.cpi(scn.spoof_start:scn.spoof_end));
+inSpoof = false(1, N);  inSpoof(scn.spoof_start:scn.spoof_end) = true;                 % the CPI margin on the NOMINAL epochs of the attack (the coast logs its own)
+cpiA = max(res{1}.cpi(inSpoof & res{1}.st == 1));  cpiC = max(res{3}.cpi(inSpoof & res{3}.st == 1));
 shrunk = cpiC < 0.5 * cpiA;
 noEarlier = isempty(res{3}.det) || (~isempty(res{1}.det) && res{3}.det(1) >= res{1}.det(1));
 latched = ~isempty(res{1}.det);

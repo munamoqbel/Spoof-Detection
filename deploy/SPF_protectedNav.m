@@ -44,8 +44,9 @@
 % - resetInhibit asks the host not to apply its protective reset while
 %   the gate holds GNSS off or alarms; the re-validation and the first
 %   probation window use the coast covariance bounded by COAST_SIGMA_MAX
-%   (STRUCT_SPF.boundCoastCov), so a spoof larger than the bound stays
-%   refused however long the coast; coastBudgetExceeded (coast PL
+%   (STRUCT_SPF.boundCoastCov), and the dwell also needs the CPI of the
+%   innovations against the coast below T_N, so a spoof the monitors
+%   would latch on stays refused however long the coast; coastBudgetExceeded (coast PL
 %   above ARM_PL_MAX, or COAST_BUDGET_EPOCHS passed) says the gate can
 %   no longer certify a re-validation and the host may reset.
 %
@@ -175,8 +176,19 @@ switch sys.mode
         info.qReval = q_value;
         info.revalComputed = true;
         info.solveFault = revalFault;
+        % 2b. the same innovations through the CPI over the last N epochs, S with the bounded coast covariance and a zero
+        %     increment: GNSS the monitors would latch on is not re-admitted (B and T_N as in NOMINAL), whatever the chi-square says
+        coastS = kfMeas.obsMatrix * coastCovBound * kfMeas.obsMatrix' + kfMeas.measNoiseCov;
+        kfMeasCoast = kfMeas;
+        kfMeasCoast.innovationCov = (coastS + coastS') / 2;
+        kfMeasCoast.postState     = kfMeas.priorState;
+        [sys.pool, report] = SPF_monitorPool(sys.pool, kfMeasCoast, propTel);
+        sys.pool = STRUCT_SPF.openWindow(sys.pool, kfMeasCoast);
+        info.cpiRatio   = report.cpiRatio;             % the CPI against the coast, logged through the coast
+        info.solveFault = info.solveFault || report.solveFault;
+        quiet = ~report.cpiAlarm;
 
-        if (passed)
+        if (passed && quiet)
             sys.dwellCount = sys.dwellCount + 1;
         elseif (double(kfMeas.numMeas) >= double(CST_spfParam.REVAL_MIN_MEAS))
             sys.dwellCount = 0;                      % a fail restarts the dwell; too few rows to test holds it

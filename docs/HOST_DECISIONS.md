@@ -207,7 +207,15 @@ clean GNSS is still re-admitted after a real coast whose drift stays below
 those figures, two to three minutes on this INS. Beyond that the gate
 stays in COAST until the coast budget (unbounded P_C, as before) and the
 host's reset, which is what the host does after a jam today. Offsets
-below about 17 m are admitted; the CPI latches from about 20 m on this
-host, so what the gate detects it can also hold. A cumulative
-position-domain re-validation (the CPI statistic against the coast over
-the dwell) would bring the hold down to about 14 m; deferred.
+below about 17 m would still be admitted by the chi-square, which is one
+epoch at a time at 1e-3 on all rows, while the CPI latches from about
+20 m. So the dwell also requires the CPI statistic of the innovations
+against the coast over the last N epochs (the pool's windows, S with the
+bounded covariance, a zero increment so the SS stays silent, B and T_N as
+in NOMINAL) to stay below T_N: GNSS the monitors would latch on is not
+re-admitted. With 5 m range rows and B = 5 m this refuses offsets from
+about 14 m, below what the gate detects, and admits clean GNSS after a
+real coast whose drift stays below about 13 m, some 100 s on this INS;
+beyond that the gate stays in COAST until the budget and the host's reset.
+The CPI margin is logged through the coast (cpiRatio), so the plots show
+how far the coast is from re-admission.

@@ -175,8 +175,28 @@ switch sys.mode
         info.qReval = q_value;
         info.revalComputed = true;
         info.solveFault = revalFault;
+        % ---- 2b. the same innovations through the CPI over the last N epochs ----
+        %         The chi-square is one epoch at a time at 1e-3 on all rows; on
+        %         the vehicle data it admits an offset below about 24 m even with
+        %         the bounded coast covariance, while the CPI latches from 20 m.
+        %         So the dwell also requires the CPI statistic of the innovations
+        %         against the coast (a zero increment: no update in COAST, the SS
+        %         stays silent; S = H P_C,bound H' + R) to stay below T_N: GNSS
+        %         the monitors would latch on is not re-admitted, with the same B
+        %         and T_N as in NOMINAL. The windows of the pool serve as the
+        %         sliding window; they are closed at the latch and at the
+        %         probation open, and none of them touches the anchor here.
+        coastS = kfMeas.obsMatrix * coastCovBound * kfMeas.obsMatrix' + kfMeas.measNoiseCov;
+        kfMeasCoast = kfMeas;
+        kfMeasCoast.innovationCov = (coastS + coastS') / 2;
+        kfMeasCoast.postState     = kfMeas.priorState;
+        [sys.pool, report] = SPF_monitorPool(sys.pool, kfMeasCoast, propTel);
+        sys.pool = STRUCT_SPF.openWindow(sys.pool, kfMeasCoast);
+        info.cpiRatio   = report.cpiRatio;             % the CPI against the coast, logged through the coast
+        info.solveFault = info.solveFault || report.solveFault;
+        quiet = ~report.cpiAlarm;
 
-        if (passed)
+        if (passed && quiet)
             sys.dwellCount = sys.dwellCount + 1;
         elseif (double(kfMeas.numMeas) >= double(CST_spfParam.REVAL_MIN_MEAS))
             sys.dwellCount = 0;                      % a failed test restarts the dwell

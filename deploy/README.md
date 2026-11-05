@@ -37,9 +37,11 @@ bounded by `COAST_SIGMA_MAX` (3 m per monitored position axis,
 `STRUCT_SPF.boundCoastCov`): a spoof larger than what the bound and the
 range noise allow, about 24 m here, stays refused for as long as it lasts,
 and clean GNSS is re-admitted after a real coast whose drift stays below
-that; beyond it the gate stays in COAST until the coast budget and the
-host's reset. The budget and the nav's own sigma use the unbounded
-covariance.
+that, and the dwell also needs the CPI of the innovations against the
+coast below T_N, so what the monitors would latch on is not re-admitted
+(from about 14 m here); beyond that the gate stays in COAST until the
+coast budget and the host's reset. The budget and the nav's own sigma use
+the unbounded covariance.
 
 Use: copy the folder contents next to the host code. Keep the root copies
 off the simulation path; they are the annotated reference (design notes,

@@ -150,12 +150,14 @@ if ~isempty(kL) && isfield(spfLog, 'qReval')
     probationInSpoof = ~isempty(kP) && tKf(kP) < tOff;
     pick = unique([segC(1:min(8, numel(segC))), segC(round(linspace(1, numel(segC), min(10, numel(segC)))))]);
     fprintf('   course (the first 8 epochs in a row, then spread to the end):\n');
-    fprintf('   %10s %5s %5s %9s %8s %5s %5s\n', 't [s]', 'mode', 'rows', 'q', 'thr', 'pass', 'dwell');
+    fprintf('   %10s %5s %5s %9s %8s %5s %5s %7s\n', 't [s]', 'mode', 'rows', 'q', 'thr', 'pass', 'dwell', 'cpi');
     letters2 = '?NCP';
     for k = pick
         i = k - kL + 1;
-        fprintf('   %10.2f %5s %5d %9.1f %8.1f %5s %5d\n', tKf(k), letters2(min(max(round(mode(k)) + 1, 1), 4)), rows(i), q(i), thr(i), ifelse(pass(i), 'yes', '-'), spfLog.dwell(k));
+        fprintf('   %10.2f %5s %5d %9.1f %8.1f %5s %5d %7.2f\n', tKf(k), letters2(min(max(round(mode(k)) + 1, 1), 4)), rows(i), q(i), thr(i), ...
+            ifelse(pass(i), 'yes', '-'), spfLog.dwell(k), max(cpiR(k, :)));
     end
+    fprintf('   (cpi = the CPI of the innovations against the coast, q/T_N of the window closed that epoch; a gate that logs it holds the dwell while it is above 1)\n');
     if probationInSpoof
         fprintf('   VERDICT: the probation opened at %.2f s while the spoof was on (tOff %.2f s): the re-validation passed on the rows and S the host\n', tKf(kP), tOff);
         fprintf('            handed over, a hand-back into the spoof');

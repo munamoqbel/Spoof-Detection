@@ -161,7 +161,9 @@ Both are tests against the null hypothesis, so their R is the noise the
 design assumes under no spoof, not the weight the host chose for its own
 update. A host that scales R up on large innovations normalises a spoof
 innovation to about one sigma before the gate sees it, and a host that
-rejects the rows with the largest innovations removes the evidence. Measured
+drops a satellite whose range or range rate jumps between epochs (this
+host: for 30 epochs) removes, at a step onset, the rows that see the step
+most, for 15 s, and the same rows again for 15 s at the step back. Measured
 on the vehicle data (`tools/cpiReplay`, `tools/matrixRow`): a 10 m step on
 every constellation read 0.09 of the CPI threshold with the host's R and
 0.30 with the nominal one (no latch either way, as designed); a 20 m step
@@ -235,3 +237,21 @@ would not have alarmed, whatever the cause of a transient, and the pool
 carries over into NOMINAL so the first windows after the arming are
 already old. On this data the 83 s transient restarts the count and the
 gate arms near 143 s; the manoeuvre at 200 s alarmed in no run.
+
+## 11. The host's spike filter and the gate
+
+The host drops a satellite for 30 epochs (15 s) when its range or range
+rate jumps between consecutive epochs beyond a limit. It runs on the raw
+measurements, before the innovation, in every mode. For the gate this
+means: a ramp never trips it, so the gate sees every row during a ramp;
+at a step onset the satellites whose line of sight projects the step most
+are gone for 15 s and come back carrying the spoof, which the gate then
+reads whole (run 5: 6 range rows at the first spoofed epoch, 14 again
+from 618 s); at the step back the same happens to the clean rows, so a
+hand-back comes about 15 to 20 s after the spoof ends (13.6 and 18.5 s
+measured). The one risk is inside those 15 s in COAST: the chi-square
+runs on the rows that saw the step least and can pass on a spoofed epoch
+(one isolated pass at 604.30 s in three runs); the dwell of ten
+consecutive passes and the CPI against the coast cover it. The gate takes
+the rows as the host gives them; passing the dropped rows as well is not
+needed.

@@ -26,7 +26,8 @@ Not included, the simulation provides its own: `CST_gnssHybrid`
 
 The S and R the gate reads (`innovationCov`, `measNoiseCov`) carry the
 nominal measurement noise on all the rows the host built. A host that
-scales R up on large innovations or leaves rows out of its own update
+scales R up on large innovations or drops a satellite for some epochs
+after a jump in its range (its spike filter) and so leaves rows out of its own update
 hands the gate the nominal pair and its own pair beside it through
 `STRUCT_SPF.setKfMeasBoth` or `kfMeasFromUpdateBoth` (`innovationCovHost`,
 `measNoiseCovHost`, kept for the record, never read by a monitor); with

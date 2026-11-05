@@ -42,7 +42,8 @@ classdef STRUCT_SPF
             % The S and R the gate reads (innovationCov, measNoiseCov) carry
             % the NOMINAL measurement noise, the noise the design assumes under
             % no spoof, on all the rows the host built. A host that scales R
-            % up on large innovations (its spike handling) or rejects rows for
+            % up on large innovations (its spike handling) or drops satellites
+            % for some epochs after a jump in their range (its spike filter) for
             % its own update would otherwise normalise a spoof innovation to
             % one sigma before the gate saw it: on the vehicle data a 20 m
             % step read 0.85 of the CPI threshold with the host's R and 1.37

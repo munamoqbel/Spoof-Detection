@@ -20,7 +20,7 @@ function [row] = matrixRow(spfLog, tKf, run, scn, name)
 %   epoch the rows the host handed over, the chi-square q against its threshold, pass or not and the dwell, with the
 %   first pass and whether the probation opened while the spoof was still on (a hand-back into the spoof: the
 %   re-validation passed on the rows and S the host handed over, fewer rows than before the latch when the host
-%   rejected the rows carrying the spoof, or q far below its threshold on a full row set when S carries an R the
+%   dropped the rows that saw the step most, its spike filter, or q far below its threshold on a full row set when S carries an R the
 %   host scaled up on large innovations).
 %   Result: name, kind, size, tOn, tOff, tEnd, latchDelay, monitor, axis, ratioAtLatch, maxSsIn, maxCpiIn,
 %   maxSsClean, maxCpiClean, errAtLatch [1 x 3], maxHorizIn, errAtOff [1 x 3], meanErrIn [1 x 3], handbackDelay,
@@ -182,7 +182,7 @@ if ~isempty(kL) && isfield(spfLog, 'qReval')
             fprintf('            H P_C H'' + R had grown to where the offset reads as noise, which the design tolerates as an error within the PL');
         end
         if rowsCoast < 0.8 * rowsBefore
-            fprintf('; the host handed fewer rows during the coast (%d against %d): the rows carrying the spoof were\n            rejected before the gate saw them\n', round(rowsCoast), round(rowsBefore));
+            fprintf('; the host handed fewer rows during the coast (%d against %d): its spike filter dropped the rows that\n            saw the step most, and the test ran on the rest\n', round(rowsCoast), round(rowsBefore));
         elseif qRatioCoast < 0.5
             fprintf('; q sat at %.2f of its threshold on a full row set: S = H P_C H'' + R carries an R the host scaled up on the\n            large innovations\n', qRatioCoast);
         else

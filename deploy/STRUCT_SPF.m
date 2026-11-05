@@ -21,7 +21,7 @@
 % clamped and flagged (numMeasClamped). The S and R the gate reads
 % (innovationCov, measNoiseCov) carry the NOMINAL measurement noise, the
 % noise the design assumes under no spoof, and all the rows the host
-% built: a host that scales R up on large innovations or rejects rows
+% built: a host that scales R up on large innovations or drops rows
 % for its own update hands those to the gate separately through
 % setKfMeasBoth / kfMeasFromUpdateBoth (innovationCovHost,
 % measNoiseCovHost, kept for the record, never read by the monitors).

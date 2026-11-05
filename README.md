@@ -310,7 +310,7 @@ hand-back. After a latch it prints the re-validation through the coast,
 per epoch the rows the host handed over, the chi-square against its
 threshold, pass and dwell, and says whether the probation opened while
 the spoof was still on, with fewer rows than before the latch (the host
-rejected the rows carrying the spoof) or with q far below its threshold
+dropped the rows that saw the step most, its spike filter) or with q far below its threshold
 on a full row set (S carrying an R the host scaled up). matrixTable
 prints the rows as one table, a dash where a run has no such number.
 

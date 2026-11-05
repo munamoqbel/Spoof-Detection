@@ -69,9 +69,11 @@ if ~isempty(kL)
         coastLen = tEnd - tKf(kL);  nVeto = nnz(vetoes > kL);
     end
 end
-if isempty(kH), kStop = n; else, kStop = kH; end
+if ~isempty(kH), kStop = kH;                                            % the hand-back
+elseif ~isempty(kL), kStop = n;                                         % a latch still open at the end
+else, kStop = find(tKf <= tOff + CLEAN_AFTER, 1, 'last'); end           % no latch: tOff and the minute of its step back
 kOff = find(tKf <= tOff, 1, 'last');
-inSpan = (1:n)' >= find(tKf >= tOn, 1) & (1:n)' <= max(kStop, kOff);   % tOn to the later of tOff and the hand-back (or the end)
+inSpan = (1:n)' >= find(tKf >= tOn, 1) & (1:n)' <= max(kStop, kOff);   % tOn to the later of tOff and the hand-back
 nomOrLatch = (mode == 1) | ismember((1:n)', latches);                  % the monitors on the host: NOMINAL epochs and the latch epochs
 maxSsIn = NaN;  maxCpiIn = NaN;  axSs = '-';  axCpi = '-';
 if any(inSpan & nomOrLatch)

@@ -205,7 +205,16 @@ range row carries the clock, so an offset common to all rows is absorbed
 by a clock variance that grows freely through the coast (run 4 of the
 matrix, a 20 m D step, with the position bounded alone: the chi-square
 passed on 60 % of the coast epochs and the coast CPI fell from 6 to 2
-over the 100 s, the spoof held only by the CPI against the coast), and
+over the 100 s, the spoof held only by the CPI against the coast). With
+the clock bias bounded as well the run was repeated and the chi-square
+still passed on 57 % of the coast epochs: a D offset is nearly common to
+all rows, and a single-direction signal of about five sigma is diluted
+over the 25 degrees of freedom of the chi-square, which then sits at its
+threshold. The chi-square is the paper's test and stays as a condition of
+the dwell; what holds a common-mode offset is the CPI against the coast,
+the directional test, at 2 to 7 times T_N on that run. The clock bound
+stays for a host whose clock variance grows through the coast (the
+synthetic case D of test_coastBound), and
 the first probation window opens on the coast with that covariance so the
 trial's first update counts. With 5 m range rows the re-validation then
 refuses any offset above about 24 m for as long as it lasts, the probation

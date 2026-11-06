@@ -34,8 +34,9 @@ hands the gate the nominal pair and its own pair beside it through
 `setKfMeas` / `kfMeasFromUpdate` the two pairs are the same matrices.
 
 The re-validation and the first probation window use the coast covariance
-bounded by `COAST_SIGMA_MAX` (3 m per monitored position axis,
-`STRUCT_SPF.boundCoastCov`): a spoof larger than what the bound and the
+bounded by `COAST_SIGMA_MAX` (3 m) on the `COAST_BOUND_STATES`, the NED
+position and the receiver clock bias (`STRUCT_SPF.boundCoastCov`; the
+host sets the clock index as it sets `MONITORED_AXES`): a spoof larger than what the bound and the
 range noise allow, about 24 m here, stays refused for as long as it lasts,
 and clean GNSS is re-admitted after a real coast whose drift stays below
 that, and the dwell also needs the CPI of the innovations against the

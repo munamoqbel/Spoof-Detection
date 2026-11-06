@@ -55,8 +55,14 @@
 % 30 m step on every constellation was re-admitted 57 s after the latch
 % with the coast sigma at 6 m, the nav then following the spoof. The gate
 % therefore bounds the coast covariance the re-admission tests may use:
-% STRUCT_SPF.boundCoastCov scales P_C by congruence so that no monitored
-% position sigma exceeds COAST_SIGMA_MAX. With 3 m and 5 m range rows the
+% STRUCT_SPF.boundCoastCov scales P_C by congruence so that no sigma of
+% the COAST_BOUND_STATES exceeds COAST_SIGMA_MAX. The clock bias is among
+% them: every range row carries it, so an offset common to all rows (a
+% clock spoof, and most of a vertical one, since every satellite is above
+% the horizon) is absorbed by a clock variance that grows freely through
+% the coast (measured on a 20 m D step: the chi-square passed on 60 % of
+% the coast epochs and the coast CPI fell from 6 to 2 over 100 s with the
+% position bounded alone). With 3 m and 5 m range rows the
 % re-validation refuses any offset above about 24 m for as long as it
 % lasts and still re-admits clean GNSS after a real coast whose drift stays
 % below that (two to three minutes on the vehicle INS); beyond it the gate
@@ -133,8 +139,10 @@ classdef CST_spfParam
         ARM_PL_MAX = 100.0;                       % m; qualifying epoch: numMeas >= REVAL_MIN_MEAS and
                                                   % K_MISSED_DETECTION * sigma_pos(P+) < ARM_PL_MAX
         PROBATION_LENGTH = uint8(18);             % quiet epochs -> commit
-        COAST_SIGMA_MAX = 3.0;                    % m: the coast position sigma the re-admission tests
-                                                  % (re-validation, first probation window) may use at most
+        COAST_SIGMA_MAX = 3.0;                    % m: the coast sigma the re-admission tests (re-validation,
+                                                  % first probation window) may use at most, per bounded state
+        COAST_BOUND_STATES = [1 2 3 16];          % the states bounded: the NED position and the receiver
+                                                  % clock bias (host indices, like MONITORED_AXES)
         MAX_ANCHOR_AGE = uint32(234);             % epochs, 0.5 s each
         MAX_MEAS = CST_gnssHybrid.MAX_MEASURES;   % max measurement rows per epoch (host class, uint8(51))
 

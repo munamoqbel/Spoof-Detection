@@ -138,18 +138,19 @@ classdef STRUCT_SPF
 
         function [coastCovBound] = boundCoastCov(coastCov)
             % the coast covariance as the re-admission tests may use it: no
-            % monitored position sigma above COAST_SIGMA_MAX, the matrix scaled
-            % by congruence (d P d) so that it stays symmetric positive
-            % semi-definite and the cross terms follow the bounded axes
+            % sigma of the COAST_BOUND_STATES (the NED position and the clock
+            % bias, which every range row carries) above COAST_SIGMA_MAX, the
+            % matrix scaled by congruence (d P d) so that it stays symmetric
+            % positive semi-definite and the cross terms follow the bounded states
             n = CST_gnssHybrid.NO_STATES;
-            axes = CST_spfParam.MONITORED_AXES;
+            states = CST_spfParam.COAST_BOUND_STATES;
             sigmaMax = CST_spfParam.COAST_SIGMA_MAX;
             scale = ones(n, 1);
-            for idx = 1:numel(axes)
-                axisIdx = axes(idx);
-                if (coastCov(axisIdx, axisIdx) > sigmaMax * sigmaMax)
-                    scale(axisIdx) = sigmaMax / sqrt(coastCov(axisIdx, axisIdx));
-                end % ELSE: within the bound: the axis is left as it is
+            for idx = 1:numel(states)
+                stateIdx = states(idx);
+                if (coastCov(stateIdx, stateIdx) > sigmaMax * sigmaMax)
+                    scale(stateIdx) = sigmaMax / sqrt(coastCov(stateIdx, stateIdx));
+                end % ELSE: within the bound: the state is left as it is
             end
             coastCovBound = zeros(n, n);
             for rowIdx = 1:n                       % element loops: deterministic, no temporaries for Coder

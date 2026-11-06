@@ -199,7 +199,13 @@ the protection level, about 60 m at that moment, and the recovery admits
 an error within the PL. For a gate whose purpose is to keep the nav off a
 spoof that is not acceptable, so the re-admission tests use the coast
 covariance bounded by `COAST_SIGMA_MAX` (3 m, `STRUCT_SPF.boundCoastCov`,
-a congruence scaling that keeps the matrix positive semi-definite), and
+a congruence scaling that keeps the matrix positive semi-definite) on the
+`COAST_BOUND_STATES`, the NED position and the receiver clock bias: every
+range row carries the clock, so an offset common to all rows is absorbed
+by a clock variance that grows freely through the coast (run 4 of the
+matrix, a 20 m D step, with the position bounded alone: the chi-square
+passed on 60 % of the coast epochs and the coast CPI fell from 6 to 2
+over the 100 s, the spoof held only by the CPI against the coast), and
 the first probation window opens on the coast with that covariance so the
 trial's first update counts. With 5 m range rows the re-validation then
 refuses any offset above about 24 m for as long as it lasts, the probation

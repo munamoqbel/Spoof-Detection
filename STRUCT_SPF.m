@@ -156,20 +156,27 @@ classdef STRUCT_SPF
             % where k sigma_C covers a spoof offset the paper's recovery
             % re-admits the GNSS as an error within the protection level
             % (measured: a 30 m step re-admitted 57 s after the latch at a
-            % coast sigma of 6 m). Here no monitored position sigma exceeds
-            % COAST_SIGMA_MAX: the matrix is scaled by congruence (d P d'),
-            % which keeps it symmetric positive semi-definite and lets the
-            % cross terms follow the bounded axes. The coast budget and the
-            % nav's own sigma keep using the unbounded P_C.
+            % coast sigma of 6 m). Here no sigma of the COAST_BOUND_STATES
+            % exceeds COAST_SIGMA_MAX: the NED position, and the receiver
+            % clock bias, which every range row carries, so that an offset
+            % common to all rows (a clock spoof, most of a vertical one) is
+            % not absorbed by a clock variance growing freely through the
+            % coast (measured on a 20 m D step: the chi-square passed on 60 %
+            % of the coast epochs and the coast CPI fell from 6 to 2 over
+            % 100 s with the position bounded alone). The matrix is scaled by
+            % congruence (d P d'), which keeps it symmetric positive
+            % semi-definite and lets the cross terms follow the bounded
+            % states. The coast budget and the nav's own sigma keep using the
+            % unbounded P_C.
             n = CST_gnssHybrid.NO_STATES;
-            axes = CST_spfParam.MONITORED_AXES;
+            states = CST_spfParam.COAST_BOUND_STATES;
             sigmaMax = CST_spfParam.COAST_SIGMA_MAX;
             scale = ones(n, 1);
-            for idx = 1:numel(axes)
-                axisIdx = axes(idx);
-                if (coastCov(axisIdx, axisIdx) > sigmaMax * sigmaMax)
-                    scale(axisIdx) = sigmaMax / sqrt(coastCov(axisIdx, axisIdx));
-                end % ELSE: within the bound: the axis is left as it is
+            for idx = 1:numel(states)
+                stateIdx = states(idx);
+                if (coastCov(stateIdx, stateIdx) > sigmaMax * sigmaMax)
+                    scale(stateIdx) = sigmaMax / sqrt(coastCov(stateIdx, stateIdx));
+                end % ELSE: within the bound: the state is left as it is
             end
             coastCovBound = zeros(n, n);
             for rowIdx = 1:n                       % element loops: deterministic, no temporaries for Coder

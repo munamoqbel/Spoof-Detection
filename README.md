@@ -324,7 +324,12 @@ below T_N, so what the monitors would latch on is not re-admitted;
 `docs/HOST_DECISIONS.md` section 9 has the measurement behind it. Through
 the warm-up the monitors run in shadow and a shadow alarm restarts the
 arming count, so a start transient delays the arming instead of latching
-right after it (section 10).
+right after it (section 10). The return path (section 12) keeps long
+INS-only coasts beside the anchor and reads a latch, or a COAST epoch, as
+the end of a followed spoof when the nav had wandered from the long coast
+and the GNSS lands back on it: the nav is corrected back to the inertial
+truth and the clean GNSS is re-admitted in seconds instead of being
+refused as a spoof.
 
 `tools/measNoiseCheck.m` shows the measurement noise the gate was handed,
 epoch by epoch over a window: the range rows in the record, the largest

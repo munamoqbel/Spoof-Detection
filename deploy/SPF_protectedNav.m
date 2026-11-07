@@ -50,6 +50,17 @@
 %   would latch on stays refused however long the coast; coastBudgetExceeded (coast PL
 %   above ARM_PL_MAX, or COAST_BUDGET_EPOCHS passed) says the gate can
 %   no longer certify a re-validation and the host may reset.
+% - The return path: RETURN_BANK long INS-only coasts are kept beside the
+%   anchor, restarted in turn (the oldest spans 80 to 120 s). At a latch,
+%   and on every COAST epoch, the position the rows ask for is read
+%   against the oldest: when the nav had wandered more than RETURN_WANDER
+%   from it and the GNSS lands within RETURN_RADIUS of it, the event is
+%   the end of a followed spoof, not an onset (eventReturn): the nav is
+%   corrected back to the long coast, velocity included (a correction in
+%   COAST goes through the host's setKF as a latch does), and the bound's
+%   floor becomes that coast's own sigma, so the clean GNSS re-validates;
+%   the first probation window keeps the short bound. Otherwise nothing
+%   changes.
 %
 % REQUIREMENT TRACEABILITY:
 % Paper Sec. 5 recovery: detection and latch, re-validation (Guide
@@ -115,8 +126,10 @@ switch sys.mode
         end
 
         if (~armedBefore)
-            % a warm-up epoch, the arming one included: no latch, the anchor follows the solution
-            sys.anchor = STRUCT_SPF.setAnchor(true, zeros(numStates, 1), kfMeas.postCov, uint32(epoch));
+            % a warm-up epoch, the arming one included: no latch, the anchor follows the solution, the long coasts
+            % start with the arming
+            sys.anchor    = STRUCT_SPF.setAnchor(true, zeros(numStates, 1), kfMeas.postCov, uint32(epoch));
+            sys.longCoast = STRUCT_SPF.zeroLongCoast;
         else
             % 2. monitor bank on the host increments
             [sys.pool, report] = SPF_monitorPool(sys.pool, kfMeas, propTel);
@@ -127,6 +140,8 @@ switch sys.mode
                 sys.anchor.covariance = Phi * sys.anchor.covariance * Phi' + Q;
                 sys.anchor.covariance = (sys.anchor.covariance + sys.anchor.covariance') / 2;
             end
+            % 2c. the long coasts of the return path kept live the same way, restarted in turn
+            sys.longCoast = SPF_longCoastStep(sys.longCoast, Phi, Q, kfIncrement, kfMeas.postCov, uint32(epoch), true);
 
             info.ssAlarm            = report.ssAlarm;
             info.cpiAlarm           = report.cpiAlarm;
@@ -148,19 +163,41 @@ switch sys.mode
             if (report.anyAlarm)
                 info.eventLatched = true;
                 anchorAge = uint32(epoch) - sys.anchor.epoch;
+                % a return or an onset? the GNSS lands where the inertial sensors alone would have carried the vehicle
+                % over the last minutes while the nav had wandered from there: the end of a followed spoof
+                % The wander is the anchor's (the nav before the event): a
+                % latch that comes a few epochs late, once the KF has already
+                % moved towards the returning GNSS, still reads as a return.
+                if (sys.anchor.valid)
+                    refSep = sys.anchor.separation;
+                else
+                    refSep = kfIncrement;                          % no anchor: the nav before this update
+                end
+                [isReturn, jLong, info] = SPF_returnCheck(sys.longCoast, kfMeas, kfIncrement, refSep, info);
 
-                if (sys.anchor.valid) && (anchorAge <= CST_spfParam.MAX_ANCHOR_AGE)
-                    % fall back to the certified-clean coast
+                if (isReturn)
+                    % back to the long coast, velocity included; the coast's uncertainty is that coast's own
+                    applyCorrection       = true;
+                    correction            = -sys.longCoast.separation(:, jLong);
+                    navState              = kfMeas.postState + correction;
+                    sys.coastCov          = sys.longCoast.covariance(:, :, jLong);
+                    info.eventAnchorEpoch = sys.longCoast.epoch(jLong);
+                    info.eventReturn      = true;
+                    sys.longCoast         = STRUCT_SPF.zeroLongCoast;
+                elseif (sys.anchor.valid) && (anchorAge <= CST_spfParam.MAX_ANCHOR_AGE)
+                    % fall back to the certified-clean coast; the long coasts follow the nav
                     applyCorrection       = true;
                     correction            = -sys.anchor.separation;
                     navState              = kfMeas.postState + correction;
                     sys.coastCov          = sys.anchor.covariance;
                     info.eventAnchorEpoch = sys.anchor.epoch;
+                    sys.longCoast         = SPF_longCoastShift(sys.longCoast, correction);
                 else
                     % no usable anchor: the current solution is frozen
                     info.eventAnchorEpoch = uint32(0);
                     info.anchorMissing    = true;
                 end
+                sys.sigmaLatch = SPF_sigmaOf(sys.coastCov);   % the floor of the bound: the coast's own sigma at the latch
 
                 sys.pool       = STRUCT_SPF.closeAllWindows(sys.pool);
                 sys.dwellCount = 0;
@@ -181,11 +218,32 @@ switch sys.mode
         sys.coastCount = sys.coastCount + 1;
         sys.coastCov   = Phi * sys.coastCov * Phi' + Q;
         sys.coastCov   = (sys.coastCov + sys.coastCov') / 2;
-        coastCovBound  = STRUCT_SPF.boundCoastCov(sys.coastCov);   % the coast as the re-admission tests may use it
 
-        % 2. the raw GNSS against the coast; the operational KF is not updated, so prior = coast
-        sys.probSep = zeros(numStates, 1);
+        % 1b. the long coasts kept live (no update in COAST: no increment), and the return read here too: the clean
+        %     GNSS back after a followed spoof reaches the gate only once the host's spike filter has released its rows
+        sys.longCoast = SPF_longCoastStep(sys.longCoast, Phi, Q, zeros(numStates, 1), kfMeas.postCov, uint32(epoch), false);
+        [isReturn, jLong, info] = SPF_returnCheck(sys.longCoast, kfMeas, zeros(numStates, 1), zeros(numStates, 1), info);
         coastMinusPrior = zeros(numStates, 1);
+        if (isReturn)
+            % back to the long coast, velocity included; the coast's uncertainty is that coast's own; the operational
+            % KF is the coast here, so the correction is relative to the prior
+            applyCorrection       = true;
+            correction            = -sys.longCoast.separation(:, jLong);
+            navState              = kfMeas.priorState + correction;
+            sys.coastCov          = sys.longCoast.covariance(:, :, jLong);
+            sys.sigmaLatch        = SPF_sigmaOf(sys.coastCov);
+            info.eventReturn      = true;
+            info.eventAnchorEpoch = sys.longCoast.epoch(jLong);
+            sys.longCoast         = STRUCT_SPF.zeroLongCoast;
+            sys.dwellCount        = 0;
+            sys.pool              = STRUCT_SPF.closeAllWindows(sys.pool);
+            coastMinusPrior       = correction;             % this epoch's rows are read against the new coast
+        end
+        coastCovBound = STRUCT_SPF.boundCoastCov(sys.coastCov, sys.sigmaLatch);        % the coast as the re-admission tests may use it
+        coastCovOpen  = STRUCT_SPF.boundCoastCov(sys.coastCov, zeros(numStates, 1));   % the first probation window keeps the short bound
+
+        % 2. the raw GNSS against the coast; the operational KF is not updated, so prior = coast (the new one on a return)
+        sys.probSep = zeros(numStates, 1);
         [passed, q_value, revalFault] = SPF_revalidation(kfMeas.innovation, kfMeas.obsMatrix, ...
             kfMeas.measNoiseCov, kfMeas.numMeas, coastMinusPrior, coastCovBound);
         info.qReval = q_value;
@@ -195,6 +253,7 @@ switch sys.mode
         %     increment: GNSS the monitors would latch on is not re-admitted (B and T_N as in NOMINAL), whatever the chi-square says
         coastS = kfMeas.obsMatrix * coastCovBound * kfMeas.obsMatrix' + kfMeas.measNoiseCov;
         kfMeasCoast = kfMeas;
+        kfMeasCoast.innovation    = kfMeas.innovation - kfMeas.obsMatrix * coastMinusPrior;
         kfMeasCoast.innovationCov = (coastS + coastS') / 2;
         kfMeasCoast.postState     = kfMeas.priorState;
         [sys.pool, report] = SPF_monitorPool(sys.pool, kfMeasCoast, propTel);
@@ -219,7 +278,7 @@ switch sys.mode
             % the first probation window opens on the coast with the bounded covariance, so the trial's first
             % update counts in its separation (otherwise a trial that jumps onto a spoof in one update is seen by nothing)
             kfMeasOpen         = kfMeas;
-            kfMeasOpen.postCov = coastCovBound;
+            kfMeasOpen.postCov = coastCovOpen;
             sys.pool           = STRUCT_SPF.openWindow(sys.pool, kfMeasOpen);
             sys.mode           = CST_spfMode.PROBATION;
             kfCommand = STRUCT_SPF.setCommand(true);
@@ -229,11 +288,12 @@ switch sys.mode
     case CST_spfMode.PROBATION
     % ==================================================================
 
-        % 1. the protected output stays on the coast (E31)
+        % 1. the protected output stays on the coast (E31); the long coasts kept live
         sys.coastCount = sys.coastCount + 1;
         sys.coastCov   = Phi * sys.coastCov * Phi' + Q;
         sys.coastCov   = (sys.coastCov + sys.coastCov') / 2;
-        coastCovBound  = STRUCT_SPF.boundCoastCov(sys.coastCov);   % the coast as the re-admission tests may use it
+        sys.longCoast  = SPF_longCoastStep(sys.longCoast, Phi, Q, zeros(numStates, 1), kfMeas.postCov, uint32(epoch), false);
+        coastCovBound  = STRUCT_SPF.boundCoastCov(sys.coastCov, sys.sigmaLatch);   % the coast as the re-admission tests may use it
 
         % 2. diagnostic: the GNSS against the coast on the trial's innovation
         coastMinusPrior = -(Phi * sys.probSep);
@@ -281,6 +341,8 @@ switch sys.mode
                 sys.anchor.separation = zeros(numStates, 1);
                 sys.anchor.covariance = kfMeas.postCov;
                 sys.anchor.epoch      = uint32(epoch);
+                sys.longCoast         = STRUCT_SPF.zeroLongCoast;   % the long coasts start again on the new solution
+                sys.sigmaLatch        = zeros(numStates, 1);
 
                 sys.probSep    = zeros(numStates, 1);
                 sys.coastCount = 0;
@@ -312,3 +374,123 @@ spoofTel = STRUCT_SPF.setTel(info, kfCommand, nav);
 
 end
 %------------------------------------------------------------------------
+
+function [longCoast] = SPF_longCoastStep(longCoast, Phi, Q, increment, postCov, epoch, inNominal)
+% the long coasts kept live (E28, E31 in increment form) and, in NOMINAL, restarted in turn every RETURN_RESTART epochs
+numStates = CST_gnssHybrid.NO_STATES;
+nb = double(CST_spfParam.RETURN_BANK);
+for idx = 1:nb
+    if (longCoast.epoch(idx) > 0)
+        longCoast.separation(:, idx) = Phi * longCoast.separation(:, idx) + increment;
+        covNext = Phi * longCoast.covariance(:, :, idx) * Phi' + Q;
+        longCoast.covariance(:, :, idx) = (covNext + covNext') / 2;
+    end
+end
+if (inNominal) && (epoch >= longCoast.restartAt)
+    idx = double(longCoast.next);
+    longCoast.separation(:, idx)    = zeros(numStates, 1);
+    longCoast.covariance(:, :, idx) = postCov;
+    longCoast.epoch(idx)            = epoch;
+    longCoast.next                  = uint8(mod(idx, nb) + 1);
+    longCoast.restartAt             = epoch + CST_spfParam.RETURN_RESTART;
+end
+end
+
+function [longCoast] = SPF_longCoastShift(longCoast, correction)
+% the nav moved by correction: every started long coast's separation (nav minus coast) moves with it
+nb = double(CST_spfParam.RETURN_BANK);
+for idx = 1:nb
+    if (longCoast.epoch(idx) > 0)
+        longCoast.separation(:, idx) = longCoast.separation(:, idx) + correction;
+    end
+end
+end
+
+function [isReturn, jLong, info] = SPF_returnCheck(longCoast, kfMeas, increment, refSep, info)
+% the return check against the oldest long coast: the horizontal wander from it of the nav before the event (the
+% separation refSep: the anchor's at a latch, zero for the coasting nav in COAST), and where the position the rows ask
+% for lands relative to it; a return when the wander exceeds RETURN_WANDER and the landing is within RETURN_RADIUS
+% (the GNSS agrees with the inertial sensors while the nav does not)
+isReturn = false;
+jLong    = 1;
+found    = false;
+oldest   = uint32(0);
+nb = double(CST_spfParam.RETURN_BANK);
+for idx = 1:nb
+    if (longCoast.epoch(idx) > 0)
+        if (~found) || (longCoast.epoch(idx) < oldest)
+            oldest = longCoast.epoch(idx);
+            jLong  = idx;
+            found  = true;
+        end
+    end
+end
+if (found)
+    [dHat, dHatOk] = SPF_positionAsked(kfMeas);
+    if (dHatOk)
+        wander2  = 0.0;
+        landing2 = 0.0;
+        for idx = 1:2                                            % the horizontal axes
+            axisIdx   = CST_spfParam.MONITORED_AXES(idx);
+            sepBefore = longCoast.separation(axisIdx, jLong) - increment(axisIdx);   % nav minus the long coast before this update
+            sepRef    = longCoast.separation(axisIdx, jLong) - refSep(axisIdx);      % the nav before the event minus the long coast
+            wander2   = wander2 + sepRef * sepRef;
+            landing2  = landing2 + (dHat(idx) + sepBefore) * (dHat(idx) + sepBefore);
+        end
+        info.returnChecked = true;
+        info.returnWander  = sqrt(wander2);
+        info.returnLanding = sqrt(landing2);
+        isReturn = (info.returnWander >= CST_spfParam.RETURN_WANDER) && (info.returnLanding <= CST_spfParam.RETURN_RADIUS);
+    end
+end
+end
+
+function [dHat, ok] = SPF_positionAsked(kfMeas)
+% the position offset the rows ask for on the monitored axes, f' S^-1 gamma / f' S^-1 f per axis (the CPI
+% projection with the full S); ok false with fewer than REVAL_MIN_MEAS rows or an unusable S
+maxMeas = double(CST_spfParam.MAX_MEAS);
+numMeas = double(kfMeas.numMeas);
+dHat = zeros(1, 3);
+ok   = false;
+if (numMeas >= double(CST_spfParam.REVAL_MIN_MEAS))
+    innovationCov = kfMeas.innovationCov;
+    padValue = max(max(diag(innovationCov)), 1.0);
+    varianceOk = true;
+    for rowIdx = 1:maxMeas
+        if (rowIdx > numMeas)
+            innovationCov(rowIdx, rowIdx) = padValue;             % padding diagonal: non-singular for matrixInv
+        elseif ~(innovationCov(rowIdx, rowIdx) > 0.0)
+            varianceOk = false;
+        end
+    end
+    [sInverse, invInvalid] = matrixInv(innovationCov);
+    if (varianceOk) && (~invInvalid)
+        sInvInnovation = sInverse * kfMeas.innovation;
+        ok = true;
+        for idx = 1:3
+            projection     = kfMeas.obsMatrix(:, CST_spfParam.MONITORED_AXES(idx));
+            sInvProjection = sInverse * projection;
+            gammaProjection  = 0.0;
+            sigma2Projection = 0.0;
+            for rowIdx = 1:maxMeas                                % element loop: deterministic rounding
+                gammaProjection  = gammaProjection + projection(rowIdx) * sInvInnovation(rowIdx);
+                sigma2Projection = sigma2Projection + projection(rowIdx) * sInvProjection(rowIdx);
+            end
+            if (sigma2Projection > 0.0) && isfinite(sigma2Projection) && isfinite(gammaProjection)
+                dHat(idx) = gammaProjection / sigma2Projection;
+            else
+                ok = false;
+            end
+        end
+    end
+end
+end
+
+function [sigma] = SPF_sigmaOf(covariance)
+% the square root of the diagonal, floored at zero
+numStates = CST_gnssHybrid.NO_STATES;
+sigma = zeros(numStates, 1);
+for idx = 1:numStates
+    sigma(idx) = sqrt(max(covariance(idx, idx), 0.0));
+end
+end

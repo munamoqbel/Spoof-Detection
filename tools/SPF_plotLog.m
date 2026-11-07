@@ -56,8 +56,11 @@ plot(ev(spfLog.evLatch), 2*ones(size(ev(spfLog.evLatch))), 'rv', 'MarkerFaceColo
 plot(ev(spfLog.evProbStart), 3*ones(size(ev(spfLog.evProbStart))), 'b^', 'MarkerFaceColor', 'b');
 plot(ev(spfLog.evVeto), 2*ones(size(ev(spfLog.evVeto))), 'mx', 'MarkerSize', 8, 'LineWidth', 1.5);
 plot(ev(spfLog.evHandback), ones(size(ev(spfLog.evHandback))), 'go', 'MarkerFaceColor', 'g');
+if isfield(spfLog, 'evReturn')
+    plot(ev(spfLog.evReturn), 2*ones(size(ev(spfLog.evReturn))), 'cs', 'MarkerFaceColor', 'c', 'MarkerSize', 8);
+end
 yticks([1 2 3]); yticklabels({'NOMINAL', 'COAST', 'PROBATION'}); ylim([0.5 3.5]); grid on;
-ylabel('mode'); title('gate mode (grey: warm-up, not armed; v latch, ^ probation, x veto, o hand-back)');
+ylabel('mode'); title('gate mode (grey: warm-up, not armed; v latch, ^ probation, x veto, o hand-back, square return)');
 subplot(2,1,2);
 stairs(t, spfLog.numMeas(1:n), 'k'); grid on; ylabel('numMeas'); xlabel('t [s]');
 

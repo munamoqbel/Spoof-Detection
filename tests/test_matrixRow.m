@@ -59,7 +59,14 @@ okC = r1.revalComputed == 73 && r1.revalPassed == 28 && r1.rowsCoast == 9 && r1.
 scn3 = struct('kind', 'step', 'tOn', 100, 'tOff', 160, 'size', 20, 'dirNed', [1 0 0]);
 fprintf('--- the probation opening while the spoof is on ---\n');
 r4 = matrixRow(L, tKf, [], scn3, 'into the spoof');
-okC = okC && r4.probationInSpoof && abs(r4.handbackDelay - (139 - 160)) < 1e-9 && r4.plAtHandback == 25 && r1.plAtHandback == 25 ...
+% the latch read as an onset and a return in COAST at 112 s; the course table carries the landing column
+L.returnWander(206) = 1;  L.returnLanding(206) = 40;  L.returnLanding(208) = 31.5;
+L.evReturn = 225;  L.returnWander(225) = 22;  L.returnLanding(225) = 4;
+fprintf('--- a return in COAST ---\n');
+r5 = matrixRow(L, tKf, [], scn, 'run 3 return');
+matrixTable([r1 r5]);
+okC = okC && abs(r5.tReturn - tKf(225)) < 1e-9 && isnan(r1.tReturn) && isnan(r4.tReturn) ...
+   && r4.probationInSpoof && abs(r4.handbackDelay - (139 - 160)) < 1e-9 && r4.plAtHandback == 25 && r1.plAtHandback == 25 ...
    && isfinite(r1.coastCpiMin) && r1.coastCpiMin < 0.35 && r1.coastCpiMed < 0.35 && isnan(r2.coastCpiMin);
 if ok1 && ok2 && ok3 && okC, fprintf('=== test_matrixRow PASS ===\n');
 else, fprintf('ok1 %d ok2 %d ok3 %d okC %d\n=== test_matrixRow FAIL ===\n', ok1, ok2, ok3, okC); end

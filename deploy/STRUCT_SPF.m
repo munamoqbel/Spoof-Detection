@@ -136,7 +136,7 @@ classdef STRUCT_SPF
                 innovationCovHost, measNoiseHP);
         end
 
-        function [coastCovBound] = boundCoastCov(coastCov)
+        function [coastCovBound] = boundCoastCov(coastCov, sigmaFloor)
             % the coast covariance as the re-admission tests may use it: no
             % sigma of the COAST_BOUND_STATES (the NED position and the clock
             % bias, which every range row carries) above COAST_SIGMA_MAX, the
@@ -148,8 +148,9 @@ classdef STRUCT_SPF
             scale = ones(n, 1);
             for idx = 1:numel(states)
                 stateIdx = states(idx);
-                if (coastCov(stateIdx, stateIdx) > sigmaMax * sigmaMax)
-                    scale(stateIdx) = sigmaMax / sqrt(coastCov(stateIdx, stateIdx));
+                cap = max(sigmaMax, sigmaFloor(stateIdx));   % the floor: the coast's own sigma at the latch
+                if (coastCov(stateIdx, stateIdx) > cap * cap)
+                    scale(stateIdx) = cap / sqrt(coastCov(stateIdx, stateIdx));
                 end % ELSE: within the bound: the state is left as it is
             end
             coastCovBound = zeros(n, n);
@@ -337,8 +338,26 @@ classdef STRUCT_SPF
 
         end
 
+        function [longCoast] = setLongCoast(separation, covariance, epoch, next, restartAt)
+            % the long coasts kept beside the anchor: separation(:, i) = host solution minus an INS-only coast
+            % started at epoch(i) (0 = not started), covariance(:, :, i) its P_C; restarted in turn every
+            % RETURN_RESTART epochs (next, restartAt), so the oldest always spans 80 to 120 s
+            longCoast = struct( ...
+                'separation', separation, ...       % [n x RETURN_BANK]
+                'covariance', covariance, ...       % [n x n x RETURN_BANK]
+                'epoch',      uint32(epoch), ...    % [1 x RETURN_BANK] start epoch, 0 = not started
+                'next',       uint8(next), ...      % the one restarted next
+                'restartAt',  uint32(restartAt));   % the epoch of the next restart
+        end
+
+        function [longCoast] = zeroLongCoast
+            n  = CST_gnssHybrid.NO_STATES;
+            nb = double(CST_spfParam.RETURN_BANK);
+            longCoast = STRUCT_SPF.setLongCoast(zeros(n, nb), zeros(n, n, nb), zeros(1, nb), 1, 0);
+        end
+
         function [sys] = setSys(mode, coastCov, probSep, pool, anchor, ...
-                dwellCount, probationCount, coastCount, armed, armCount)
+                dwellCount, probationCount, coastCount, armed, armCount, longCoast, sigmaLatch)
 
             sys = struct( ...
                 'mode',           mode, ...           % CST_spfMode
@@ -350,7 +369,9 @@ classdef STRUCT_SPF
                 'probationCount', probationCount, ... % quiet probation epochs
                 'coastCount',     coastCount, ...     % epochs in COAST + PROBATION
                 'armed',          logical(armed), ... % monitors active (after the warm-up)
-                'armCount',       armCount);          % qualifying epochs so far
+                'armCount',       armCount, ...       % qualifying epochs so far
+                'longCoast',      longCoast, ...      % the long coasts of the return path
+                'sigmaLatch',     sigmaLatch);        % [n x 1] the coast's sigma at the latch: the bound's floor
         end
 
         function [sys] = zeroSys
@@ -366,9 +387,11 @@ classdef STRUCT_SPF
             coastCount = 0.0;
             armed = false;
             armCount = 0.0;
+            longCoast = STRUCT_SPF.zeroLongCoast;
+            sigmaLatch = zeros(n, 1);
 
             sys = STRUCT_SPF.setSys(mode, coastCov, probSep, pool, ...
-                anchor, dwellCount, probationCount, coastCount, armed, armCount);
+                anchor, dwellCount, probationCount, coastCount, armed, armCount, longCoast, sigmaLatch);
         end
 
         function [altXCheck] = setAltXCheck(suspect, altDiff)
@@ -410,7 +433,7 @@ classdef STRUCT_SPF
                 dwellCount, eventLatched, eventAnchorEpoch, eventProbationStarted,...
                 eventProbationVetoed, eventHandback, anchorMissing, coastEpochs, ...
                 inputFault, numMeasClamped, solveFault, ssRatio, cpiRatio, armed, ...
-                resetInhibit, coastBudgetExceeded)
+                resetInhibit, coastBudgetExceeded, eventReturn, returnChecked, returnWander, returnLanding)
 
             info = struct( ...
                 'mode',                  mode, ...
@@ -435,7 +458,11 @@ classdef STRUCT_SPF
                 'cpiRatio',              cpiRatio, ...                % [1x3] CPI margin, alarm at > 1
                 'armed',                 logical(armed), ...          % monitors active
                 'resetInhibit',          logical(resetInhibit), ...   % the host must not reset this epoch
-                'coastBudgetExceeded',   logical(coastBudgetExceeded)); % coast PL above ARM_PL_MAX or COAST_BUDGET_EPOCHS passed: the host may reset
+                'coastBudgetExceeded',   logical(coastBudgetExceeded), ... % coast PL above ARM_PL_MAX or COAST_BUDGET_EPOCHS passed: the host may reset
+                'eventReturn',           logical(eventReturn), ...   % a return: the nav corrected back to the long coast (latch or COAST)
+                'returnChecked',         logical(returnChecked), ... % the return check ran this epoch (a latch, or a COAST epoch with rows)
+                'returnWander',          returnWander, ...           % m: the nav's horizontal wander from the long coast
+                'returnLanding',         returnLanding); % m: where the GNSS lands, horizontal, from the long coast
         end
 
         function [info] = zeroInfo
@@ -463,13 +490,17 @@ classdef STRUCT_SPF
             armed                 = false;
             resetInhibit          = false;
             coastBudgetExceeded   = false;
+            eventReturn           = false;
+            returnChecked         = false;
+            returnWander          = 0.0;
+            returnLanding         = 0.0;
 
             info = STRUCT_SPF.setInfo(mode, ssAlarm, cpiAlarm, ...
                 alarmPerAxis, maxProtectionLevel, qReval, revalComputed,...
                 dwellCount, eventLatched, eventAnchorEpoch, eventProbationStarted,...
                 eventProbationVetoed, eventHandback, anchorMissing, coastEpochs, ...
                 inputFault, numMeasClamped, solveFault, ssRatio, cpiRatio, armed, ...
-                resetInhibit, coastBudgetExceeded);
+                resetInhibit, coastBudgetExceeded, eventReturn, returnChecked, returnWander, returnLanding);
         end
 
         function [command] = setCommand(startTrial)

@@ -43,6 +43,8 @@ mode = spfLog.mode(1:n);  armed = logical(spfLog.armed(1:n));
 ssR = spfLog.ssRatio(1:n, :);  cpiR = spfLog.cpiRatio(1:n, :);
 ev = @(f) double(spfLog.(f)(spfLog.(f) >= 1 & spfLog.(f) <= n));
 latches = ev('evLatch');  handbacks = ev('evHandback');  vetoes = ev('evVeto');  probs = ev('evProbStart');
+returns = [];  tReturn = NaN;                                            % returns: the nav corrected back to the long INS coast
+if isfield(spfLog, 'evReturn'), returns = ev('evReturn'); end
 fprintf('matrixRow: %s, %s %g %s on %.2f to %.2f s (scenario), records to %.2f s', name, scn.kind, scn.size, unitOf(scn.kind), tOn, tOff, tEnd);
 if any(armed), fprintf('; armed from %.2f s\n', tKf(find(armed, 1))); else, fprintf('; never armed\n'); end
 %% the latch and the hand-back
@@ -130,7 +132,21 @@ else
     if ~isempty(relatch)
         fprintf('   re-latched %d time(s) within the window and the minute after it, at%s\n', numel(relatch), sprintf(' %.2f s', tKf(relatch)));
     end
+    if isfield(spfLog, 'returnLanding') && isfinite(spfLog.returnLanding(kL))
+        fprintf('   at the latch the nav had wandered %.1f m from the long INS coast and the GNSS landed %.1f m from it', ...
+            spfLog.returnWander(kL), spfLog.returnLanding(kL));
+        if any(returns == kL), fprintf(': a return, the nav corrected back to that coast\n'); else, fprintf(': an onset, latched on the anchor\n'); end
+    end
     fprintf('   timeline (mode and the time it starts): %s\n', timeline);
+end
+retIn = returns(returns >= find(tKf >= tOn, 1) & returns <= kStop);
+if ~isempty(retIn)
+    tReturn = tKf(retIn(1));
+    for r = retIn(:)'
+        fprintf('   return at %.2f s: the GNSS landed %.1f m from the long INS coast while the nav had wandered %.1f m from it; the nav corrected\n', ...
+            tKf(r), spfLog.returnLanding(r), spfLog.returnWander(r));
+        fprintf('   back to that coast, velocity included, and the re-validation loosened to the coast''s own uncertainty\n');
+    end
 end
 fprintf('   largest ratio on the NOMINAL epochs from tOn to the later of tOff and the hand-back: SS %.2f (%s), CPI %.2f (%s); on the clean armed\n', ...
     maxSsIn, axSs, maxCpiIn, axCpi);
@@ -168,14 +184,24 @@ if ~isempty(kL) && isfield(spfLog, 'qReval')
     probationInSpoof = ~isempty(kP) && tKf(kP) < tOff;
     pick = unique([segC(1:min(8, numel(segC))), segC(round(linspace(1, numel(segC), min(10, numel(segC)))))]);
     fprintf('   course (the first 8 epochs in a row, then spread to the end):\n');
-    fprintf('   %10s %5s %5s %9s %8s %5s %5s %7s\n', 't [s]', 'mode', 'rows', 'q', 'thr', 'pass', 'dwell', 'cpi');
+    hasLand = isfield(spfLog, 'returnLanding');
+    fprintf('   %10s %5s %5s %9s %8s %5s %5s %7s', 't [s]', 'mode', 'rows', 'q', 'thr', 'pass', 'dwell', 'cpi');
+    if hasLand, fprintf(' %7s', 'land'); end
+    fprintf('\n');
     letters2 = '?NCP';
     for k = pick
         i = k - kL + 1;
-        fprintf('   %10.2f %5s %5d %9.1f %8.1f %5s %5d %7.2f\n', tKf(k), letters2(min(max(round(mode(k)) + 1, 1), 4)), rows(i), q(i), thr(i), ...
+        fprintf('   %10.2f %5s %5d %9.1f %8.1f %5s %5d %7.2f', tKf(k), letters2(min(max(round(mode(k)) + 1, 1), 4)), rows(i), q(i), thr(i), ...
             ifelse(pass(i), 'yes', '-'), spfLog.dwell(k), max(cpiR(k, :)));
+        if hasLand, fprintf(' %7s', num2(spfLog.returnLanding(k))); end
+        fprintf('\n');
     end
-    fprintf('   (cpi = the CPI of the innovations against the coast, q/T_N of the window closed that epoch; a gate that logs it holds the dwell while it is above 1)\n');
+    fprintf('   (cpi = the CPI of the innovations against the coast, q/T_N of the window closed that epoch; a gate that logs it holds the dwell while it is above 1');
+    if hasLand
+        fprintf(';\n   land = where the GNSS lands from the long INS coast, m: a return when within %g m while the nav had wandered %g m or more', ...
+            CST_spfParam.RETURN_RADIUS, CST_spfParam.RETURN_WANDER);
+    end
+    fprintf(')\n');
     if probationInSpoof
         fprintf('   VERDICT: the probation opened at %.2f s while the spoof was on (tOff %.2f s): the re-validation passed on the rows and S the host\n', tKf(kP), tOff);
         fprintf('            handed over, a hand-back into the spoof');
@@ -237,7 +263,7 @@ row = struct('name', name, 'kind', scn.kind, 'size', scn.size, 'tOn', tOn, 'tOff
     'sigmaAtHandback', sigmaAtHandback, 'falseAlarms', numel(falseL), 'tFalse', tKf(falseL)', 'faults', faults, 'timeline', timeline, ...
     'revalComputed', revalComputed, 'revalPassed', revalPassed, 'rowsCoast', rowsCoast, 'rowsBefore', rowsBefore, ...
     'qRatioCoast', qRatioCoast, 'tFirstPass', tFirstPass, 'probationInSpoof', probationInSpoof, 'nRelatch', numel(relatch), ...
-    'plAtHandback', plAtHandback, 'coastCpiMin', coastCpiMin, 'coastCpiMed', coastCpiMed);
+    'plAtHandback', plAtHandback, 'coastCpiMin', coastCpiMin, 'coastCpiMed', coastCpiMed, 'tReturn', tReturn);
 end
 
 %------------------------------------------------------------------------
@@ -264,4 +290,8 @@ end
 
 function [s] = ifelse(c, a, b)
 if c, s = a; else, s = b; end
+end
+
+function [s] = num2(x)
+if isnan(x), s = '-'; else, s = sprintf('%.1f', x); end
 end

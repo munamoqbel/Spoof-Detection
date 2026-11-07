@@ -5,19 +5,23 @@ function matrixTable(rows)
 %   the largest SS and CPI ratio from tOn to the hand-back and on the clean epochs, the nav error at the latch
 %   (N E, m), the smallest CPI against the coast while the spoof was on (a gate that logs it; the dwell holds above 1),
 %   the largest horizontal error from tOn to the hand-back, the error at tOff (N E), the hand-back delay
-%   from tOff (s), the coast length (s), the vetoes, the false alarms. A dash is a number the run does not have.
+%   from tOff (s), the coast length (s), the return (the time from tOff at which the gate read the GNSS as back on
+%   the long INS coast and corrected the nav to it, s; a dash without one), the vetoes, the false alarms. A dash is a
+%   number the run does not have.
 %   MATLAB desktop tool, not codegen. Runs under Octave.
 if iscell(rows), rows = [rows{:}]; end
-fprintf('%-14s %-14s %7s %-8s %5s %7s %7s %7s %7s %7s %13s %7s %13s %8s %7s %4s %3s\n', 'run', 'scenario', 'latch', 'monitor', 'ratio', ...
-    'SS in', 'CPI in', 'SS cln', 'CPI cln', 'cstCPI', 'err@latch N E', 'maxHor', 'err@off N E', 'handback', 'coast', 'veto', 'FA');
-fprintf('%-14s %-14s %7s %-8s %5s %7s %7s %7s %7s %7s %13s %7s %13s %8s %7s %4s %3s\n', '', '', '[s]', '', '', '', '', '', '', 'min', '[m]', '[m]', '[m]', '[s]', '[s]', '', '');
+fprintf('%-14s %-14s %7s %-8s %5s %7s %7s %7s %7s %7s %13s %7s %13s %8s %7s %6s %4s %3s\n', 'run', 'scenario', 'latch', 'monitor', 'ratio', ...
+    'SS in', 'CPI in', 'SS cln', 'CPI cln', 'cstCPI', 'err@latch N E', 'maxHor', 'err@off N E', 'handback', 'coast', 'return', 'veto', 'FA');
+fprintf('%-14s %-14s %7s %-8s %5s %7s %7s %7s %7s %7s %13s %7s %13s %8s %7s %6s %4s %3s\n', '', '', '[s]', '', '', '', '', '', '', 'min', '[m]', '[m]', '[m]', '[s]', '[s]', '[s]', '', '');
 for i = 1:numel(rows)
     r = rows(i);
-    fprintf('%-14s %-14s %7s %-8s %5s %7s %7s %7s %7s %7s %13s %7s %13s %8s %7s %4d %3d\n', cut(r.name, 14), ...
+    tRet = NaN;
+    if isfield(r, 'tReturn') && isfinite(r.tReturn), tRet = r.tReturn - r.tOff; end
+    fprintf('%-14s %-14s %7s %-8s %5s %7s %7s %7s %7s %7s %13s %7s %13s %8s %7s %6s %4d %3d\n', cut(r.name, 14), ...
         cut(sprintf('%s %g', r.kind, r.size), 14), num(r.latchDelay, '%.1f'), cut([r.monitor ' ' r.axis], 8), num(r.ratioAtLatch, '%.2f'), ...
         num(r.maxSsIn, '%.2f'), num(r.maxCpiIn, '%.2f'), num(r.maxSsClean, '%.2f'), num(r.maxCpiClean, '%.2f'), num(r.coastCpiMin, '%.2f'), ...
         pair(r.errAtLatch), num(r.maxHorizIn, '%.1f'), pair(r.errAtOff), num(r.handbackDelay, '%.1f'), num(r.coastLen, '%.1f'), ...
-        r.nVeto, r.falseAlarms);
+        num(tRet, '%.1f'), r.nVeto, r.falseAlarms);
 end
 end
 

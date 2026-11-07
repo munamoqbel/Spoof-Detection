@@ -105,6 +105,8 @@ the estimate having no information, not a sign that the attack ended.
 | Event | Flags | `nav.state` | `nav.covar` | `kfCommand` |
 |---|---|---|---|---|
 | Latch | `applyCorrection`, `eventLatched`, `eventAnchorEpoch` | operational `xPost - anchor.separation` | `anchor.covariance` | none |
+| Return at a latch | `applyCorrection`, `eventLatched`, `eventReturn`, `eventAnchorEpoch` (the long coast's start) | operational `xPost - longCoast.separation` | the long coast's covariance | none |
+| Return in COAST | `applyCorrection`, `eventReturn`, `eventAnchorEpoch` (the long coast's start) | coasting `xPrior - longCoast.separation` | the long coast's covariance | none; the mode stays COAST, the dwell restarts |
 | Probation opens | `eventProbationStarted` | none | none | `startTrial = true` |
 | Veto | `eventProbationVetoed` | none | none | none |
 | Commit | `applyCorrection`, `eventHandback` | trial `xPost` | trial `PPost` | none |
@@ -270,3 +272,55 @@ runs on the rows that saw the step least and can pass on a spoofed epoch
 consecutive passes and the CPI against the coast cover it. The gate takes
 the rows as the host gives them; passing the dropped rows as well is not
 needed.
+
+## 12. The return path
+
+Run 5 of the vehicle matrix, a 0.3 m/s east ramp for 100 s: followed, as
+every ramp below about 3.6 m/s is on this host (1.5 m per 5 s window
+against a gate near 18 m, an innovation offset of the rate times the 3 s
+filter lag under the 5 m deadband), 30 m by the end. At the step back the
+gate latched, 2 s later on the rows the spike filter had left, and the
+bound refused the clean GNSS for the rest of the run: the coast, which
+had inherited the ramp's velocity, moved away at 0.3 m/s, 57 m by the end.
+"The GNSS is 30 m from the nav" reads both as a spoof that has jumped and
+as a spoof that has ended; the paper re-admits both after about 60 s, the
+bound refuses both. The inertial sensors tell them apart: in a followed
+spoof the nav has wandered from where the INS alone would have carried it
+over the last minutes, and the returning GNSS lands on that INS coast
+within its drift (7 to 11 m over two minutes on this host); an onset lands
+away from both the nav and the INS coast, and the nav had not wandered.
+
+The gate therefore keeps `RETURN_BANK` long INS-only coasts beside the
+anchor (host solution minus a coast, propagated as the anchor is, started
+in turn every `RETURN_RESTART` epochs so that the oldest spans 80 to 120 s;
+they start with the arming and again after a return and a hand-back). At
+a latch, and on every COAST epoch with rows (the clean GNSS reaches the
+gate only once the spike filter has released its rows, and a followed drag
+can end while the gate already coasts on a later onset), it reads the
+position the rows ask for, the CPI projection with the full S, against the
+oldest long coast: a return when the nav before the event (the anchor at
+a latch, so that a latch a few epochs late still reads right; the coasting
+nav in COAST) had wandered more than `RETURN_WANDER` from it horizontally
+and the GNSS lands within `RETURN_RADIUS` of it. On a return the nav is corrected back to the long
+coast, velocity included (`nav.applyCorrection`, in COAST relative to the
+coasting KF), the coast's uncertainty becomes that coast's own and is the
+floor of the bound (`boundCoastCov(P_C, sigmaLatch)`: no sigma above the
+larger of `COAST_SIGMA_MAX` and the coast's sigma at the latch), so the
+clean GNSS re-validates and the hand-back follows in about 15 s. The first
+probation window keeps the short bound whatever opened the probation, so a
+trial that jumps more than about 20 m is still vetoed. Otherwise nothing
+changes: an onset latches on the anchor as before, and the long coasts
+follow the nav through the correction.
+
+The two radii, 15 m, sit above the two-minute INS drift measured on the
+vehicle and below the smallest step the gate latches on (about 20 m), so
+every return that can occur qualifies and no onset does. What a spoofer
+can get through the door is a hand-back within about `RETURN_RADIUS` plus
+the drift of the truth, after a slow drag the spoofer could make anyway,
+and the first window caps the probation's jump. Vertical returns are not
+read (the GLONASS clock-height pattern reads 7 to 11 m on single epochs
+in D); a ramp longer than the horizon has its last two minutes undone and
+the rest must fit the loosened re-admission; an INS drift beyond 15 m in
+two minutes makes the gate miss a return, which is the stranding of
+before, not a new failure. `test_coastBound` cases E and G hold a
+followed ramp's end and a drag-then-step's end on the synthetic host.

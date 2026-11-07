@@ -57,4 +57,8 @@ if info.eventProbationStarted, spfLog.evProbStart(end+1) = k; end
 if info.eventProbationVetoed,  spfLog.evVeto(end+1)      = k; end
 if info.eventHandback,         spfLog.evHandback(end+1)  = k; end
 if info.anchorMissing,         spfLog.evNoAnchor(end+1)  = k; end
+if isfield(info, 'eventReturn')
+    if info.eventReturn,   spfLog.evReturn(end+1) = k; end
+    if info.returnChecked, spfLog.returnWander(k) = info.returnWander;  spfLog.returnLanding(k) = info.returnLanding; end
+end
 end

@@ -30,7 +30,10 @@
 %                 either): the gate's coast covariance is Phi*P*Phi' + Q of
 %                 exactly this filter.
 %   LATCH/COMMIT  nav.applyCorrection: (nav.state, nav.covar) through the
-%                 NORMAL setKF case, nothing else that epoch.
+%                 NORMAL setKF case, nothing else that epoch. A RETURN (the
+%                 end of a followed spoof, read against the gate's long
+%                 INS-only coast, info.eventReturn) is applied the same way;
+%                 it comes at a latch or on a COAST epoch.
 %   invalid epoch present it to the gate as numMeas = 0 with xPost = xPrior,
 %                 PPost = PPrior (no GNSS, no increment).
 %
@@ -170,7 +173,9 @@
 % %  INPUT is selected before the call:
 % kfEstimatedUpdate = kfPost;
 % if spfTel.nav.applyCorrection
-%     % LATCH (x+ of the operational KF minus the anchor separation) or
+%     % LATCH (x+ of the operational KF minus the anchor separation), a
+%     % RETURN (the long INS coast's separation taken out, at a latch or in
+%     % COAST, info.eventReturn) or
 %     % COMMIT (the trial's x+): a complete (x+, P+) for the OPERATIONAL KF,
 %     % through the normal case. Never write KF.states / KF.covariance
 %     % directly and then call setKF on kfPost: that overwrites the clean

@@ -67,6 +67,10 @@ classdef CST_spfParam
         PROBATION_LENGTH = uint8(18);                     % quiet epochs -> hand-back
         COAST_SIGMA_MAX = 3.0;                            % m: the coast sigma the re-admission tests may use at most, per bounded state
         COAST_BOUND_STATES = [1 2 3 16];                  % the states bounded: the NED position and the receiver clock bias
+        RETURN_BANK = uint8(3);                           % long coasts kept beside the anchor, restarted in turn
+        RETURN_RESTART = uint32(80);                      % epochs between restarts: the oldest spans 160 to 240 epochs
+        RETURN_WANDER = 15.0;                             % m: the nav must have wandered this far from the long coast,
+        RETURN_RADIUS = 15.0;                             % m: and the GNSS must land this close to it, for a return
         MAX_ANCHOR_AGE = uint32(234);                     % epochs: an older anchor is refused at a latch
         MAX_MEAS = CST_gnssHybrid.MAX_MEASURES;           % rows per epoch, the host's bound
 

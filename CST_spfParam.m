@@ -68,6 +68,40 @@
 % below that (two to three minutes on the vehicle INS); beyond it the gate
 % stays in COAST until the coast budget and the host's reset. The budget
 % itself and the nav's own sigma keep using the unbounded P_C.
+% - RETURN_BANK, RETURN_RESTART, RETURN_WANDER, RETURN_RADIUS (the return path):
+% The end of a followed spoof and the onset of a step spoof are the same
+% innovations: "the GNSS is 30 m from the nav". The paper re-admits both
+% once the coast covariance covers the offset; the bound refuses both for
+% as long as the offset lasts, which strands a nav that had followed a
+% slow spoof (measured: a 0.3 m/s ramp followed for 100 s, 30 m; at the
+% step back the gate latched on the clean GNSS and coasted to the end of
+% the run, the coast moving at the ramp's own velocity, 57 m by then).
+% The inertial sensors tell the two apart: in a followed spoof the nav
+% has wandered from where the INS alone would have carried it over the
+% last minutes, and the returning GNSS lands on that INS coast within its
+% drift; a spoof onset lands away from both the nav and the INS coast,
+% and the nav had not wandered. So the gate keeps RETURN_BANK long coasts
+% beside the anchor (host solution minus an INS-only coast, propagated as
+% the anchor is, restarted in turn every RETURN_RESTART epochs so that
+% the oldest always spans 80 to 120 s), and at a latch, and on every
+% COAST epoch (the clean GNSS reaches the gate only once the host's
+% spike filter has released its rows), reads the position the rows ask
+% for against the oldest long coast: a return when the nav before the
+% event (the anchor at a latch, the coasting nav in COAST) had wandered
+% more than RETURN_WANDER from it horizontally and the GNSS lands within
+% RETURN_RADIUS of it. On a return the nav is corrected back to the long
+% coast, velocity included, and the coast's uncertainty becomes that
+% coast's own (the bound's floor, STRUCT_SPF.boundCoastCov), so the clean
+% GNSS re-validates and the hand-back follows in about 15 s; the first
+% probation window keeps the short bound, so a trial that jumps more than
+% about 20 m is still vetoed. Otherwise nothing changes. The two radii sit
+% above the two-minute INS drift measured on the vehicle (7 to 11 m) and
+% below the smallest step the gate latches on (about 20 m), so every
+% return that can occur qualifies and no onset does; the door lets a
+% spoofer in only within about RETURN_RADIUS plus the drift of the truth,
+% after a slow drag the spoofer could make anyway. Vertical returns are
+% not read (the GLONASS clock-height pattern reads 7 to 11 m on single
+% epochs in D).
 % - REVAL_MIN_MEAS:
 % Minimum valid rows for a re-validation pass. The host's measurement
 % vector always carries the pressure-altitude row, so numMeas >= 1 even in
@@ -143,6 +177,14 @@ classdef CST_spfParam
                                                   % first probation window) may use at most, per bounded state
         COAST_BOUND_STATES = [1 2 3 16];          % the states bounded: the NED position and the receiver
                                                   % clock bias (host indices, like MONITORED_AXES)
+        RETURN_BANK = uint8(3);                   % long coasts kept beside the anchor, restarted in turn
+        RETURN_RESTART = uint32(80);              % epochs between restarts: the oldest long coast spans
+                                                  % RETURN_RESTART * (RETURN_BANK - 1) to RETURN_RESTART * RETURN_BANK
+                                                  % epochs, 80 to 120 s here
+        RETURN_WANDER = 15.0;                     % m: the nav must have wandered this far (horizontal) from the
+                                                  % long coast, and
+        RETURN_RADIUS = 15.0;                     % m: the GNSS must land this close (horizontal) to the long
+                                                  % coast, for a latch or a coast epoch to read as a return
         MAX_ANCHOR_AGE = uint32(234);             % epochs, 0.5 s each
         MAX_MEAS = CST_gnssHybrid.MAX_MEASURES;   % max measurement rows per epoch (host class, uint8(51))
 

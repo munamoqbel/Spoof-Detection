@@ -45,6 +45,16 @@ coast below T_N, so what the monitors would latch on is not re-admitted
 coast budget and the host's reset. The budget and the nav's own sigma use
 the unbounded covariance.
 
+The return path: `RETURN_BANK` long INS-only coasts are kept beside the
+anchor, the oldest spanning 80 to 120 s. At a latch and on every COAST
+epoch the position the rows ask for is read against it: when the nav had
+wandered more than `RETURN_WANDER` from that coast and the GNSS lands
+within `RETURN_RADIUS` of it, the event is the end of a followed spoof,
+not an onset (`eventReturn`): the nav is corrected back to the long coast,
+velocity included, through `nav.applyCorrection` (in COAST too), and the
+bound's floor becomes that coast's own sigma, so the clean GNSS
+re-validates; the first probation window keeps the short bound.
+
 Through the warm-up the monitors run in shadow: windows open and close as
 in NOMINAL, the margins are logged, nothing latches and the alarm flags
 stay down, and a shadow alarm restarts the arming count, so the gate arms

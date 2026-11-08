@@ -343,6 +343,19 @@ in). On the vehicle data the host scales R on a spoofed epoch from 5 m to
 up to 15 m per row, which is what kept a 20 m step below the CPI threshold
 and re-validated a 30 m coast into the spoof.
 
+`tools/imuModelCheck.m` reads an IMU model's injected error against the
+datasheet: the model's output with its error terms on minus the output
+with them off on the same input, or the model's own error terms one at a
+time, as delta angles and delta velocities per sample. Per axis it prints
+the constant part (the run's turn-on bias), the per-sample sigma, the
+overlapping Allan deviation, the random walk read at 1 s and the floor
+beyond 10 s with the bias instability it implies, each as a ratio to the
+datasheet, and says whether the floor was reached within the record. The
+gate's coast covariance is honest only if the IMU the host simulates emits
+the datasheet it is designed against; this is the measurement that says
+so without any trajectory (the static run, `docs/HOST_DECISIONS.md`
+section 13).
+
 `tools/cpiReplay.m` replays the CPI monitor on the saved spfMeas records
 over a window and prints, per epoch and axis, the offset the CPI
 projection reads in metres, the sigma of that reading (and what R alone

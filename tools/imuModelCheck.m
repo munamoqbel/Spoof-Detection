@@ -7,7 +7,7 @@ function [res] = imuModelCheck(rec, spec)
 %                                   its output with them off on the same input, or the model's own error terms, one
 %                                   at a time or summed. Rates instead of increments (rad/s, m/s^2): rec.isRate true.
 %   res = imuModelCheck(rec, spec)  spec: the datasheet: arw (deg/sqrt(h)), vrw (m/s/sqrt(h)), gyroBias (deg/h),
-%                                   accBias (micro-g); default the vehicle IMU: 0.06, 0.0147, 0.48, 10.
+%                                   accBias (micro-g); default the vehicle IMU: 0.05, 0.0147, 0.48, 10.
 %   Per axis: the constant part (this run's turn-on bias), the per-sample sigma against the one the datasheet's
 %   white noise gives at this rate, the overlapping Allan deviation from the sample interval to a tenth of the
 %   record, the random walk read at 1 s (white noise: the slope of -1/2) and the floor: the deviation at the
@@ -18,12 +18,12 @@ function [res] = imuModelCheck(rec, spec)
 %   errors; otherwise the white noise still covers the bias terms at this record length, the floor printed is an
 %   upper bound, and a longer record or the bias term on its own reads them. Each reading is
 %   also printed as a ratio to the datasheet: a model that emits the datasheet reads ratios near 1. For the vehicle
-%   IMU the expected readings are 3.6 deg/h and 25 micro-g at 1 s and a floor near 0.32 deg/h and 6.6 micro-g.
+%   IMU the expected readings are 3.0 deg/h and 25 micro-g at 1 s and a floor near 0.32 deg/h and 6.6 micro-g.
 %   Result per channel (res.gyro, res.acc): bias and biasSpec [1 x 3, deg/h or micro-g], sigmaSample and
 %   sigmaSampleSpec (per sample), tau and allan [nTau x 3], rwAt1s, rwSpec and rwRatio, floor, floorTau,
 %   floorSlope, floorReached (per axis), floorSpec (0.664 times the datasheet instability) and floorRatio.
 %   MATLAB desktop tool, not codegen. Runs under Octave.
-if nargin < 2 || isempty(spec), spec = struct('arw', 0.06, 'vrw', 0.0147, 'gyroBias', 0.48, 'accBias', 10); end
+if nargin < 2 || isempty(spec), spec = struct('arw', 0.05, 'vrw', 0.0147, 'gyroBias', 0.48, 'accBias', 10); end
 isRate = isfield(rec, 'isRate') && rec.isRate;
 if ~isfield(rec, 'dt') || isempty(rec.dt), rec.dt = median(diff(rec.t(:))); end   % rec.t: the sample times instead
 res = struct('dt', rec.dt, 'spec', spec);

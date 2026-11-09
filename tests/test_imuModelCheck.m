@@ -10,7 +10,7 @@ here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'tools'));
 rng(1);
 dt = 0.01;  K = 200000;
-arw = 0.06 * pi / 180 / 60;            % rad/sqrt(s)
+arw = 0.05 * pi / 180 / 60;            % rad/sqrt(s)
 vrw = 0.0147 / 60;                     % m/s/sqrt(s)
 gBias = 0.48 * pi / 180 / 3600;        % rad/s, the stability
 aBias = 10 * 9.80665e-6;               % m/s^2

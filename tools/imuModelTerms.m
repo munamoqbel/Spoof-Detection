@@ -24,7 +24,7 @@ function [res] = imuModelTerms(recErrorIMU, recTime, io, spec, verbose)
 %   of -2 to 2 samples: the smallest residual says how the model composes its output and whether the recorded terms
 %   are all that it adds. MATLAB desktop tool, not codegen. Runs under Octave.
 if nargin < 3, io = []; end
-if nargin < 4 || isempty(spec), spec = struct('arw', 0.06, 'vrw', 0.0147, 'gyroBias', 0.48, 'accBias', 10); end
+if nargin < 4 || isempty(spec), spec = struct('arw', 0.05, 'vrw', 0.0147, 'gyroBias', 0.48, 'accBias', 10); end
 if nargin < 5 || isempty(verbose), verbose = false; end
 G = 9.80665;  R2D = 180 / pi;
 t = recTime(:);

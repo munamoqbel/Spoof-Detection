@@ -12,8 +12,14 @@ function [res] = imuModelTerms(recErrorIMU, recTime, io, spec, verbose)
 %                                                   io.fibb, io.wibb [K x 3] (the input specific force m/s^2 and angular
 %                                                   rate rad/s) and io.dVel, io.dAng [K x 3] (the output delta velocity
 %                                                   m/s and delta angle rad). [] to skip.
-%   res = imuModelTerms(..., spec, verbose)         spec: the datasheet as for imuModelCheck; verbose true prints the
-%                                                   full imuModelCheck report of every term (default: the summary only).
+%   res = imuModelTerms(..., spec, verbose)         spec: the datasheet as for imuModelCheck, plus spec.stepDt, the
+%                                                   model's own step (s) when the record is sampled coarser than the
+%                                                   model draws its white noise: a record of every tenth 1 ms draw at
+%                                                   10 ms reads each draw as a 10 ms rate and overstates the white
+%                                                   noise by sqrt(10); with stepDt given, the white-noise readings are
+%                                                   scaled by sqrt(stepDt / dt). Slow terms need no correction.
+%                                                   verbose true prints the full imuModelCheck report of every term
+%                                                   (default: the summary only).
 %   What each term is read for: the noise terms for the random walk at 1 s against the ARW and VRW, and that they
 %   carry no floor; the bias-stability terms for their standard deviation over the record against the datasheet
 %   stability, and for their Allan floor; the random-walk terms for the slope of their Allan deviation (+1/2) and the
@@ -36,11 +42,19 @@ fprintf('   datasheet: ARW %g deg/sqrt(h), VRW %g m/s/sqrt(h), gyro bias stabili
     spec.arw, spec.vrw, spec.gyroBias, spec.accBias);
 res = struct('dt', dt, 'K', K, 'spec', spec);
 term = @(name) termOf(recErrorIMU, name, K);
+whiteScale = 1.0;                                    % the correction of the white-noise readings for a record of single draws
+if isfield(spec, 'stepDt') && ~isempty(spec.stepDt) && spec.stepDt < dt
+    whiteScale = sqrt(spec.stepDt / dt);
+    fprintf('   the model draws its white noise every %.4g s and the record holds every draw at %.4g s: the white-noise\n', spec.stepDt, dt);
+    fprintf('   readings below are scaled by sqrt(%.4g / %.4g) = %.3f (a slow term is read as it is)\n', spec.stepDt, dt, whiteScale);
+end
 
 %% 1. the white noise terms: the random walks at 1 s, no floor
 [gN, aN] = deal(term('rndNoiseGyro'), term('rndNoiseAcc'));
 if ~isempty(gN) || ~isempty(aN)
     c = check(struct('dt', dt, 'gyro', gN, 'acc', aN, 'isRate', true), spec, verbose, 'the noise terms');
+    if isfield(c, 'gyro'), c.gyro.rwAt1s = c.gyro.rwAt1s * whiteScale;  c.gyro.rwRatio = c.gyro.rwRatio * whiteScale; end
+    if isfield(c, 'acc'),  c.acc.rwAt1s  = c.acc.rwAt1s * whiteScale;   c.acc.rwRatio  = c.acc.rwRatio * whiteScale;  end
     res.noise = c;
     fprintf('1. noise terms\n');
     if isfield(c, 'gyro')
@@ -130,8 +144,8 @@ end
 if ~isempty(gE) || ~isempty(aE)
     c = check(struct('dt', dt, 'gyro', gE, 'acc', aE, 'isRate', true), spec, verbose, 'the sums');
     res.sum = c;
-    if ~isempty(gE), fprintf('   on errorGyro: ARW at 1 s ratios %s, floor %s deg/h reached: %s\n', v3(c.gyro.rwRatio, '%.2f'), v3(c.gyro.floor, '%.3g'), yesNo(all(c.gyro.floorReached))); end
-    if ~isempty(aE), fprintf('   on errorAcc:  VRW at 1 s ratios %s, floor %s micro-g reached: %s\n', v3(c.acc.rwRatio, '%.2f'), v3(c.acc.floor, '%.3g'), yesNo(all(c.acc.floorReached))); end
+    if ~isempty(gE), fprintf('   on errorGyro: ARW at 1 s ratios %s, floor %s deg/h reached: %s\n', v3(c.gyro.rwRatio * whiteScale, '%.2f'), v3(c.gyro.floor, '%.3g'), yesNo(all(c.gyro.floorReached))); end
+    if ~isempty(aE), fprintf('   on errorAcc:  VRW at 1 s ratios %s, floor %s micro-g reached: %s\n', v3(c.acc.rwRatio * whiteScale, '%.2f'), v3(c.acc.floor, '%.3g'), yesNo(all(c.acc.floorReached))); end
 end
 
 %% 6. the output against the input and the sums

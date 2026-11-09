@@ -75,9 +75,15 @@ s = imuModelTerms(recArr, recTime(1:n), ioN);
 okArr = numel(recArr) == n && isequal(s.constants.drift, drift) && isequal(s.constants.sfAcc, sfA) ...
     && max(abs(s.constants.biasGyro - biasG)) < 1e-12 && ~isempty(strfind(s.outGyro.best, 'lag +0')) ...
     && abs(s.noise.gyro.sigmaSample(1) - std(rec.rndNoiseGyro(1:n, 1)) * dt) < 1e-12;
-fprintf('noise densities, no floor: %s | stability sigmas: %s | walks rise: %s | constants: %s | sums: %s | composition at lag 0: %s | over the interval: %s | struct array reads the same: %s\n', ...
-    pf(okNoise), pf(okStab), pf(okWalk), pf(okConst), pf(okSum), pf(okOut), pf(okTrap), pf(okArr));
-if okNoise && okStab && okWalk && okConst && okSum && okOut && okTrap && okArr, fprintf('=== test_imuModelTerms PASS ===\n');
+% a record of single 1 ms draws held every 10 ms: the white-noise readings scale by sqrt(1/10), the rest stays
+fprintf('--- the record of single draws, stepDt given ---\n');
+spec10 = struct('arw', 0.05, 'vrw', 0.0147, 'gyroBias', 0.48, 'accBias', 10, 'stepDt', dt / 10);
+evalc('rS = imuModelTerms(rec, recTime, [], spec10);');
+okStep = max(abs(rS.noise.gyro.rwRatio - r.noise.gyro.rwRatio * sqrt(0.1))) < 1e-12 && max(abs(rS.noise.acc.rwRatio - r.noise.acc.rwRatio * sqrt(0.1))) < 1e-12 ...
+    && max(abs(rS.stability.gyroSigma - r.stability.gyroSigma)) < 1e-12 && isequal(rS.constants.sfAcc, r.constants.sfAcc);
+fprintf('noise densities, no floor: %s | stability sigmas: %s | walks rise: %s | constants: %s | sums: %s | composition at lag 0: %s | over the interval: %s | struct array reads the same: %s | stepDt scales the noise: %s\n', ...
+    pf(okNoise), pf(okStab), pf(okWalk), pf(okConst), pf(okSum), pf(okOut), pf(okTrap), pf(okArr), pf(okStep));
+if okNoise && okStab && okWalk && okConst && okSum && okOut && okTrap && okArr && okStep, fprintf('=== test_imuModelTerms PASS ===\n');
 else, fprintf('=== test_imuModelTerms FAIL ===\n'); end
 end
 

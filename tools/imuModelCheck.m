@@ -1,6 +1,7 @@
 function [res] = imuModelCheck(rec, spec)
 %IMUMODELCHECK  Allan deviation of an IMU model's injected error, read against the datasheet.
-%   res = imuModelCheck(rec)        rec.dt: the sample interval (s); rec.gyro: [K x 3] delta angles per sample (rad);
+%   res = imuModelCheck(rec)        rec.dt: the sample interval (s), or rec.t: the sample times (s), the interval
+%                                   being their median difference; rec.gyro: [K x 3] delta angles per sample (rad);
 %                                   rec.acc: [K x 3] delta velocities per sample (m/s); either may be left out. The
 %                                   streams are the model's injected error: its output with the error terms on minus
 %                                   its output with them off on the same input, or the model's own error terms, one
@@ -24,6 +25,7 @@ function [res] = imuModelCheck(rec, spec)
 %   MATLAB desktop tool, not codegen. Runs under Octave.
 if nargin < 2 || isempty(spec), spec = struct('arw', 0.05, 'vrw', 0.0147, 'gyroBias', 0.48, 'accBias', 10); end
 isRate = isfield(rec, 'isRate') && rec.isRate;
+if ~isfield(rec, 'dt') || isempty(rec.dt), rec.dt = median(diff(rec.t(:))); end   % rec.t: the sample times instead
 res = struct('dt', rec.dt, 'spec', spec);
 if isfield(rec, 'gyro') && ~isempty(rec.gyro), res.gyro = channel(rec.gyro, rec.dt, isRate, true, spec); end
 if isfield(rec, 'acc') && ~isempty(rec.acc), res.acc = channel(rec.acc, rec.dt, isRate, false, spec); end

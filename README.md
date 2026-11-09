@@ -353,8 +353,13 @@ beyond 10 s with the bias instability it implies, each as a ratio to the
 datasheet, and says whether the floor was reached within the record. The
 gate's coast covariance is honest only if the IMU the host simulates emits
 the datasheet it is designed against; this is the measurement that says
-so without any trajectory (the static run, `docs/HOST_DECISIONS.md`
-section 13).
+so without any trajectory (the static run). `tools/imuModelTerms.m` reads
+the host's record of the model's terms directly, one element per sample
+or a struct of arrays, with the sample times: the noise terms for their
+densities, the bias-stability terms for their sigma and floor, the walks
+for their slope, the constants of the run, the sums against the sum of
+the terms, and, with the model's input and output beside them, how the
+output is composed and whether the recorded terms are all the model adds.
 
 `tools/cpiReplay.m` replays the CPI monitor on the saved spfMeas records
 over a window and prints, per epoch and axis, the offset the CPI

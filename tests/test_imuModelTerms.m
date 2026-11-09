@@ -14,7 +14,7 @@ addpath(fullfile(here, '..', 'tools'));
 rng(2);
 G = 9.80665;  R2D = 180 / pi;
 dt = 0.009;  K = 100000;  recTime = dt * (1:K)';
-arw = 0.05 / R2D / 60;  vrw = 0.0147 / 60;                      % rad/sqrt(s), m/s/sqrt(s)
+arw = 0.06 / R2D / 60;  vrw = 0.0147 / 60;                      % rad/sqrt(s), m/s/sqrt(s)
 gS = 0.48 / R2D / 3600;  aS = 10 * G * 1e-6;                     % rad/s, m/s^2
 tauC = 30;  a = exp(-dt / tauC);
 gm = @(s) filter(1, [1 -a], s * sqrt(1 - a^2) * randn(K, 3));

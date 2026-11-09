@@ -19,9 +19,10 @@ function [res] = imuModelTerms(recErrorIMU, recTime, io, spec, verbose)
 %   stability, and for their Allan floor; the random-walk terms for the slope of their Allan deviation (+1/2) and the
 %   density it implies; the constant biases against the repeatability (one sigma per run); the scale factors and the
 %   g-sensitivity matrix as constants, for the record; the sums against the sum of the terms. With io, the output is
-%   compared with the input and the sums sample by sample, with and without the scale factor and the g-sensitivity
-%   on the input, at lags of -2 to 2 samples: the smallest residual says how the model composes its output and
-%   whether the recorded terms are all that it adds. MATLAB desktop tool, not codegen. Runs under Octave.
+%   compared with the input and the sums sample by sample: the input taken at the sample or integrated over the
+%   interval (the trapezoid of two samples), with and without the scale factor and the g-sensitivity on it, at lags
+%   of -2 to 2 samples: the smallest residual says how the model composes its output and whether the recorded terms
+%   are all that it adds. MATLAB desktop tool, not codegen. Runs under Octave.
 if nargin < 3, io = []; end
 if nargin < 4 || isempty(spec), spec = struct('arw', 0.05, 'vrw', 0.0147, 'gyroBias', 0.48, 'accBias', 10); end
 if nargin < 5 || isempty(verbose), verbose = false; end
@@ -136,16 +137,24 @@ end
 %% 6. the output against the input and the sums
 if ~isempty(io)
     fprintf('6. the output against the input plus the sums, lags of -2 to 2 samples (the smallest residual tells how the model composes its output)\n');
+    trap = @(x) [x(1, :); (x(1:end - 1, :) + x(2:end, :)) / 2];   % the input integrated over the interval that ends at the sample
+    if isempty(sG), sfG = zeros(1, 3); else, sfG = 1 + sG(:)' * 1e-6; end
+    if isempty(sA), sfA = zeros(1, 3); else, sfA = 1 + sA(:)' * 1e-6; end
     if isfield(io, 'dAng') && ~isempty(gE)
-        base = io.wibb + gE;
-        withSf = io.wibb .* (1 + sG(:)' * 1e-6) + gE;
-        if ~isempty(drift), withSf = withSf + (drift * io.fibb')'; end
-        res.outGyro = compose(io.dAng, dt, {base, withSf}, {'input + errorGyro', 'input (1 + SF) + drift * f + errorGyro'}, 'delta angle [rad]');
+        w = io.wibb;  wT = trap(io.wibb);  f = io.fibb;  fT = trap(io.fibb);
+        gk = zeros(size(w));  gT = gk;
+        if ~isempty(drift), gk = (drift * f')';  gT = (drift * fT')'; end
+        models = {w + gE, w .* sfG + gk + gE, wT + gE, wT .* sfG + gT + gE};
+        names = {'input at the sample + errorGyro', 'input at the sample (1 + SF) + drift f + errorGyro', ...
+            'input over the interval + errorGyro', 'input over the interval (1 + SF) + drift f + errorGyro'};
+        res.outGyro = compose(io.dAng, dt, models, names, 'delta angle [rad]');
     end
     if isfield(io, 'dVel') && ~isempty(aE)
-        base = io.fibb + aE;
-        withSf = io.fibb .* (1 + sA(:)' * 1e-6) + aE;
-        res.outAcc = compose(io.dVel, dt, {base, withSf}, {'input + errorAcc', 'input (1 + SF) + errorAcc'}, 'delta velocity [m/s]');
+        f = io.fibb;  fT = trap(io.fibb);
+        models = {f + aE, f .* sfA + aE, fT + aE, fT .* sfA + aE};
+        names = {'input at the sample + errorAcc', 'input at the sample (1 + SF) + errorAcc', ...
+            'input over the interval + errorAcc', 'input over the interval (1 + SF) + errorAcc'};
+        res.outAcc = compose(io.dVel, dt, models, names, 'delta velocity [m/s]');
     end
 end
 end
@@ -222,11 +231,10 @@ for i = 1:numel(models)
         if sum(r.rms(i, j, :)) < best, best = sum(r.rms(i, j, :));  r.best = sprintf('%s at lag %+d', names{i}, L);  r.bestMean = mean(res, 1); end
     end
 end
-fprintf('   %s: rms of output minus model * dt per axis\n', what);
+fprintf('   %s: rms of output minus model * dt per axis, each model at its best lag\n', what);
 for i = 1:numel(models)
-    for j = 1:numel(lags)
-        fprintf('      %-45s lag %+d: %s\n', names{i}, lags(j), v3(squeeze(r.rms(i, j, :))', '%.3g'));
-    end
+    [~, j] = min(sum(r.rms(i, :, :), 3));
+    fprintf('      %-58s lag %+d: %s\n', names{i}, lags(j), v3(squeeze(r.rms(i, j, :))', '%.3g'));
 end
 fprintf('      output rms %s; best: %s, mean residual %s\n', v3(rms(out), '%.3g'), r.best, v3(r.bestMean, '%.3g'));
 end

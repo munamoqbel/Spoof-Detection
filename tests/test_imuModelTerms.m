@@ -5,8 +5,9 @@ function test_imuModelTerms()
 % turn-on biases, scale factors in ppm, a g-sensitivity matrix, the sums), the sample times, and the model's input
 % and output beside them, the output composed as input (1 + SF) + drift f + error, times the interval. The tool must
 % read the noise densities within 10 % with no floor, the stability sigmas within 25 %, the walks' slope near +1/2,
-% the constants exactly, the sums as the sum of the terms, and name the right composition at lag 0; the struct-array
-% layout (one element per sample) must read the same as the struct of arrays. Run from anywhere:
+% the constants exactly, the sums as the sum of the terms, and name the right composition at lag 0, with the input
+% taken at the sample or integrated over the interval; the struct-array layout (one element per sample) must read
+% the same as the struct of arrays. Run from anywhere:
 % octave --no-gui --quiet --eval test_imuModelTerms
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'tools'));
@@ -45,9 +46,20 @@ rmsOf = @(x) sqrt(mean(x .^ 2, 1));
 okConst = max(abs(r.constants.biasGyro - biasG)) < 1e-12 && max(abs(r.constants.biasAcc - biasA)) < 1e-12 ...
     && isequal(r.constants.sfGyro, sfG) && isequal(r.constants.sfAcc, sfA) && isequal(r.constants.drift, drift);
 okSum = r.sumGyroResidual < 1e-12 && r.sumAccResidual < 1e-12;
-okOut = ~isempty(strfind(r.outGyro.best, 'drift')) && ~isempty(strfind(r.outGyro.best, 'lag +0')) ...
-    && ~isempty(strfind(r.outAcc.best, 'SF')) && ~isempty(strfind(r.outAcc.best, 'lag +0')) ...
+okOut = ~isempty(strfind(r.outGyro.best, 'at the sample (1 + SF) + drift')) && ~isempty(strfind(r.outGyro.best, 'lag +0')) ...
+    && ~isempty(strfind(r.outAcc.best, 'at the sample (1 + SF)')) && ~isempty(strfind(r.outAcc.best, 'lag +0')) ...
     && all(squeeze(r.outGyro.rms(2, 3, :))' < 1e-8 * rmsOf(io.dAng)) && all(squeeze(r.outAcc.rms(2, 3, :))' < 1e-8 * rmsOf(io.dVel));
+% the same model composing its output from the input integrated over the interval
+trap = @(x) [x(1, :); (x(1:end - 1, :) + x(2:end, :)) / 2];
+ioT = io;
+ioT.dAng = (trap(io.wibb) .* (1 + sfG * 1e-6) + (drift * trap(io.fibb)')' + rec.errorGyro) * dt;
+ioT.dVel = (trap(io.fibb) .* (1 + sfA * 1e-6) + rec.errorAcc) * dt;
+fprintf('--- the output composed over the interval ---\n');
+evalc('rT = imuModelTerms(rec, recTime, ioT);');
+okTrap = ~isempty(strfind(rT.outGyro.best, 'over the interval (1 + SF) + drift')) && ~isempty(strfind(rT.outGyro.best, 'lag +0')) ...
+    && ~isempty(strfind(rT.outAcc.best, 'over the interval (1 + SF)')) && ~isempty(strfind(rT.outAcc.best, 'lag +0')) ...
+    && all(squeeze(rT.outGyro.rms(4, 3, :))' < 1e-8 * rmsOf(ioT.dAng)) && all(squeeze(rT.outAcc.rms(4, 3, :))' < 1e-8 * rmsOf(ioT.dVel));
+fprintf('   best: %s | %s\n', rT.outGyro.best, rT.outAcc.best);
 % the struct-array layout, one element per sample, on the first samples
 n = 3000;
 names = fieldnames(rec);  args = {};
@@ -63,9 +75,9 @@ s = imuModelTerms(recArr, recTime(1:n), ioN);
 okArr = numel(recArr) == n && isequal(s.constants.drift, drift) && isequal(s.constants.sfAcc, sfA) ...
     && max(abs(s.constants.biasGyro - biasG)) < 1e-12 && ~isempty(strfind(s.outGyro.best, 'lag +0')) ...
     && abs(s.noise.gyro.sigmaSample(1) - std(rec.rndNoiseGyro(1:n, 1)) * dt) < 1e-12;
-fprintf('noise densities, no floor: %s | stability sigmas: %s | walks rise: %s | constants: %s | sums: %s | composition at lag 0: %s | struct array reads the same: %s\n', ...
-    pf(okNoise), pf(okStab), pf(okWalk), pf(okConst), pf(okSum), pf(okOut), pf(okArr));
-if okNoise && okStab && okWalk && okConst && okSum && okOut && okArr, fprintf('=== test_imuModelTerms PASS ===\n');
+fprintf('noise densities, no floor: %s | stability sigmas: %s | walks rise: %s | constants: %s | sums: %s | composition at lag 0: %s | over the interval: %s | struct array reads the same: %s\n', ...
+    pf(okNoise), pf(okStab), pf(okWalk), pf(okConst), pf(okSum), pf(okOut), pf(okTrap), pf(okArr));
+if okNoise && okStab && okWalk && okConst && okSum && okOut && okTrap && okArr, fprintf('=== test_imuModelTerms PASS ===\n');
 else, fprintf('=== test_imuModelTerms FAIL ===\n'); end
 end
 

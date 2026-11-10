@@ -373,6 +373,15 @@ coast and by how much the host's P overstates it. This is the measurement
 the gate's own Q is validated against, on the twin and later on the
 vehicle.
 
+`tools/navConsistency.m` asks whether the host's P describes its own
+errors: per state group (position, velocity, tilt, heading, the two bias
+sets) the rms error against the rms sigma the filter carried over the
+aided windows, their ratio and the share of epochs beyond 3 sigma. A
+consistent P reads near 1 with 0.3 % beyond; a P three times the error
+reads 3; an overconfident P reads below 1 with many epochs beyond. This
+is the criterion for the host's Q, since nav accuracy on a good GNSS
+rewards an obedient filter rather than an honest one.
+
 `tools/cpiReplay.m` replays the CPI monitor on the saved spfMeas records
 over a window and prints, per epoch and axis, the offset the CPI
 projection reads in metres, the sigma of that reading (and what R alone

@@ -361,6 +361,18 @@ for their slope, the constants of the run, the sums against the sum of
 the terms, and, with the model's input and output beside them, how the
 output is composed and whether the recorded terms are all the model adds.
 
+`tools/coastDriftCheck.m` reads an INS-only coast, the GNSS switched off
+at tOut, against two predictions along the host's own accumPhi: the
+host's P with its accumQ, and the same P at tOut with the datasheet Q on
+the inertial states (velocity from the VRW, tilt from the ARW, the bias
+states from the in-run stability and the walk). It tabulates the measured
+nav error, the logged sigma, the two predictions and the sensor-only
+growth at 5 to 120 s into the coast and at its end, with the errors-off
+run's error beside them, and says whether the datasheet explains the
+coast and by how much the host's P overstates it. This is the measurement
+the gate's own Q is validated against, on the twin and later on the
+vehicle.
+
 `tools/cpiReplay.m` replays the CPI monitor on the saved spfMeas records
 over a window and prints, per epoch and axis, the offset the CPI
 projection reads in metres, the sigma of that reading (and what R alone

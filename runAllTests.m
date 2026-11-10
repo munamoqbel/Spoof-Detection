@@ -40,6 +40,7 @@ tests = { ...
     'test_matrixRow',        '=== test_matrixRow PASS ===';
     'test_imuModelCheck',    '=== test_imuModelCheck PASS ===';
     'test_imuModelTerms',    '=== test_imuModelTerms PASS ===';
+    'test_coastDriftCheck',  '=== test_coastDriftCheck PASS ===';
     'test_cpiReplay',        '=== test_cpiReplay PASS ===';
     'test_measNoiseCheck',   '=== test_measNoiseCheck PASS ===';
     'test_kfMeasBoth',       '=== test_kfMeasBoth PASS ===';

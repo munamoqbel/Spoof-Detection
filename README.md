@@ -376,9 +376,12 @@ vehicle.
 `tools/navConsistency.m` asks whether the host's P describes its own
 errors: per state group (position, velocity, tilt, heading, the two bias
 sets) the rms error against the rms sigma the filter carried over the
-aided windows, their ratio and the share of epochs beyond 3 sigma. A
-consistent P reads near 1 with 0.3 % beyond; a P three times the error
-reads 3; an overconfident P reads below 1 with many epochs beyond. This
+aided windows, their ratio, the same ratio with the mean error removed
+(a constant offset between the nav and the truth, a reference-point or
+datum offset, is no business of P) and the share of epochs beyond 3
+sigma. A consistent P reads near 1 with 0.3 % beyond; a P three times
+the error reads 3; an overconfident P reads below 1 with many epochs
+beyond. This
 is the criterion for the host's Q, since nav accuracy on a good GNSS
 rewards an obedient filter rather than an honest one.
 

@@ -11,13 +11,17 @@ function [res] = navConsistency(run, tKf, pAtEpochs, aidedWin)
 %   pAtEpochs   the host's P per epoch as coastDriftCheck takes it: a cell of n x n (or of diagonals), [n x n x K], or
 %               the diagonal [K x n]
 %   aidedWin    [W x 2] windows [t1 t2] to read (s); [] or omitted: the whole run
-%   Per group it prints the rms of the error, the rms of the sigma the filter carried, their ratio and the share of
-%   epochs beyond 3 sigma: a consistent P reads a ratio near 1 and a share near 0.3 %; a ratio of 3 is a P three
-%   times wider than the error, the pessimistic case; a ratio of 0.3 is an overconfident P, and its share beyond 3
-%   sigma is large. Groups: position N, E, D; velocity N, E, D; tilt (the horizontal pair, rotation-invariant);
-%   heading; accelerometer bias; gyro bias. A group whose truth is not in the run is skipped. The tilt and bias
-%   groups compare magnitudes, so the host's sign conventions do not matter.
-%   Result: res.group (names), res.rmsErr, res.rmsSig, res.ratio, res.beyond3 (per group), res.K (epochs read).
+%   Per group it prints the rms of the error, its mean over the window, the rms of the sigma the filter carried,
+%   their ratio, the same ratio with the mean error removed, and the share of epochs beyond 3 sigma: a consistent
+%   P reads a ratio near 1 and a share near 0.3 %; a ratio of 3 is a P three times wider than the error, the
+%   pessimistic case; a ratio of 0.3 is an overconfident P, and its share beyond 3 sigma is large. A constant
+%   offset between the nav and the truth (a reference-point or datum offset, a GNSS latency at steady speed) is
+%   not something a P can cover: the mean-removed ratio reads the P against the part of the error that varies.
+%   Groups: position N, E, D; velocity N, E, D; tilt (the horizontal pair, rotation-invariant); heading;
+%   accelerometer bias; gyro bias. A group whose truth is not in the run is skipped. The tilt and bias groups
+%   compare magnitudes (the mean removed per component), so the host's sign conventions do not matter.
+%   Result: res.group (names), res.rmsErr, res.meanErr (the norm of the mean per component), res.rmsErrC (mean
+%   removed), res.rmsSig, res.ratio, res.ratioC (mean removed), res.beyond3 (per group), res.K (epochs read).
 %   MATLAB desktop tool, not codegen. Runs under Octave.
 if nargin < 4, aidedWin = []; end
 tKf = tKf(:);  K = numel(tKf);
@@ -29,27 +33,27 @@ if ~isempty(aidedWin)
     use = false(K, 1);
     for w = 1:size(aidedWin, 1), use = use | (tKf >= aidedWin(w, 1) & tKf <= aidedWin(w, 2)); end
 end
-names = {};  rmsErr = [];  rmsSig = [];  ratio = [];  beyond3 = [];
+G = struct('names', {{}}, 'rmsErr', [], 'meanErr', [], 'rmsErrC', [], 'rmsSig', [], 'ratio', [], 'ratioC', [], 'beyond3', []);
 % position
 e = navErrAt(run, tKf);
 ax = {'N', 'E', 'D'};
 for a = 1:3
-    [names, rmsErr, rmsSig, ratio, beyond3] = add(names, rmsErr, rmsSig, ratio, beyond3, ['position ' ax{a}], e(:, a), sig(:, a), use);
+    G = add(G, ['position ' ax{a}], e(:, a), sig(:, a), use);
 end
 % velocity
 if isfield(run, 'navVel') && ~isempty(run.navVel) && isfield(run, 'trueVel') && ~isempty(run.trueVel)
     nv = interpRows(run.t, run.navVel, tKf);  tv = interpRows(run.tTrue, run.trueVel, tKf);
     for a = 1:3
-        [names, rmsErr, rmsSig, ratio, beyond3] = add(names, rmsErr, rmsSig, ratio, beyond3, ['velocity ' ax{a}], nv(:, a) - tv(:, a), sig(:, 3 + a), use);
+        G = add(G, ['velocity ' ax{a}], nv(:, a) - tv(:, a), sig(:, 3 + a), use);
     end
 end
 % tilt and heading
 if isfield(run, 'navAtt') && ~isempty(run.navAtt) && isfield(run, 'trueAtt') && ~isempty(run.trueAtt)
     na = interpRows(run.t, run.navAtt, tKf);  ta = interpRows(run.tTrue, run.trueAtt, tKf);
     d = na - ta;  d = atan2(sin(d), cos(d));
-    tiltErr = sqrt(d(:, 1) .^ 2 + d(:, 2) .^ 2);  tiltSig = sqrt(sig(:, 7) .^ 2 + sig(:, 8) .^ 2);
-    [names, rmsErr, rmsSig, ratio, beyond3] = add(names, rmsErr, rmsSig, ratio, beyond3, 'tilt (roll, pitch)', tiltErr, tiltSig, use);
-    [names, rmsErr, rmsSig, ratio, beyond3] = add(names, rmsErr, rmsSig, ratio, beyond3, 'heading', d(:, 3), sig(:, 9), use);
+    tiltSig = sqrt(sig(:, 7) .^ 2 + sig(:, 8) .^ 2);
+    G = add(G, 'tilt (roll, pitch)', d(:, 1:2), tiltSig, use);
+    G = add(G, 'heading', d(:, 3), sig(:, 9), use);
 end
 % biases
 if isfield(run, 'biasEst') && ~isempty(run.biasEst) && isfield(run, 'biasTrue') && ~isempty(run.biasTrue)
@@ -60,27 +64,34 @@ if isfield(run, 'biasEst') && ~isempty(run.biasEst) && isfield(run, 'biasTrue') 
     bt = run.biasTrue;
     if size(bt, 1) == 1, bt = repmat(bt, K, 1); elseif size(bt, 1) ~= K, bt = interpRows(linspace(run.t(1), run.t(end), size(bt, 1))', bt, tKf); end
     db = b - bt;
-    accErr = sqrt(sum(db(:, 1:3) .^ 2, 2));   accSig = sqrt(sum(sig(:, accIdx) .^ 2, 2));
-    gyrErr = sqrt(sum(db(:, 4:6) .^ 2, 2));   gyrSig = sqrt(sum(sig(:, gyroIdx) .^ 2, 2));
-    [names, rmsErr, rmsSig, ratio, beyond3] = add(names, rmsErr, rmsSig, ratio, beyond3, 'accelerometer bias', accErr, accSig, use);
-    [names, rmsErr, rmsSig, ratio, beyond3] = add(names, rmsErr, rmsSig, ratio, beyond3, 'gyro bias', gyrErr, gyrSig, use);
+    accSig = sqrt(sum(sig(:, accIdx) .^ 2, 2));  gyrSig = sqrt(sum(sig(:, gyroIdx) .^ 2, 2));
+    G = add(G, 'accelerometer bias', db(:, 1:3), accSig, use);
+    G = add(G, 'gyro bias', db(:, 4:6), gyrSig, use);
 end
 fprintf('navConsistency: %d epochs read of %d, %d states in P\n', nnz(use), K, n);
-fprintf('   %-22s %12s %12s %8s %10s\n', 'group', 'rms error', 'rms sigma', 'ratio', 'beyond 3s');
-for g = 1:numel(names)
-    fprintf('   %-22s %12.4g %12.4g %8.2f %9.2f%%\n', names{g}, rmsErr(g), rmsSig(g), ratio(g), 100 * beyond3(g));
+fprintf('   %-22s %12s %12s %12s %8s %10s %10s\n', 'group', 'rms error', 'mean error', 'rms sigma', 'ratio', 'mean out', 'beyond 3s');
+for g = 1:numel(G.names)
+    fprintf('   %-22s %12.4g %12.4g %12.4g %8.2f %10.2f %9.2f%%\n', G.names{g}, G.rmsErr(g), G.meanErr(g), G.rmsSig(g), ...
+        G.ratio(g), G.ratioC(g), 100 * G.beyond3(g));
 end
-fprintf('   (ratio = sigma / error: near 1 consistent, 3 a P three times the error, 0.3 overconfident; a consistent Gaussian P\n');
-fprintf('   has 0.3 %% beyond 3 sigma; position in m, velocity m/s, angles rad, biases in the units of biasEst)\n');
-res = struct('group', {names}, 'rmsErr', rmsErr, 'rmsSig', rmsSig, 'ratio', ratio, 'beyond3', beyond3, 'K', nnz(use));
+fprintf('   (ratio = sigma / error: near 1 consistent, 3 a P three times the error, 0.3 overconfident; mean out: the same with the\n');
+fprintf('   mean error over the window removed, a constant offset being no business of P; a consistent Gaussian P has 0.3 %% beyond\n');
+fprintf('   3 sigma; position in m, velocity m/s, angles rad, biases in the units of biasEst; the mean of a multi-axis group is its norm)\n');
+res = struct('group', {G.names}, 'rmsErr', G.rmsErr, 'meanErr', G.meanErr, 'rmsErrC', G.rmsErrC, 'rmsSig', G.rmsSig, ...
+    'ratio', G.ratio, 'ratioC', G.ratioC, 'beyond3', G.beyond3, 'K', nnz(use));
 end
 
-function [names, rmsErr, rmsSig, ratio, beyond3] = add(names, rmsErr, rmsSig, ratio, beyond3, name, err, sg, use)
-ok = use & isfinite(err) & isfinite(sg) & sg > 0;
+function [G] = add(G, name, err, sg, use)
+% err [K x c]: the error's components (one for a signed axis, two or three for a magnitude group); sg [K x 1]
+ok = use & all(isfinite(err), 2) & isfinite(sg) & sg > 0;
 if nnz(ok) < 2, return; end
-re = sqrt(mean(err(ok) .^ 2));  rs = sqrt(mean(sg(ok) .^ 2));
-names{end + 1} = name;  rmsErr(end + 1) = re;  rmsSig(end + 1) = rs;  ratio(end + 1) = rs / re;
-beyond3(end + 1) = mean(abs(err(ok)) > 3 * sg(ok));
+mag = sqrt(sum(err(ok, :) .^ 2, 2));
+mu = mean(err(ok, :), 1);
+magC = sqrt(sum((err(ok, :) - mu) .^ 2, 2));
+re = sqrt(mean(mag .^ 2));  reC = sqrt(mean(magC .^ 2));  rs = sqrt(mean(sg(ok) .^ 2));
+G.names{end + 1} = name;  G.rmsErr(end + 1) = re;  G.meanErr(end + 1) = norm(mu);  G.rmsErrC(end + 1) = reC;
+G.rmsSig(end + 1) = rs;  G.ratio(end + 1) = rs / re;  G.ratioC(end + 1) = rs / reC;
+G.beyond3(end + 1) = mean(mag > 3 * sg(ok));
 end
 
 function [sig, n] = sigmaAt(p, K)

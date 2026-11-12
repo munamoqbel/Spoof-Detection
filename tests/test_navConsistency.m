@@ -3,7 +3,8 @@ function test_navConsistency()
 % tools/navConsistency on a synthetic stationary run: errors drawn from known sigmas on position, velocity, attitude
 % and biases, and a logged P that is either those sigmas (ratios near 1, about 0.3 % beyond 3 sigma), three times
 % them (ratios near 3, nothing beyond 3 sigma) or a third of them (ratios near 0.33, many beyond 3 sigma); the
-% window argument must restrict the epochs read; the three forms of P must read the same. Run from anywhere:
+% window argument must restrict the epochs read; the three forms of P must read the same; a constant 3 m offset on
+% the north position must read a low ratio and a mean-removed ratio near 1, with the mean reported. Run from anywhere:
 % octave --no-gui --quiet --eval test_navConsistency
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'tools'));
@@ -39,9 +40,14 @@ evalc('rC = navConsistency(run, tKf, pCell);');
 P3 = repmat(diag(sig .^ 2), [1 1 K]);
 evalc('r3d = navConsistency(run, tKf, P3);');
 okForm = max(abs(rC.ratio - r1.ratio)) < 1e-9 && max(abs(r3d.ratio - r1.ratio)) < 1e-9;
-fprintf('consistent P reads near 1: %s | three times reads 3: %s | a third reads 0.33 with many beyond 3 sigma: %s | window: %s | forms of P: %s\n', ...
-    pf(ok1), pf(ok3), pf(okT), pf(okW), pf(okForm));
-if ok1 && ok3 && okT && okW && okForm, fprintf('=== test_navConsistency PASS ===\n');
+fprintf('--- a constant offset of 3 m on the north position ---\n');
+runOff = run;  runOff.navPos(:, 1) = runOff.navPos(:, 1) + 3 / (Rm + h0);
+rO = navConsistency(runOff, tKf, pDiag);
+okOff = rO.ratio(1) < 0.7 && abs(rO.ratioC(1) - 1) < 0.1 && abs(rO.meanErr(1) - 3) < 0.2 && abs(rO.ratioC(2) - r1.ratioC(2)) < 1e-9 ...
+    && all(abs(r1.ratioC - r1.ratio) < 0.05);
+fprintf('consistent P reads near 1: %s | three times reads 3: %s | a third reads 0.33 with many beyond 3 sigma: %s | window: %s | forms of P: %s | offset: %s\n', ...
+    pf(ok1), pf(ok3), pf(okT), pf(okW), pf(okForm), pf(okOff));
+if ok1 && ok3 && okT && okW && okForm && okOff, fprintf('=== test_navConsistency PASS ===\n');
 else, fprintf('=== test_navConsistency FAIL ===\n'); end
 end
 

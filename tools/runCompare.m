@@ -211,6 +211,11 @@ end
 gA = winA(inAided);
 gT = winT(inT);
 fprintf('0. time alignment, nav(t) = truth(t + lag)\n');
+timeBaseLine('t (nav)', t);                                   % the two time bases first: every read below differentiates and
+timeBaseLine('tTrue', tT);                                    % interpolates on them, and a glitch in either reads as nav error
+if min(t) > max(tT) || max(t) < min(tT) || (min(max(t), max(tT)) - max(min(t), min(tT))) < 0.9 * (max(t) - min(t))
+    fprintf('   WARNING: t and tTrue overlap on less than 90 %% of the nav span: different clocks or offsets; the errors below are not usable\n');
+end
 F0 = '   %-38s%-13s%-29s%s\n';                           % check, shift or lag, residual, note
 fprintf(F0, 'check', 'shift / lag', 'residual', 'note');
 
@@ -862,6 +867,23 @@ d  = atan2(sin(d), cos(d));
 ok = isfinite(d);
 d  = demeanRows(d(ok), grp(ok));
 v  = sqrt(mean(d.^2));
+end
+
+function timeBaseLine(name, tv)
+% one line per time base: count, span, median step, and the steps that break it (a replay that stamps two samples
+% at the same instant or jumps makes the differenced velocity explode there, and the mean of section 0 with it)
+tv = tv(:);  d = diff(tv);
+if isempty(d), fprintf('   %-8s %d sample\n', name, numel(tv)); return; end
+md = median(d);
+bad = nnz(d <= 0.5 * md | d >= 2 * md);
+fprintf('   %-8s %d samples, %.2f to %.2f s, step %.4g s', name, numel(tv), tv(1), tv(end), md);
+if bad > 0
+    i = find(d <= 0.5 * md | d >= 2 * md, 1);
+    fprintf('; WARNING: %d steps off the median by a factor 2 or more (first at %.2f s, step %.3g s); a non-increasing\n', bad, tv(i), d(i));
+    fprintf('            or uneven base makes the differenced velocities and the lag scans unusable there\n');
+else
+    fprintf('\n');
+end
 end
 
 function [v] = velFromPos(tt, pos)

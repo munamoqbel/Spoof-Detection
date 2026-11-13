@@ -333,3 +333,12 @@ resN0 = runCompare(runA, [], [], []);
 okN = abs(resN.run1.tau - 0.5) < 0.011 && abs(resN.run2.tau - 0.5) < 0.011 && isnan(resN.run1.T) && ~any(isfinite(resN.run1.dv)) ...
    && all(isfinite(resN.run1.rmsPos)) && all(abs(resN.run1.rmsPos - res.run1.rmsPos) < 1e-9) && isnan(resN0.run1.T) && all(isfinite(resN0.run1.rmsPos));
 if okN, fprintf('=== no-outage check PASS ===\n'); else, fprintf('=== no-outage check FAIL ===\n'); end
+% a time base with a glitch (two samples 1 ms apart in a 100 Hz record) and one shifted by 1000 s: section 0 must say so
+runT = runA;  runT.t(500) = runT.t(499) + 1e-3;
+txtT = evalc('runCompare(runT, [], [], [], [10 95; 255 295]);');
+runU = runA;  runU.tTrue = runU.tTrue + 1000;
+txtU = evalc('runCompare(runU, [], [], [], [10 95; 255 295]);');
+txtN = evalc('runCompare(runA, [], [], [], [10 95; 255 295]);');
+okT = ~isempty(strfind(txtT, 'steps off the median')) && ~isempty(strfind(txtU, 'overlap on less than 90')) ...
+   && isempty(strfind(txtN, 'WARNING: t and tTrue')) && isempty(strfind(txtN, 'steps off the median'));
+if okT, fprintf('=== time-base check PASS ===\n'); else, fprintf('=== time-base check FAIL ===\n'); end

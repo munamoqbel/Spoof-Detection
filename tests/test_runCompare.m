@@ -342,3 +342,11 @@ txtN = evalc('runCompare(runA, [], [], [], [10 95; 255 295]);');
 okT = ~isempty(strfind(txtT, 'steps off the median')) && ~isempty(strfind(txtU, 'overlap on less than 90')) ...
    && isempty(strfind(txtN, 'WARNING: t and tTrue')) && isempty(strfind(txtN, 'steps off the median'));
 if okT, fprintf('=== time-base check PASS ===\n'); else, fprintf('=== time-base check FAIL ===\n'); end
+% a log that starts before the filter navigates: the first 20 s of navPos at [0 0 0] (thousands of km off) inside the
+% aided window must be left out, said so, and the aided rms must be the clean run's
+runZ = runA;  iZ = runZ.t < 20;  runZ.navPos(iZ, :) = 0;  runZ.navAtt(iZ, 3) = 2;
+txtZ = evalc('resZ = runCompare(runZ, [], [], [], [10 95; 255 295]);');
+resZ0 = runCompare(runA, [], [], [], [21 95; 255 295]);
+okZ = ~isempty(strfind(txtZ, 'not navigating there')) && all(abs(resZ.run1.rmsPos - resZ0.run1.rmsPos) < 0.05 * resZ0.run1.rmsPos + 0.05) ...
+   && all(resZ.run1.rmsPos < 10) && abs(resZ.run1.rmsAtt(3) - resZ0.run1.rmsAtt(3)) < 0.1 * resZ0.run1.rmsAtt(3) + 1e-3;
+if okZ, fprintf('=== not-navigating samples check PASS ===\n'); else, fprintf('=== not-navigating samples check FAIL ===\n'); end

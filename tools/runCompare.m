@@ -196,6 +196,25 @@ for w = 1:size(aidedWin, 1)
     inAided = inAided | inW;
     winA(inW) = w;
 end
+% samples where the nav is not navigating (the alignment not done, a reset, a log that starts before the filter):
+% a position a kilometre or more from the truth, or not finite. Left in, one such second dominates every rms and the
+% differenced velocity at its edges; they are taken out of the aided set with a second of margin, and said so
+eQuick = posErrNed(r, t, true(N, 1));
+notNav = all(isfinite(eQuick), 2) & sqrt(sum(eQuick(:, 1:2) .^ 2, 2)) > 1000;
+if any(notNav & inAided)
+    m = max(1, round(1 / median(diff(t))));
+    wide = conv(double(notNav), ones(2 * m + 1, 1), 'same') > 0;
+    nIn = nnz(wide & inAided);
+    if nnz(inAided & ~wide) >= 0.5 * nnz(inAided)
+        fprintf('   NOTE: %d samples (%.1f s) are a kilometre or more from the truth, from %.2f to %.2f s: the nav not navigating there\n', ...
+            nIn, nIn * median(diff(t)), t(find(wide & inAided, 1)), t(find(wide & inAided, 1, 'last')));
+        fprintf('         (alignment, a reset, a log that starts before the filter); left out of the aided set with a second of margin\n');
+        inAided = inAided & ~wide;  winA(wide) = 0;
+    else
+        fprintf('   WARNING: %d of %d aided samples are a kilometre or more from the truth: not an alignment segment but a unit, frame or\n', nIn, nnz(inAided));
+        fprintf('            datum problem in navPos or truePos; nothing excluded, and the errors below are not usable\n');
+    end
+end
 
 %% 0. time alignment: nav(t) is compared with the truth at t + lag
 tauGrid = -1.5:0.01:1.5;

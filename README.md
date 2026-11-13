@@ -385,6 +385,14 @@ beyond. This
 is the criterion for the host's Q, since nav accuracy on a good GNSS
 rewards an obedient filter rather than an honest one.
 
+`tools/leverArmCheck.m` reads the host's lever-arm compensation from the
+records: the rate-row innovations projected along and across the heading,
+regressed on the yaw rate over the turning epochs. The slope is the
+effective arm error in metres, an along-body error showing across track;
+the turning rms against the straight-leg rms says whether the turns carry
+anything the legs do not. A heading that steps at every turn and holds
+between them is what an uncompensated arm looks like through the filter.
+
 `tools/cpiReplay.m` replays the CPI monitor on the saved spfMeas records
 over a window and prints, per epoch and axis, the offset the CPI
 projection reads in metres, the sigma of that reading (and what R alone

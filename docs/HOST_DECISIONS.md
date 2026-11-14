@@ -324,3 +324,55 @@ the rest must fit the loosened re-admission; an INS drift beyond 15 m in
 two minutes makes the gate miss a return, which is the stranding of
 before, not a new failure. `test_coastBound` cases E and G hold a
 followed ramp's end and a drag-then-step's end on the synthetic host.
+
+## 13. The gate's own coast covariance
+
+Every gate threshold is k times a coast sigma: the separation gate, the
+protection level and the coast budget, the re-validation's S, the long
+coasts' covariance that floors the bound after a return. Until now the
+gate propagated its coasts with the host's accumQ, and the host's Q is a
+filter tuning: inflated to keep the filter responsive under the GNSS, it
+overstated the drift of an INS-only coast about three times in sigma on
+the vehicle host (section 9, `tools/coastDriftCheck`), which is why the
+re-admission had to be bounded by hand and why the budget flag came at
+68 s. The IMU model was then brought to the datasheet and its Allan plots
+(`tools/imuModelCheck`, `tools/imuModelTerms`), and the host's Q to the
+sensor on the attitude and bias blocks with its remaining terms named
+(the position block for the receiver's 0.11 s offset, the horizontal
+velocity for the heading's unobserved drift on a wheeled vehicle). What
+the host cannot give up, the gate does not need: it builds its own Q.
+
+With `COAST_Q_DATASHEET` the gate replaces accumQ, once per epoch and for
+every coast it propagates, by `SPF_coastQ`: on the inertial states the
+datasheet, the velocity from the VRW, the attitude from the ARW, the two
+bias blocks from their in-run stability read as a walk over a coast plus
+their bias walk, the position block without noise of its own, integrated
+over the interval the host's accumPhi covers as dt/2 (Phi Qc Phi' + Qc);
+on every other state, clock, pressure, GNSS states, the host's accumQ as
+it comes. The host's propTel is unchanged on the wire; the host sets the
+flag and the `IMU_*` and `COAST_*_STATES` constants in its CST_spfParam,
+the states in its own layout. At two minutes the velocity block alone then
+contributes 0.2 m of position sigma where the host's tuning gave 23 m,
+and the coast sigma is the sensor's: about 5 m from the ARW plus what the
+filter's errors at the latch grow into.
+
+Those errors at the latch are the other half, and the host's P does not
+state them honestly on every state: on a wheeled vehicle without heading
+aiding the heading is unobserved on straight legs and drifts a degree in
+a quarter of an hour with a P of 0.03 degree (`tools/navConsistency`,
+the heading row at 0.1 with the mean out; the tilt and the horizontal
+velocity at 0.4 through the turns). The gate therefore reads the host's P
+through `COAST_SIGMA_FLOOR_STATES / _VALUES`: the listed diagonals are
+raised to the sigma the consistency read measured, once per epoch on
+kfMeas.postCov, before the P starts a window, an anchor or a long coast
+and before the separation test subtracts it, so the floor cancels in the
+separation and only its growth through the dynamics remains. At a commit
+the host takes its own P back, not the floored one. The lists are empty in
+the repository; a host whose P reads consistent leaves them empty.
+
+The order of honesty is therefore: the sensor from its datasheet and its
+Allan plots, the host's Q from the sensor plus named terms, the gate's
+coasts from the sensor, and the host's P floored where its own
+consistency read says so. `test_coastQ` checks the Q against the formula
+and the floor against its definition; the test references, run with the
+flag off and empty floors, stand unchanged.

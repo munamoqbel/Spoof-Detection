@@ -72,6 +72,22 @@ classdef CST_spfParam
         RETURN_WANDER = 15.0;                             % m: the nav must have wandered this far from the long coast,
         RETURN_RADIUS = 15.0;                             % m: and the GNSS must land this close to it, for a return
         MAX_ANCHOR_AGE = uint32(234);                     % epochs: an older anchor is refused at a latch
+        COAST_Q_DATASHEET = false;                        % the gate's coasts on the IMU datasheet Q (SPF_coastQ); false: the host's accumQ
+        IMU_ARW = 0.05;                                   % deg/sqrt(h)
+        IMU_VRW = 0.0147;                                 % m/s/sqrt(h)
+        IMU_GYRO_BIAS_SIGMA = 0.03;                       % deg/h, in-run
+        IMU_ACC_BIAS_SIGMA = 4.0;                         % micro-g, in-run
+        IMU_BIAS_TAU = 300.0;                             % s
+        IMU_GYRO_WALK = 0.016;                            % deg/h per sqrt(h)
+        IMU_ACC_WALK = 10.0;                              % micro-g per sqrt(h)
+        COAST_POS_STATES = [1 2 3];                       % the blocks in the host's state layout
+        COAST_VEL_STATES = [4 5 6];
+        COAST_ATT_STATES = [7 8 9];
+        COAST_ACC_BIAS_STATES = [10 11 12];
+        COAST_GYRO_BIAS_STATES = [13 14 15];
+        COAST_Q_INTERVAL = 0.5;                           % s, when accumPhi carries no position-from-velocity entry
+        COAST_SIGMA_FLOOR_STATES = zeros(1, 0);           % the host's P floored on these states
+        COAST_SIGMA_FLOOR_VALUES = zeros(1, 0);           % at these sigmas
         MAX_MEAS = CST_gnssHybrid.MAX_MEASURES;           % rows per epoch, the host's bound
 
     end

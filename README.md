@@ -329,7 +329,12 @@ INS-only coasts beside the anchor and reads a latch, or a COAST epoch, as
 the end of a followed spoof when the nav had wandered from the long coast
 and the GNSS lands back on it: the nav is corrected back to the inertial
 truth and the clean GNSS is re-admitted in seconds instead of being
-refused as a spoof.
+refused as a spoof. The gate's coasts are propagated with its own Q from
+the IMU datasheet along the host's Phi (section 13, `SPF_coastQ`, under
+`COAST_Q_DATASHEET`), and the host's P is read with sigma floors on the
+states its own consistency read shows it underestimates
+(`COAST_SIGMA_FLOOR_*`); both are off in the repository, so the test
+references stand, and on in the host's constants.
 
 `tools/measNoiseCheck.m` shows the measurement noise the gate was handed,
 epoch by epoch over a window: the range rows in the record, the largest

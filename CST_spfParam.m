@@ -102,6 +102,35 @@
 % after a slow drag the spoofer could make anyway. Vertical returns are
 % not read (the GLONASS clock-height pattern reads 7 to 11 m on single
 % epochs in D).
+% - COAST_Q_DATASHEET, IMU_*, COAST_*_STATES, COAST_Q_INTERVAL (the gate's own Q):
+% An INS-only coast drifts by the sensor; the host's Q is a filter tuning,
+% inflated to keep the filter responsive under the GNSS, and carried into
+% a coast it overstated the drift three times in sigma on the vehicle host
+% (tools/coastDriftCheck). Every gate threshold is k times the coast sigma,
+% so with COAST_Q_DATASHEET the gate propagates its coasts (windows, anchor,
+% long coasts, the coast in COAST) with a Q built from the IMU datasheet,
+% SPF_coastQ: the velocity from the VRW, the attitude from the ARW, the two
+% bias blocks from their in-run stability (a Markov bias read as a walk
+% over a coast) and their walk, the position without noise, along the
+% host's own accumPhi, and the host's accumQ on every state the IMU does
+% not drive. The IMU_* values are the vehicle IMU's datasheet as its Allan
+% plots confirmed them; the COAST_*_STATES name the blocks in the host's
+% layout (here the simulation's, build_Phi_Q: accelerometer biases 10:12,
+% gyro biases 13:15; the host has the gyro biases first). The repository
+% value is false (the published design, the test references); the host
+% sets true, as with ARM_EPOCHS.
+% - COAST_SIGMA_FLOOR_STATES / _VALUES (the host's P as the gate reads it):
+% The gate starts every coast from the host's P and subtracts it in the
+% separation test. A host whose P underestimates its own errors on some
+% states (tools/navConsistency: the rows that read below 1 with the mean
+% out; on the vehicle host the heading, which nothing observes on a
+% straight leg, the tilt and the horizontal velocity in the turns) hands
+% the gate coasts that are too sure of themselves. The floors raise those
+% diagonals to the sigma the consistency read measured, once per epoch on
+% kfMeas.postCov, so that a coast start and the filter covariance the
+% separation subtracts carry the same floor: the floor cancels in the
+% separation and only its growth through the dynamics remains. The lists
+% are empty in the repository; the host fills them from its own read.
 % - REVAL_MIN_MEAS:
 % Minimum valid rows for a re-validation pass. The host's measurement
 % vector always carries the pressure-altitude row, so numMeas >= 1 even in
@@ -186,6 +215,22 @@ classdef CST_spfParam
         RETURN_RADIUS = 15.0;                     % m: the GNSS must land this close (horizontal) to the long
                                                   % coast, for a latch or a coast epoch to read as a return
         MAX_ANCHOR_AGE = uint32(234);             % epochs, 0.5 s each
+        COAST_Q_DATASHEET = false;                % the gate's coasts on the IMU datasheet Q (SPF_coastQ); false: the host's accumQ
+        IMU_ARW = 0.05;                           % deg/sqrt(h)   angle random walk
+        IMU_VRW = 0.0147;                         % m/s/sqrt(h)   velocity random walk (0.0015 g s/sqrt(h))
+        IMU_GYRO_BIAS_SIGMA = 0.03;               % deg/h         in-run bias wander, the Allan floor
+        IMU_ACC_BIAS_SIGMA = 4.0;                 % micro-g       in-run bias wander
+        IMU_BIAS_TAU = 300.0;                     % s             its correlation time
+        IMU_GYRO_WALK = 0.016;                    % deg/h per sqrt(h)   bias random walk
+        IMU_ACC_WALK = 10.0;                      % micro-g per sqrt(h)
+        COAST_POS_STATES = [1 2 3];               % the blocks in the host's state layout (here the simulation's)
+        COAST_VEL_STATES = [4 5 6];
+        COAST_ATT_STATES = [7 8 9];
+        COAST_ACC_BIAS_STATES = [10 11 12];
+        COAST_GYRO_BIAS_STATES = [13 14 15];
+        COAST_Q_INTERVAL = 0.5;                   % s: the interval when accumPhi carries no position-from-velocity entry
+        COAST_SIGMA_FLOOR_STATES = zeros(1, 0);   % the host's P floored on these states (none here)
+        COAST_SIGMA_FLOOR_VALUES = zeros(1, 0);   % at these sigmas, in the states' units
         MAX_MEAS = CST_gnssHybrid.MAX_MEASURES;   % max measurement rows per epoch (host class, uint8(51))
 
 

@@ -51,6 +51,10 @@ applyCorrection = false;
 correction      = zeros(numStates, 1);    % increment relative to the OPERATIONAL KF
 navState        = kfMeas.postState;       % absolute x+ to hand to setKF (LATCH / COMMIT)
 
+propTel = SPF_coastPropTel(propTel);                     % the gate's own Q on its coasts (CST_spfParam.COAST_Q_DATASHEET)
+postCovHost    = kfMeas.postCov;                         % the host's P as it came: handed back as it came at a commit
+kfMeas.postCov = SPF_coastStartCov(kfMeas.postCov);      % the host's P as the gate reads it: floored where its own
+                                                         % consistency reads say it underestimates (CST_spfParam.COAST_SIGMA_FLOOR_*)
 Phi = propTel.accumPhi;
 Q   = propTel.accumQ;
 kfIncrement = kfMeas.postState - kfMeas.priorState;      % K*y of the active filter
@@ -365,7 +369,7 @@ switch sys.mode
                 applyCorrection    = true;
                 correction         = sys.probSep;          % trial - coast (relative to the operational KF)
                 navState           = kfMeas.postState;     % the trial's x+ IS the clean solution
-                sys.coastCov       = kfMeas.postCov;
+                sys.coastCov       = postCovHost;          % the host takes its own P back, not the floored one
 
                 % just certified by a full quiet probation: new anchor; the
                 % long coasts start again on the new solution

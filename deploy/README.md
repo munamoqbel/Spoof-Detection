@@ -45,6 +45,22 @@ coast below T_N, so what the monitors would latch on is not re-admitted
 coast budget and the host's reset. The budget and the nav's own sigma use
 the unbounded covariance.
 
+The gate's own coast covariance: with `COAST_Q_DATASHEET` the gate
+propagates every coast it keeps (windows, anchor, long coasts, the coast
+in COAST) with a Q built from the IMU datasheet along the host's accumPhi
+(`SPF_coastQ`: velocity from the VRW, attitude from the ARW, the bias
+blocks from their in-run stability and walk, the position without noise,
+the host's accumQ on the states the IMU does not drive), instead of the
+host's tuning Q, which overstates an INS-only coast several times. The
+host's P is read through `COAST_SIGMA_FLOOR_STATES / _VALUES`, raised on
+the states its own consistency read shows it underestimates (the heading
+of a wheeled vehicle without heading aiding), once per epoch, before a
+coast starts from it and before the separation test subtracts it; at a
+commit the host takes its own P back. `SPF_coastPropTel`, `SPF_coastQ`,
+`SPF_coastStartCov` and `SPF_floorCov` are the four files; the flag, the
+`IMU_*` values and the `COAST_*_STATES` in the host's layout are the
+host's constants.
+
 The return path: `RETURN_BANK` long INS-only coasts are kept beside the
 anchor, the oldest spanning 80 to 120 s. At a latch and on every COAST
 epoch the position the rows ask for is read against it: when the nav had

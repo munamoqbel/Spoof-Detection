@@ -78,6 +78,9 @@ applyCorrection = false;
 correction      = zeros(numStates, 1);    % increment relative to the operational KF
 navState        = kfMeas.postState;       % x+ handed to setKF on a latch or a commit
 
+propTel = SPF_coastPropTel(propTel);                     % the gate's own Q on its coasts (CST_spfParam.COAST_Q_DATASHEET)
+postCovHost    = kfMeas.postCov;                         % the host's P as it came: handed back as it came at a commit
+kfMeas.postCov = SPF_coastStartCov(kfMeas.postCov);      % the host's P as the gate reads it, floored (CST_spfParam.COAST_SIGMA_FLOOR_*)
 Phi = propTel.accumPhi;
 Q   = propTel.accumQ;
 kfIncrement = kfMeas.postState - kfMeas.priorState;      % K y of the active filter
@@ -335,7 +338,7 @@ switch sys.mode
                 applyCorrection    = true;
                 correction         = sys.probSep;
                 navState           = kfMeas.postState;
-                sys.coastCov       = kfMeas.postCov;
+                sys.coastCov       = postCovHost;
 
                 sys.anchor.valid      = true;
                 sys.anchor.separation = zeros(numStates, 1);

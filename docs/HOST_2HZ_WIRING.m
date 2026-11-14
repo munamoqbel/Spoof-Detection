@@ -29,6 +29,10 @@
 %                 bias feedback kept. Keep the coast PURE (no baro update
 %                 either): the gate's coast covariance is Phi*P*Phi' + Q of
 %                 exactly this filter.
+%   propTel       unchanged on the wire: accumPhi, accumQ as the host
+%                 accumulates them. With CST_spfParam.COAST_Q_DATASHEET the
+%                 gate replaces accumQ for its own coasts (SPF_coastQ); the
+%                 host's filter never sees that Q.
 %   LATCH/COMMIT  nav.applyCorrection: (nav.state, nav.covar) through the
 %                 NORMAL setKF case, nothing else that epoch. A RETURN (the
 %                 end of a followed spoof, read against the gate's long

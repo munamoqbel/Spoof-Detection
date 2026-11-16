@@ -8,7 +8,9 @@ function test_cpiReplay()
 % range rows with one 30 m row must read tens of metres without a row floor and nothing with a floor of 6. The row screen: the
 % consistent 12 m shift must drop no row and leave the sums as they are; one range row of 60 m among eight must be dropped on
 % every epoch it is in, the sums on the rows left must stay clean and the detailed window must name it; with a truth run the
-% detail must read the 12 m as the nav's own error and the single bad row as the ranges'. Run from the repo root (the stand-in matrixInv):
+% detail must read the 12 m as the nav's own error and the single bad row as the ranges'. The free-clock fit: 30 m on every
+% range row must read as the clock's with no position shift, the 12 m as a position shift, the bad row as the rows'.
+% Run from the repo root (the stand-in matrixInv):
 % octave --no-gui --quiet --eval test_cpiReplay
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'tools'));  addpath(fullfile(here, '..', 'deploy'));  addpath(fullfile(here, '..'));
@@ -103,7 +105,18 @@ r8 = cpiReplay(log, tKf, spfLog, [tKf(25) tKf(50)], B, 'record', 0, run);
 runT = run;  runT.navPos = truePos;                                          % the nav on the truth: the bad row is the ranges'
 fprintf('--- the bad row with the truth run: the ranges carry it ---\n');
 r9 = cpiReplay(logR, tKf, [], [tKf(25) tKf(50)], [0 0 0], 'record', 0, runT);
-ok5 = all(r1.nDropped(25:50) == 0) && max(max(abs(r1.qScreen(36:50, :) - r1.qReplay(36:50, :)))) < 1e-9 && abs(r1.dHatScreen(35, 1) - r1.dHat(35, 1)) < 1e-9 ...
+%% a common mode: 30 m on every range row (the receiver clock jumping) must read as the clocks', not as a position shift
+logC = log;
+for k = 30:45
+    r = logC{k};  yk = r.innovation;  yk(1:17) = 0.1 * randn(17, 1);  yk(1:8) = yk(1:8) + 30;      % every range row, 30 m
+    logC{k}.innovation = yk;
+end
+fprintf('--- 30 m on every range row on epochs 30 to 45, B = 0: a clock jump ---\n');
+r10 = cpiReplay(logC, tKf, [], [tKf(25) tKf(50)], [0 0 0]);
+okC = all(abs(r10.shiftFree(35, :)) < 1.5) && abs(r10.clockFree{35} - 30) < 1 && ~isempty(r10.detail) && all(strcmp({r10.detail.carrier}, 'clock')) ...
+   && all(r10.nDropped(30:45) == 0) && abs(r1.shiftFree(35, 1) - 12) < 0.5 && abs(r1.clockFree{35}) < 1 && strcmp(r1.detail(1).carrier, 'position') ...
+   && strcmp(r7.detail(1).carrier, 'rows') && all(abs(r7.shiftFree(35, :)) < 1.5);
+ok5 = okC && all(r1.nDropped(25:50) == 0) && max(max(abs(r1.qScreen(36:50, :) - r1.qReplay(36:50, :)))) < 1e-9 && abs(r1.dHatScreen(35, 1) - r1.dHat(35, 1)) < 1e-9 ...
    && all(r7.nDropped(30:45) == 1) && all(r7.worstRow(30:45) == 3) && all(r7.worstNorm(30:45) > 3) && all(r7.nDropped(25:29) == 0) ...
    && max(max(r7.qReplay(30:50, :))) > 1 && max(max(r7.qScreen(30:50, :))) < 0.1 && max(max(abs(r7.dHatScreen(30:45, :)))) < 1 ...
    && max(max(abs(r7.dHat(30:45, :)))) > 5 && r7.rowK == 3 && ~isempty(r7.detail) && r7.detail(1).q >= 1 && r7.detail(1).qScreen < 0.1 ...
@@ -111,5 +124,5 @@ ok5 = all(r1.nDropped(25:50) == 0) && max(max(abs(r1.qScreen(36:50, :) - r1.qRep
    && numel(r8.detail) == 1 && strcmp(r8.detail(1).verdict, 'nav') && abs(r8.detail(1).navErr - 12) < 0.3 && abs(r8.detail(1).excess) < 0.5 ...
    && ~isempty(r9.detail) && strcmp(r9.detail(1).verdict, 'ranges') && abs(r9.detail(1).navErr) < 1e-6 && r9.detail(1).excess > 5;
 if ok1 && ok2 && ok3 && ok4 && ok5, fprintf('=== test_cpiReplay PASS ===\n');
-else, fprintf('ok1 %d ok2 %d ok3 %d ok4 %d ok5 %d\n=== test_cpiReplay FAIL ===\n', ok1, ok2, ok3, ok4, ok5); end
+else, fprintf('ok1 %d ok2 %d ok3 %d ok4 %d ok5 %d okC %d\n=== test_cpiReplay FAIL ===\n', ok1, ok2, ok3, ok4, ok5, okC); end
 end

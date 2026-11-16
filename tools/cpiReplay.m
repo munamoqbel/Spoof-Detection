@@ -36,15 +36,23 @@ function [res] = cpiReplay(spfMeasLog, tKf, spfLog, tWin, nominalBias, rMode, mi
 %   redundancy, and the projection is read again on the rows left (dHatScreen, xiScreen, qScreen, nDropped). A spoof
 %   that shifts the position moves every row together and drops nothing; a reflected or re-acquired satellite disagrees
 %   with the others and is dropped. Every ten-epoch sum that crosses 1 in the window (the largest one when none does) is
-%   printed epoch by epoch: the rows, the reading, the fit's worst row (its index in the record, its elevation from H,
-%   its residual over the sigma of the fit), the rows dropped, the reading on the rows left and, with run, the logged
-%   nav's error from the truth (nav minus truth, NED) on the axis.
+%   printed epoch by epoch: the rows (the range rows per system), the reading, the shift [N E D] the rows imply with
+%   the clocks left free and the clock shift per system (the same fit: what the rows say about the position once a
+%   common mode per system is allowed, where the CPI's projection holds the clocks at the host's P), the fit's worst
+%   row (its index in the record, its elevation from H, its residual over the sigma of the fit), the rows dropped, the
+%   reading on the rows left and, with run, the logged nav's error from the truth (nav minus truth, NED) on the axis.
+%   Each detailed window ends with what carries the reading over the epochs that count: the rows dropped, a common
+%   mode of the set (a clock jump, the inter-channel biases of a new set) or the position the rows agree on; and, with
+%   run, whether the ranges or the nav carry it, or both.
 %   Result: t, dHat, sig, sigR, xi, qReplay, qLog [K x nAxes], sigP [K x nAxes], matches, window, axes, rMode,
 %   rNominal, minRows, nRangeRows, peaks (a cell per axis of [t q] for every run of the ten-epoch sum above 0.25 in
 %   the window, one peak per run: the near misses, not only the largest), dHatScreen, xiScreen, qScreen [K x nAxes],
-%   nDropped, worstRow, worstNorm [K x 1], rowK, detail (a struct per detailed window: tEnd, axis, q, qScreen, nDropped,
-%   navErr and excess, the medians over its epochs of nav minus truth on the axis and of |dHat| - |nav - truth|, NaN
-%   without run, and verdict, 'ranges' when the reading exceeds the nav's error by three sigma, 'nav' otherwise).
+%   nDropped, worstRow, worstNorm [K x 1], shiftFree [K x 3] (the shift of the free-clock fit), clockFree {K x 1} (the
+%   clock shift per system), rowK, detail (a struct per detailed window: tEnd, axis, q, qScreen, nDropped, shiftFree
+%   and carrier, the free-clock shift on the axis over the counting epochs and what carries the reading, 'rows',
+%   'clock' or 'position'; navErr and excess, the medians over the counting epochs of nav minus truth on the axis and
+%   of |dHat| - |nav - truth|, NaN without run, and verdict, 'ranges' when the reading exceeds the nav's error by three
+%   sigma, 'nav' within 1.5 sigma of it, 'both' between).
 %   Needs SPF_cpiMonitor, CST_spfParam and the host's matrixInv on the path. MATLAB desktop tool, not codegen. Runs under Octave.
 
 if iscell(spfMeasLog), spfMeasLog = [spfMeasLog{:}]; end
@@ -75,6 +83,7 @@ kAll = [kB; kW];
 dHat = NaN(K, nA);  sig = NaN(K, nA);  sigR = NaN(K, nA);  xi = zeros(K, nA);  sigP = NaN(K, nA);  qReplay = NaN(K, nA);  qLog = NaN(K, nA);
 dHatS = NaN(K, nA);  sigS = NaN(K, nA);  xiS = zeros(K, nA);  qScreen = NaN(K, nA);                 % the row screen
 nDropped = zeros(K, 1);  worstRow = zeros(K, 1);  worstNorm = NaN(K, 1);  worstEl = NaN(K, 1);  dropList = cell(K, 1);
+shiftFit = NaN(K, 3);  clkFit = cell(K, 1);  sysRows = cell(K, 1);                                    % the free-clock fit
 haveRun = ~isempty(run);
 if haveRun && ~(isstruct(run) && all(isfield(run, {'t', 'navPos', 'tTrue', 'truePos'})))
     error('cpiReplay:run', 'run needs the fields t, navPos [lat lon h], tTrue and truePos, as runCompare reads them');
@@ -118,8 +127,9 @@ for k = kAll'
         if r2 > 0 && isfinite(r2), sigR(k, a) = 1 / sqrt(r2); end
     end
     % the row screen: the range rows against one shift and one clock per system, the rows beyond ROW_K sigma dropped
-    [drop, wRow, wNorm, wEl] = rowScreen(H, y, R, ROW_K);
+    [drop, wRow, wNorm, wEl, shiftK, clkK, sysK] = rowScreen(H, y, R, ROW_K);
     dropList{k} = drop;  nDropped(k) = numel(drop);  worstRow(k) = wRow;  worstNorm(k) = wNorm;  worstEl(k) = wEl;
+    shiftFit(k, :) = shiftK;  clkFit{k} = clkK;  sysRows{k} = sysK;
     if isempty(drop)
         dHatS(k, :) = dHat(k, :);  sigS(k, :) = sig(k, :);  xiS(k, :) = xi(k, :);
     else
@@ -309,11 +319,12 @@ elseif size(sel, 1) > DETAIL_MAX
     fprintf('   %d windows cross 1; the first %d are detailed\n', size(sel, 1), DETAIL_MAX);
     sel = sel(1:DETAIL_MAX, :);
 end
-detail = struct('tEnd', {}, 'axis', {}, 'q', {}, 'qScreen', {}, 'nDropped', {}, 'navErr', {}, 'excess', {}, 'verdict', {});
+detail = struct('tEnd', {}, 'axis', {}, 'q', {}, 'qScreen', {}, 'nDropped', {}, 'shiftFree', {}, 'carrier', {}, 'navErr', {}, 'excess', {}, 'verdict', {});
 for i = 1:size(sel, 1)
     kE = sel(i, 1);  a = sel(i, 2);  idx = max(kE - N + 1, 1):kE;
     fprintf('   window ending %.2f s on %s: q/T_N %.3f, on the rows left %.3f; B = %g m\n', tKf(kE), letters(a), qReplay(kE, a), qScreen(kE, a), nominalBias(axes(a)));
-    fprintf('      %8s %4s %4s | %6s %5s %5s | %s %4s %5s %7s %7s | %6s %5s | %s\n', 't [s]', 'rows', 'rng', 'dHat', 'sig', 'xi', 'fit:', 'row', 'elev', 'res/sig', 'dropped', 'dHat''', 'xi''', 'nav - truth N, E, D (m)');
+    fprintf('      %8s %4s %-9s | %6s %5s %5s | %s %6s %6s %6s  %-17s | %s %4s %5s %7s %7s | %6s %5s | %s\n', 't [s]', 'rows', 'rng/system', 'dHat', 'sig', 'xi', ...
+        'clocks free:', 'N', 'E', 'D', 'clock per system', 'worst', 'row', 'elev', 'res/sig', 'dropped', 'dHat''', 'xi''', 'nav - truth N, E, D (m)');
     navErrW = NaN(numel(idx), 3);
     for j = 1:numel(idx)
         k = idx(j);  m = double(spfMeasLog(k).numMeas);
@@ -321,27 +332,56 @@ for i = 1:size(sel, 1)
             navErrW(j, :) = nedDelta(interpRows(run.t(:), run.navPos, tKf(k)), interpRows(run.tTrue(:), run.truePos, tKf(k)));
         end
         if m < 1
-            fprintf('      %8.2f %4d %4d | no rows\n', tKf(k), 0, 0);  continue;
+            fprintf('      %8.2f %4d %-9s | no rows\n', tKf(k), 0, '0');  continue;
         elseif ~counts(k)
-            fprintf('      %8.2f %4d %4d | below the row floor: not counted\n', tKf(k), m, nRangeRows(k));  continue;
+            fprintf('      %8.2f %4d %-9s | below the row floor: not counted\n', tKf(k), m, sprintf('%d', nRangeRows(k)));  continue;
         end
         if worstRow(k) > 0, wr = sprintf('%4d %5.0f %7.1f', worstRow(k), worstEl(k), worstNorm(k)); else, wr = sprintf('%4s %5s %7s', '-', '-', 'no fit'); end
         if haveRun, te = sprintf('%+6.1f %+6.1f %+6.1f', navErrW(j, :)); else, te = '(give run)'; end
-        fprintf('      %8.2f %4d %4d | %6s %5s %5s | %s %s %7d | %6s %5s | %s\n', tKf(k), m, nRangeRows(k), num(dHat(k, a), '%+6.1f'), num(sig(k, a), '%5.2f'), ...
-            num(xi(k, a), '%5.2f'), '    ', wr, nDropped(k), num(dHatS(k, a), '%+6.1f'), num(xiS(k, a), '%5.2f'), te);
+        rs = sprintf('%d', nRangeRows(k));
+        if numel(sysRows{k}) > 1, rs = sprintf('%d=%s', nRangeRows(k), strjoin(arrayfun(@(v) sprintf('%d', v), sysRows{k}, 'UniformOutput', false), '+')); end
+        if isempty(clkFit{k}), cs = '-'; else, cs = strjoin(arrayfun(@(v) sprintf('%+.1f', v), clkFit{k}, 'UniformOutput', false), ' '); end
+        fprintf('      %8.2f %4d %-9s | %6s %5s %5s | %s %6s %6s %6s  %-17s | %s %s %7d | %6s %5s | %s\n', tKf(k), m, rs, num(dHat(k, a), '%+6.1f'), num(sig(k, a), '%5.2f'), ...
+            num(xi(k, a), '%5.2f'), '            ', num(shiftFit(k, 1), '%+6.1f'), num(shiftFit(k, 2), '%+6.1f'), num(shiftFit(k, 3), '%+6.1f'), cs, ...
+            '     ', wr, nDropped(k), num(dHatS(k, a), '%+6.1f'), num(xiS(k, a), '%5.2f'), te);
     end
-    d = struct('tEnd', tKf(kE), 'axis', a, 'q', qReplay(kE, a), 'qScreen', qScreen(kE, a), 'nDropped', sum(nDropped(idx)), 'navErr', NaN, 'excess', NaN, 'verdict', '');
+    d = struct('tEnd', tKf(kE), 'axis', a, 'q', qReplay(kE, a), 'qScreen', qScreen(kE, a), 'nDropped', sum(nDropped(idx)), 'shiftFree', NaN, 'carrier', '', ...
+        'navErr', NaN, 'excess', NaN, 'verdict', '');
+    % the epochs that count: those whose xi is above zero, else every epoch with a reading
+    cnt = idx(xi(idx, a) > 0 & isfinite(dHat(idx, a)));
+    if isempty(cnt), cnt = idx(isfinite(dHat(idx, a))); end
+    if ~isempty(cnt)
+        medD = median(abs(dHat(cnt, a)));  medS = medF(abs(dHatS(cnt, a)));  medFree = medF(shiftFit(cnt, a));  d.shiftFree = medFree;
+        if isfinite(medS) && medS < 0.5 * medD
+            d.carrier = 'rows';
+            fprintf('      over the %d epochs that count the reading is %.1f m and %.1f m on the rows left: the rows dropped carry it\n', numel(cnt), medD, medS);
+        elseif isfinite(medFree) && abs(medFree) < 0.5 * medD
+            d.carrier = 'clock';
+            fprintf('      over the %d epochs that count the reading is %.1f m while the rows with their clocks free put the shift on %s at %+.1f m: a common mode\n', numel(cnt), medD, letters(a), medFree);
+            fprintf('      of the set carries it (the receiver clock, or the biases of a changed satellite set), read as position because the projection holds the clocks at the host''s P\n');
+        elseif isfinite(medFree)
+            d.carrier = 'position';
+            fprintf('      over the %d epochs that count the reading is %.1f m and the rows with their clocks free put the shift on %s at %+.1f m: the rows agree on a position shift\n', numel(cnt), medD, letters(a), medFree);
+        else
+            fprintf('      over the %d epochs that count the reading is %.1f m; no free-clock fit (too few range rows for a redundancy)\n', numel(cnt), medD);
+        end
+    end
     if haveRun
-        ok = isfinite(dHat(idx, a)) & isfinite(navErrW(:, a));
-        if any(ok)
-            d.navErr = median(navErrW(ok, a));  d.excess = median(abs(dHat(idx(ok), a)) - abs(navErrW(ok, a)));
-            sg = medF(sig(idx(ok), a));
+        ok = cnt(isfinite(navErrW(cnt - idx(1) + 1, a)));
+        if ~isempty(ok)
+            jj = ok - idx(1) + 1;
+            d.navErr = median(navErrW(jj, a));  d.excess = median(abs(dHat(ok, a)) - abs(navErrW(jj, a)));
+            sg = medF(sig(ok, a));
             if d.excess > 3 * sg
                 d.verdict = 'ranges';
-                fprintf('      the reading exceeds the logged nav''s error from the truth by %.1f m (median of |dHat| - |nav - truth|, %.1f sigma): the ranges carry it\n', d.excess, d.excess / sg);
-            else
+                fprintf('      the reading exceeds the logged nav''s error from the truth by %.1f m (median of |dHat| - |nav - truth| over those epochs, %.1f sigma): the ranges carry it\n', d.excess, d.excess / sg);
+            elseif abs(d.excess) <= 1.5 * sg
                 d.verdict = 'nav';
-                fprintf('      the reading is within %.1f m of the logged nav''s error from the truth (median of |dHat| - |nav - truth|, %.1f sigma): the nav carries it\n', abs(d.excess), abs(d.excess) / sg);
+                fprintf('      the reading is within %.1f m of the logged nav''s error from the truth (median of |dHat| - |nav - truth| over those epochs, %.1f sigma): the nav carries it\n', abs(d.excess), abs(d.excess) / sg);
+            else
+                d.verdict = 'both';
+                fprintf('      the reading exceeds the logged nav''s error from the truth by %.1f m (median of |dHat| - |nav - truth| over those epochs, %.1f sigma): the nav carries\n', d.excess, d.excess / sg);
+                fprintf('      %.1f m of it and the ranges the rest\n', abs(d.navErr));
             end
         else
             fprintf('      no epoch of the window has both a reading and a truth sample\n');
@@ -368,7 +408,7 @@ end
 res = struct('t', tKf, 'dHat', dHat, 'sig', sig, 'sigR', sigR, 'xi', xi, 'qReplay', qReplay, 'qLog', qLog, 'sigP', sigP, ...
     'matches', matches, 'window', [tKf(kW(1)) tKf(kW(end))], 'axes', axes, 'rMode', rMode, 'rNominal', rNom, ...
     'minRows', minRows, 'nRangeRows', nRangeRows, 'peaks', {peaks}, 'dHatScreen', dHatS, 'xiScreen', xiS, 'qScreen', qScreen, ...
-    'nDropped', nDropped, 'worstRow', worstRow, 'worstNorm', worstNorm, 'rowK', ROW_K, 'detail', detail);
+    'nDropped', nDropped, 'worstRow', worstRow, 'worstNorm', worstNorm, 'shiftFree', shiftFit, 'clockFree', {clkFit}, 'rowK', ROW_K, 'detail', detail);
 end
 
 %------------------------------------------------------------------------
@@ -392,15 +432,21 @@ typ(normV > 0.5 & normP < 0.1) = 2;
 end
 
 %------------------------------------------------------------------------
-function [drop, worst, worstNorm, worstEl] = rowScreen(H, y, R, rowK)
+function [drop, worst, worstNorm, worstEl, shift, clk, sysK] = rowScreen(H, y, R, rowK)
 % the range rows of one epoch fitted by one shift [N E D] and one clock per system (every column beyond the velocity a
 % range row uses), weighted by R; the row with the largest residual over its sigma is dropped while it exceeds rowK and
 % one degree of redundancy is left after the drop. worst is the row with the largest residual of the first fit (its
-% index in the record), worstNorm that residual over its sigma, worstEl the elevation its line of sight gives (deg)
-drop = zeros(1, 0);  worst = 0;  worstNorm = NaN;  worstEl = NaN;
+% index in the record), worstNorm that residual over its sigma, worstEl the elevation its line of sight gives (deg);
+% shift [N E D] and clk (one per clock column) are the last fit, on the rows left, NaN without one; sysK the range rows
+% per clock column
+drop = zeros(1, 0);  worst = 0;  worstNorm = NaN;  worstEl = NaN;  shift = NaN(1, 3);  clk = zeros(1, 0);  sysK = zeros(1, 0);
 typ = rowTypes(H);  keep = find(typ == 1)';
 if numel(keep) < 2, return; end
-cols = [1 2 3, 6 + find(any(abs(H(keep, 7:end)) > 1e-9, 1))];
+clkCols = 6 + find(any(abs(H(keep, 7:end)) > 1e-9, 1));
+cols = [1 2 3, clkCols];
+sysK = zeros(1, numel(clkCols));
+for c = 1:numel(clkCols), sysK(c) = nnz(abs(H(keep, clkCols(c))) > 1e-9); end
+clk = NaN(1, numel(clkCols));
 first = true;
 while true
     nK = numel(keep);
@@ -409,7 +455,8 @@ while true
     Aw = H(keep, cols) .* repmat(sqrt(w), 1, numel(cols));  yw = y(keep) .* sqrt(w);
     rk = rank(Aw);
     if nK - rk < 1, break; end                               % no redundancy: nothing can be judged
-    hat = Aw * pinv(Aw);
+    pA = pinv(Aw);  hat = Aw * pA;
+    delta = pA * yw;  shift = delta(1:3)';  clk = delta(4:end)';
     rw = yw - hat * yw;
     rn = rw ./ sqrt(max(1 - diag(hat), 1e-6));
     [mx, i] = max(abs(rn));

@@ -432,10 +432,15 @@ moves every row together and drops nothing; a reflected or re-acquired
 satellite disagrees with the others and is dropped, so the two sums side
 by side say whether a window's reading is a position shift or a few bad
 rows. Every window whose sum crosses the threshold (the largest when none
-does) is printed epoch by epoch with its rows, the fit's worst row, the
-rows dropped and the reading on the rows left; given the run's truth
-arrays it adds the logged nav's error from the truth on the axis and says
-whether the ranges or the nav carry the reading.
+does) is printed epoch by epoch with its rows per system, the shift the
+rows imply with their clocks left free and the clock shift per system,
+the fit's worst row, the rows dropped and the reading on the rows left,
+and ends with what carries the reading: the rows dropped, a common mode of
+the set (a receiver clock jump or the biases of a changed satellite set,
+which the CPI's projection reads as position because it holds the clocks
+at the host's P) or a position shift the rows agree on; given the run's
+truth arrays it adds the logged nav's error from the truth on the axis
+and says whether the ranges or the nav carry the reading, or both.
 
 `runCompare` ends the outage at the first logged P that falls by more than
 30% inside the given interval (the first update back, or a reset): the

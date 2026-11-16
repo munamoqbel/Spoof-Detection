@@ -98,7 +98,8 @@ imuF = imu;  imuF.floorStates = [7 8 9];  imuF.floorSigmas = [1e-4 1e-4 10e-3];
 fprintf('--- a heading of 10 mrad the host''s P states at 0.1 mrad, with the gate''s floors ---\n');
 rH = coastDriftCheck(runH, tKf, tOut, [], propH, P0, imuF);
 jH = find(rH.T >= 120, 1);
-okGate = rH.sigGate(jH) > 1.5 * rH.sigDs(jH) && abs(rH.sigGate(jH) / rH.errH(jH) - 1) < 0.15 && abs(rH.headingFloor - 10e-3) < 1e-12;
+okGate = rH.sigGate(jH) > 1.5 * rH.sigDs(jH) && abs(rH.sigGate(jH) / rH.errH(jH) - 1) < 0.15 && abs(rH.headingFloor - 10e-3) < 1e-12 ...
+    && abs(rH.floorScale - 1) < 0.2 && isnan(r1.floorScale);                   % the list drawn is this coast's: scale near 1
 fprintf('--- the same coast without the floors: the heading the tool solves for ---\n');
 rH0 = coastDriftCheck(runH, tKf, tOut, [], propH, P0, imu);
 okImplied = abs(rH0.headingImplied / 10e-3 - 1) < 0.3 && all(isnan(rH0.sigGate)) && rH0.ratioDs < 0.7;

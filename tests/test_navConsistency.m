@@ -45,9 +45,13 @@ runOff = run;  runOff.navPos(:, 1) = runOff.navPos(:, 1) + 3 / (Rm + h0);
 rO = navConsistency(runOff, tKf, pDiag);
 okOff = rO.ratio(1) < 0.7 && abs(rO.ratioC(1) - 1) < 0.1 && abs(rO.meanErr(1) - 3) < 0.2 && abs(rO.ratioC(2) - r1.ratioC(2)) < 1e-9 ...
     && all(abs(r1.ratioC - r1.ratio) < 0.05);
-fprintf('consistent P reads near 1: %s | three times reads 3: %s | a third reads 0.33 with many beyond 3 sigma: %s | window: %s | forms of P: %s | offset: %s\n', ...
-    pf(ok1), pf(ok3), pf(okT), pf(okW), pf(okForm), pf(okOff));
-if ok1 && ok3 && okT && okW && okForm && okOff, fprintf('=== test_navConsistency PASS ===\n');
+% the per-axis rms of the multi-axis groups: the tilt's two axes at sAtt(1:2), the gyro bias's three at sGyr
+gT = find(strcmp(r1.group, 'tilt (roll, pitch)'));  gG = find(strcmp(r1.group, 'gyro bias'));
+okAxes = all(abs(r1.rmsAxes(gT, 1:2) ./ sAtt(1:2) - 1) < 0.05) && isnan(r1.rmsAxes(gT, 3)) ...
+    && all(abs(r1.rmsAxes(gG, :) ./ sGyr - 1) < 0.05) && all(isnan(r1.rmsAxes(1, 2:3)));
+fprintf('consistent P reads near 1: %s | three times reads 3: %s | a third reads 0.33 with many beyond 3 sigma: %s | window: %s | forms of P: %s | offset: %s | per-axis rms: %s\n', ...
+    pf(ok1), pf(ok3), pf(okT), pf(okW), pf(okForm), pf(okOff), pf(okAxes));
+if ok1 && ok3 && okT && okW && okForm && okOff && okAxes, fprintf('=== test_navConsistency PASS ===\n');
 else, fprintf('=== test_navConsistency FAIL ===\n'); end
 end
 

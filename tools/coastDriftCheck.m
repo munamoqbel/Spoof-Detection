@@ -33,9 +33,14 @@ function [res] = coastDriftCheck(run, tKf, tOut, tReacq, propTelLog, pAtOut, imu
 %   legs and its P understates: the tool also solves for the heading sigma at tOut that would explain the coast at
 %   120 s with the datasheet Q along this Phi (the heading reaches the position only where the host's Phi couples
 %   it, in the manoeuvres of the coast), which is the heading floor the gate needs, read from one coast.
+%   With floors it also solves for the scale on the whole floor list at which the gate column meets the measured
+%   coast at 120 s: 1 means the list is the coast's, 0.5 that the floors over-cover it twice (a floor read from an
+%   aided rms is a magnitude over axes and over the turns, and the states of an unobservable pair carry errors that
+%   partly cancel in a coast), 2 that they under-cover it.
 %   Result: t (the coast epochs), T (seconds from tOut), err [m x 3], errH, sigLogged, sigHost, sigDs, sigQ, sigGate
 %   (NaN without floors), errC, ratioHost, ratioDs, ratioGate, headingSigmaHost, headingFloor, headingImplied (rad;
-%   0 when the datasheet already covers the coast, Inf when 0.5 rad does not), tEnd, note.
+%   0 when the datasheet already covers the coast, Inf when 0.5 rad does not), floorScale (NaN without floors),
+%   tEnd, note.
 %   MATLAB desktop tool, not codegen. Runs under Octave.
 G = 9.80665;  R2D = 180 / pi;
 if nargin < 7 || isempty(imu), imu = struct(); end
@@ -145,6 +150,16 @@ else
     fprintf('; the heading sigma that explains the coast at %.0f s along this Phi is %.1f mrad\n', T(jv), headingImplied * 1e3);
     fprintf('           (the heading floor this coast asks for, read from one coast: a sample with its scatter, not an rms)\n');
 end
+floorScale = NaN;
+if hasFloor
+    floorScale = impliedScale(prop, P0, imu.floorStates, imu.floorSigmas, jv, errH(jv));
+    if isfinite(floorScale)
+        fprintf('   the floor list scaled by %.2f meets the coast at %.0f s (1: the list is this coast''s; below 1 the floors over-cover it,\n', floorScale, T(jv));
+        fprintf('   a floor read from an aided rms being a magnitude over axes and turns, and an unobservable pair cancelling in part)\n');
+    else
+        fprintf('   no scale of the floor list up to 10 meets the coast at %.0f s: the gap is not in the floored states\n', T(jv));
+    end
+end
 if ratioDs >= 0.7 && ratioDs <= 2
     fprintf('   VERDICT: the datasheet Q along the host''s Phi explains the coast; the host''s P overstates it %.1f times\n', ratioHost);
 elseif ratioDs < 0.7
@@ -160,7 +175,32 @@ else
 end
 res = struct('t', t, 'T', T, 'err', err, 'errH', errH, 'sigLogged', sigLogged, 'sigHost', sigHost, 'sigDs', sigDs, 'sigQ', sigQ, ...
     'sigGate', sigGate, 'sigHostD', sigHostD, 'sigDsD', sigDsD, 'errC', errC, 'ratioHost', ratioHost, 'ratioDs', ratioDs, 'ratioGate', ratioGate, ...
-    'headingSigmaHost', headingSigmaHost, 'headingFloor', headingFloor, 'headingImplied', headingImplied, 'tEnd', tKf(kEnd), 'note', note, 'Qc', Qc);
+    'headingSigmaHost', headingSigmaHost, 'headingFloor', headingFloor, 'headingImplied', headingImplied, 'floorScale', floorScale, ...
+    'tEnd', tKf(kEnd), 'note', note, 'Qc', Qc);
+end
+
+function [s] = impliedScale(prop, P0, floorStates, floorSigmas, jv, target)
+% the scale on the floor list at which the floored P0 with the datasheet Q meets the measured error at epoch jv:
+% bisection on [0, 10]; NaN when the range does not bracket the target
+f = @(sc) predictFloored(prop, P0, floorStates, floorSigmas * sc, jv);
+lo = 0;  hi = 10;
+if f(lo) >= target, s = 0; return; end
+if f(hi) < target, s = NaN; return; end
+for it = 1:40
+    mid = 0.5 * (lo + hi);
+    if f(mid) < target, lo = mid; else, hi = mid; end
+end
+s = 0.5 * (lo + hi);
+end
+
+function [v] = predictFloored(prop, P0, floorStates, floorSigmas, jv)
+P = P0;
+for k = 1:numel(floorStates)
+    idx = floorStates(k);
+    if P(idx, idx) < floorSigmas(k)^2, P(idx, idx) = floorSigmas(k)^2; end
+end
+sig = propagateSigma(prop, P, false);
+v = sig(jv);
 end
 
 function [sigH, sigD] = propagateSigma(prop, P0, useHostQ)

@@ -20,8 +20,12 @@ function [res] = navConsistency(run, tKf, pAtEpochs, aidedWin)
 %   Groups: position N, E, D; velocity N, E, D; tilt (the horizontal pair, rotation-invariant); heading;
 %   accelerometer bias; gyro bias. A group whose truth is not in the run is skipped. The tilt and bias groups
 %   compare magnitudes (the mean removed per component), so the host's sign conventions do not matter.
+%   For the multi-axis groups (tilt, the biases) a second line gives the rms error per axis with the mean out: a
+%   floor on a state is a per-axis number, and the group's rms is the norm over its axes, 1.4 to 1.7 times the
+%   per-axis value.
 %   Result: res.group (names), res.rmsErr, res.meanErr (the norm of the mean per component), res.rmsErrC (mean
-%   removed), res.rmsSig, res.ratio, res.ratioC (mean removed), res.beyond3 (per group), res.K (epochs read).
+%   removed), res.rmsSig, res.ratio, res.ratioC (mean removed), res.beyond3 (per group), res.rmsAxes ([g x 3] the
+%   per-axis rms with the mean out, NaN where a group has fewer axes), res.K (epochs read).
 %   MATLAB desktop tool, not codegen. Runs under Octave.
 if nargin < 4, aidedWin = []; end
 tKf = tKf(:);  K = numel(tKf);
@@ -33,7 +37,7 @@ if ~isempty(aidedWin)
     use = false(K, 1);
     for w = 1:size(aidedWin, 1), use = use | (tKf >= aidedWin(w, 1) & tKf <= aidedWin(w, 2)); end
 end
-G = struct('names', {{}}, 'rmsErr', [], 'meanErr', [], 'rmsErrC', [], 'rmsSig', [], 'ratio', [], 'ratioC', [], 'beyond3', []);
+G = struct('names', {{}}, 'rmsErr', [], 'meanErr', [], 'rmsErrC', [], 'rmsSig', [], 'ratio', [], 'ratioC', [], 'beyond3', [], 'rmsAxes', zeros(0, 3));
 % position
 e = navErrAt(run, tKf);
 ax = {'N', 'E', 'D'};
@@ -73,12 +77,16 @@ fprintf('   %-22s %12s %12s %12s %8s %10s %10s\n', 'group', 'rms error', 'mean e
 for g = 1:numel(G.names)
     fprintf('   %-22s %12.4g %12.4g %12.4g %8.2f %10.2f %9.2f%%\n', G.names{g}, G.rmsErr(g), G.meanErr(g), G.rmsSig(g), ...
         G.ratio(g), G.ratioC(g), 100 * G.beyond3(g));
+    ax = G.rmsAxes(g, isfinite(G.rmsAxes(g, :)));
+    if numel(ax) > 1
+        fprintf('   %-22s %s\n', '   per axis, mean out', strtrim(sprintf('%12.4g', ax)));
+    end
 end
 fprintf('   (ratio = sigma / error: near 1 consistent, 3 a P three times the error, 0.3 overconfident; mean out: the same with the\n');
 fprintf('   mean error over the window removed, a constant offset being no business of P; a consistent Gaussian P has 0.3 %% beyond\n');
 fprintf('   3 sigma; position in m, velocity m/s, angles rad, biases in the units of biasEst; the mean of a multi-axis group is its norm)\n');
 res = struct('group', {G.names}, 'rmsErr', G.rmsErr, 'meanErr', G.meanErr, 'rmsErrC', G.rmsErrC, 'rmsSig', G.rmsSig, ...
-    'ratio', G.ratio, 'ratioC', G.ratioC, 'beyond3', G.beyond3, 'K', nnz(use));
+    'ratio', G.ratio, 'ratioC', G.ratioC, 'beyond3', G.beyond3, 'rmsAxes', G.rmsAxes, 'K', nnz(use));
 end
 
 function [G] = add(G, name, err, sg, use)
@@ -92,6 +100,11 @@ re = sqrt(mean(mag .^ 2));  reC = sqrt(mean(magC .^ 2));  rs = sqrt(mean(sg(ok) 
 G.names{end + 1} = name;  G.rmsErr(end + 1) = re;  G.meanErr(end + 1) = norm(mu);  G.rmsErrC(end + 1) = reC;
 G.rmsSig(end + 1) = rs;  G.ratio(end + 1) = rs / re;  G.ratioC(end + 1) = rs / reC;
 G.beyond3(end + 1) = mean(mag > 3 * sg(ok));
+axes = NaN(1, 3);
+for c = 1:size(err, 2)
+    axes(c) = sqrt(mean((err(ok, c) - mu(c)) .^ 2));
+end
+G.rmsAxes(end + 1, :) = axes;
 end
 
 function [sig, n] = sigmaAt(p, K)

@@ -1,4 +1,4 @@
-function [res] = cpiReplay(spfMeasLog, tKf, spfLog, tWin, nominalBias, rMode, minRows)
+function [res] = cpiReplay(spfMeasLog, tKf, spfLog, tWin, nominalBias, rMode, minRows, run)
 %CPIREPLAY  The CPI monitor replayed on the saved spfMeas records: what its projection reads, epoch by epoch, against the gate log.
 %   res = cpiReplay(spfMeasLog, tKf, spfLog, tWin)               B from CST_spfParam on the path (the host's values)
 %   res = cpiReplay(spfMeasLog, tKf, spfLog, tWin, nominalBias)  B per NED position axis (m)
@@ -17,6 +17,10 @@ function [res] = cpiReplay(spfMeasLog, tKf, spfLog, tWin, nominalBias, rMode, mi
 %                                                 the few satellites left in a partial outage carry reflected signals
 %                                                 or the gap's drift, and a one-axis projection on three rows turns one
 %                                                 bad row into tens of metres; this measures the rule offline
+%   res = cpiReplay(..., rMode, minRows, run)     the detailed windows read against the truth: run holds the arrays
+%                                                 runCompare reads (t, navPos [lat lon h], tTrue, truePos), and each
+%                                                 detailed window prints the logged nav's error from the truth beside the
+%                                                 reading, so the printout says whether the ranges or the nav carry it
 %   spfLog may be [] (no comparison with the log); tWin [tOn tOff] in s on tKf, the minute before it is the baseline.
 %   Per epoch and monitored axis, from the record's innovation gamma, S and H: dHat = f' S^-1 gamma / (f' S^-1 f), the
 %   offset the CPI projection reads on the axis (m); sig = 1 / sqrt(f' S^-1 f), the sigma of that reading (m); sigR =
@@ -26,9 +30,21 @@ function [res] = cpiReplay(spfMeasLog, tKf, spfLog, tWin, nominalBias, rMode, mi
 %   position sigma the host carries. Prints the table over the window, the medians over the minute before and over
 %   the window, whether the replay matches the log (then the gate was fed these records), and what sets the reading:
 %   how large the offset read is, how many epochs it stays above B, and whether S is R or the host's P.
+%   Row screen, a diagnostic read beside the replay, not in the gate: per epoch the range rows are fitted by one position
+%   shift [N E D] and one clock per system (every column beyond the velocity that a range row uses) with the replay's R;
+%   a row whose residual exceeds ROW_K sigma of the fit is dropped, the worst first, while the fit keeps one degree of
+%   redundancy, and the projection is read again on the rows left (dHatScreen, xiScreen, qScreen, nDropped). A spoof
+%   that shifts the position moves every row together and drops nothing; a reflected or re-acquired satellite disagrees
+%   with the others and is dropped. Every ten-epoch sum that crosses 1 in the window (the largest one when none does) is
+%   printed epoch by epoch: the rows, the reading, the fit's worst row (its index in the record, its elevation from H,
+%   its residual over the sigma of the fit), the rows dropped, the reading on the rows left and, with run, the logged
+%   nav's error from the truth (nav minus truth, NED) on the axis.
 %   Result: t, dHat, sig, sigR, xi, qReplay, qLog [K x nAxes], sigP [K x nAxes], matches, window, axes, rMode,
 %   rNominal, minRows, nRangeRows, peaks (a cell per axis of [t q] for every run of the ten-epoch sum above 0.25 in
-%   the window, one peak per run: the near misses, not only the largest).
+%   the window, one peak per run: the near misses, not only the largest), dHatScreen, xiScreen, qScreen [K x nAxes],
+%   nDropped, worstRow, worstNorm [K x 1], rowK, detail (a struct per detailed window: tEnd, axis, q, qScreen, nDropped,
+%   navErr and excess, the medians over its epochs of nav minus truth on the axis and of |dHat| - |nav - truth|, NaN
+%   without run, and verdict, 'ranges' when the reading exceeds the nav's error by three sigma, 'nav' otherwise).
 %   Needs SPF_cpiMonitor, CST_spfParam and the host's matrixInv on the path. MATLAB desktop tool, not codegen. Runs under Octave.
 
 if iscell(spfMeasLog), spfMeasLog = [spfMeasLog{:}]; end
@@ -40,12 +56,15 @@ if nargin < 4 || isempty(tWin), tWin = [tKf(1) tKf(end)]; end
 if nargin < 5 || isempty(nominalBias), nominalBias = CST_spfParam.NOMINAL_BIAS; end
 if nargin < 6 || isempty(rMode), rMode = 'record'; end
 if nargin < 7 || isempty(minRows), minRows = 0; end
+if nargin < 8, run = []; end
 useNom = strcmpi(rMode, 'nominal');
 useHost = strcmpi(rMode, 'host');
 if useHost && ~isfield(spfMeasLog, 'measNoiseCovHost')
     error('cpiReplay:host', 'the records carry no measNoiseCovHost: the mode ''host'' needs records from setKfMeasBoth / kfMeasFromUpdateBoth');
 end
 BEFORE = 60;                                                 % s: the baseline minute before the window
+ROW_K = 3;                                                   % the row screen: a range row beyond this many sigma of the fit is dropped
+DETAIL_MAX = 6;                                              % detailed windows printed at most
 MATCH_TOL = 0.02;                                            % in q/T_N: replay and log closer than this agree
 N = double(CST_spfParam.WINDOW_LENGTH);  T = CST_spfParam.CPI_THRESHOLD;
 axes = double(CST_spfParam.MONITORED_AXES);  nA = numel(axes);  letters = 'NED';
@@ -54,6 +73,12 @@ kB = find(tKf >= min(tWin) - BEFORE & tKf < min(tWin));
 if isempty(kW), error('cpiReplay:window', 'the window %g to %g s holds no epoch of the records (%.2f to %.2f s)', tWin, tKf(1), tKf(end)); end
 kAll = [kB; kW];
 dHat = NaN(K, nA);  sig = NaN(K, nA);  sigR = NaN(K, nA);  xi = zeros(K, nA);  sigP = NaN(K, nA);  qReplay = NaN(K, nA);  qLog = NaN(K, nA);
+dHatS = NaN(K, nA);  sigS = NaN(K, nA);  xiS = zeros(K, nA);  qScreen = NaN(K, nA);                 % the row screen
+nDropped = zeros(K, 1);  worstRow = zeros(K, 1);  worstNorm = NaN(K, 1);  worstEl = NaN(K, 1);  dropList = cell(K, 1);
+haveRun = ~isempty(run);
+if haveRun && ~(isstruct(run) && all(isfield(run, {'t', 'navPos', 'tTrue', 'truePos'})))
+    error('cpiReplay:run', 'run needs the fields t, navPos [lat lon h], tTrue and truePos, as runCompare reads them');
+end
 maxMeas = size(spfMeasLog(1).innovation, 1);  nState = size(spfMeasLog(1).obsMatrix, 2);
 rNom = NaN(1, 3);
 if useNom
@@ -92,6 +117,25 @@ for k = kAll'
         r2 = f' * (R \ f);
         if r2 > 0 && isfinite(r2), sigR(k, a) = 1 / sqrt(r2); end
     end
+    % the row screen: the range rows against one shift and one clock per system, the rows beyond ROW_K sigma dropped
+    [drop, wRow, wNorm, wEl] = rowScreen(H, y, R, ROW_K);
+    dropList{k} = drop;  nDropped(k) = numel(drop);  worstRow(k) = wRow;  worstNorm(k) = wNorm;  worstEl(k) = wEl;
+    if isempty(drop)
+        dHatS(k, :) = dHat(k, :);  sigS(k, :) = sig(k, :);  xiS(k, :) = xi(k, :);
+    else
+        keep = setdiff(1:m, drop);
+        Sk = S(keep, keep);  yk = y(keep);  Syk = Sk \ yk;
+        for a = 1:nA
+            f = H(keep, axes(a));
+            if ~any(f), continue; end
+            s2 = f' * (Sk \ f);
+            if s2 > 0 && isfinite(s2)
+                g = f' * Syk;
+                dHatS(k, a) = g / s2;  sigS(k, a) = 1 / sqrt(s2);
+                xiS(k, a) = max(abs(g) / sqrt(s2) - nominalBias(axes(a)) * sqrt(s2), 0);
+            end
+        end
+    end
 end
 %% the window sums from SPF_cpiMonitor itself: the ten epochs ending at each epoch
 for k = kAll(kAll >= N)'
@@ -106,6 +150,23 @@ for k = kAll(kAll >= N)'
     for a = 1:nA
         [~, q] = SPF_cpiMonitor(innB, covB, obsB, numB, axes(a), nominalBias(axes(a)));
         qReplay(k, a) = q / T;
+    end
+    % the same sum on the rows the screen leaves: each epoch's rows compacted without the dropped ones
+    if any(nDropped(idx) > 0)
+        for i = reshape(find(nDropped(idx) > 0), 1, [])
+            mi = numB(i);
+            if mi < 1, continue; end
+            keep = setdiff(1:mi, dropList{idx(i)});  nk = numel(keep);
+            yi = innB(:, i);  Si = covB(:, :, i);  Hi = obsB(:, :, i);
+            innB(:, i) = 0;  covB(:, :, i) = 0;  obsB(:, :, i) = 0;
+            innB(1:nk, i) = yi(keep);  covB(1:nk, 1:nk, i) = Si(keep, keep);  obsB(1:nk, :, i) = Hi(keep, :);  numB(i) = nk;
+        end
+        for a = 1:nA
+            [~, q] = SPF_cpiMonitor(innB, covB, obsB, numB, axes(a), nominalBias(axes(a)));
+            qScreen(k, a) = q / T;
+        end
+    else
+        qScreen(k, :) = qReplay(k, :);
     end
 end
 haveLog = ~isempty(spfLog) && isstruct(spfLog) && isfield(spfLog, 'cpiRatio');
@@ -221,6 +282,73 @@ for a = 1:nA
         fprintf('   %s: runs of the ten-epoch sum above %.2f (time of the peak, value):%s\n', letters(a), PEAK_MIN, sprintf(' %.2f s %.3f;', pk'));
     end
 end
+%% the row screen over the window, and the windows that cross 1 read epoch by epoch
+nRangeTot = sum(nRangeRows(kW));  nDropTot = sum(nDropped(kW));
+qS = qScreen(kW, :);  qS(~isfinite(qS)) = 0;  qR = qReplay(kW, :);  qR(~isfinite(qR)) = 0;
+fprintf('   ROW SCREEN (a diagnostic read, not in the gate): the range rows of each epoch fitted by one shift [N E D] and one clock per system with the\n');
+fprintf('   replay''s R; a row beyond %g sigma of the fit is dropped, the worst first, while one degree of redundancy is left. Over the window %d of %d range\n', ROW_K, nDropTot, nRangeTot);
+fprintf('   rows are dropped, on %d of %d epochs; the largest ten-epoch sum on the rows left is %.3f (N %.3f, E %.3f, D %.3f) against %.3f without the screen\n', ...
+    nnz(nDropped(kW) > 0), numel(kW), max(max(qS)), max(qS), max(max(qR)));
+if nDropTot > 0
+    fprintf('   (a spoof that shifts the position moves every row together and drops nothing; a row dropped is one that disagrees with the others)\n');
+end
+sel = zeros(0, 2);                                           % [k axis] of the windows to detail
+for a = 1:nA
+    pk = peaks{a};
+    for i = 1:size(pk, 1)
+        if pk(i, 2) >= 1, sel(end+1, :) = [kW(find(tKf(kW) >= pk(i, 1) - 1e-9, 1)), a]; end %#ok<AGROW>
+    end
+end
+if isempty(sel)
+    [~, iM] = max(qR(:));  [iK, aM] = ind2sub(size(qR), iM);
+    if qR(iM) > 0, sel = [kW(iK), aM]; end
+end
+if isempty(sel)
+    fprintf('   no ten-epoch sum above zero in the window: nothing to detail\n');
+elseif size(sel, 1) > DETAIL_MAX
+    fprintf('   %d windows cross 1; the first %d are detailed\n', size(sel, 1), DETAIL_MAX);
+    sel = sel(1:DETAIL_MAX, :);
+end
+detail = struct('tEnd', {}, 'axis', {}, 'q', {}, 'qScreen', {}, 'nDropped', {}, 'navErr', {}, 'excess', {}, 'verdict', {});
+for i = 1:size(sel, 1)
+    kE = sel(i, 1);  a = sel(i, 2);  idx = max(kE - N + 1, 1):kE;
+    fprintf('   window ending %.2f s on %s: q/T_N %.3f, on the rows left %.3f; B = %g m\n', tKf(kE), letters(a), qReplay(kE, a), qScreen(kE, a), nominalBias(axes(a)));
+    fprintf('      %8s %4s %4s | %6s %5s %5s | %s %4s %5s %7s %7s | %6s %5s | %s\n', 't [s]', 'rows', 'rng', 'dHat', 'sig', 'xi', 'fit:', 'row', 'elev', 'res/sig', 'dropped', 'dHat''', 'xi''', 'nav - truth N, E, D (m)');
+    navErrW = NaN(numel(idx), 3);
+    for j = 1:numel(idx)
+        k = idx(j);  m = double(spfMeasLog(k).numMeas);
+        if haveRun
+            navErrW(j, :) = nedDelta(interpRows(run.t(:), run.navPos, tKf(k)), interpRows(run.tTrue(:), run.truePos, tKf(k)));
+        end
+        if m < 1
+            fprintf('      %8.2f %4d %4d | no rows\n', tKf(k), 0, 0);  continue;
+        elseif ~counts(k)
+            fprintf('      %8.2f %4d %4d | below the row floor: not counted\n', tKf(k), m, nRangeRows(k));  continue;
+        end
+        if worstRow(k) > 0, wr = sprintf('%4d %5.0f %7.1f', worstRow(k), worstEl(k), worstNorm(k)); else, wr = sprintf('%4s %5s %7s', '-', '-', 'no fit'); end
+        if haveRun, te = sprintf('%+6.1f %+6.1f %+6.1f', navErrW(j, :)); else, te = '(give run)'; end
+        fprintf('      %8.2f %4d %4d | %6s %5s %5s | %s %s %7d | %6s %5s | %s\n', tKf(k), m, nRangeRows(k), num(dHat(k, a), '%+6.1f'), num(sig(k, a), '%5.2f'), ...
+            num(xi(k, a), '%5.2f'), '    ', wr, nDropped(k), num(dHatS(k, a), '%+6.1f'), num(xiS(k, a), '%5.2f'), te);
+    end
+    d = struct('tEnd', tKf(kE), 'axis', a, 'q', qReplay(kE, a), 'qScreen', qScreen(kE, a), 'nDropped', sum(nDropped(idx)), 'navErr', NaN, 'excess', NaN, 'verdict', '');
+    if haveRun
+        ok = isfinite(dHat(idx, a)) & isfinite(navErrW(:, a));
+        if any(ok)
+            d.navErr = median(navErrW(ok, a));  d.excess = median(abs(dHat(idx(ok), a)) - abs(navErrW(ok, a)));
+            sg = medF(sig(idx(ok), a));
+            if d.excess > 3 * sg
+                d.verdict = 'ranges';
+                fprintf('      the reading exceeds the logged nav''s error from the truth by %.1f m (median of |dHat| - |nav - truth|, %.1f sigma): the ranges carry it\n', d.excess, d.excess / sg);
+            else
+                d.verdict = 'nav';
+                fprintf('      the reading is within %.1f m of the logged nav''s error from the truth (median of |dHat| - |nav - truth|, %.1f sigma): the nav carries it\n', abs(d.excess), abs(d.excess) / sg);
+            end
+        else
+            fprintf('      no epoch of the window has both a reading and a truth sample\n');
+        end
+    end
+    detail(end+1) = d; %#ok<AGROW>
+end
 nomW = kW;
 if haveLog && isfield(spfLog, 'mode'), nomW = kW(round(spfLog.mode(kW)) == 1); end
 if isempty(nomW), nomW = kW; end
@@ -239,7 +367,8 @@ if haveLog && numel(nomW) < numel(kW)
 end
 res = struct('t', tKf, 'dHat', dHat, 'sig', sig, 'sigR', sigR, 'xi', xi, 'qReplay', qReplay, 'qLog', qLog, 'sigP', sigP, ...
     'matches', matches, 'window', [tKf(kW(1)) tKf(kW(end))], 'axes', axes, 'rMode', rMode, 'rNominal', rNom, ...
-    'minRows', minRows, 'nRangeRows', nRangeRows, 'peaks', {peaks});
+    'minRows', minRows, 'nRangeRows', nRangeRows, 'peaks', {peaks}, 'dHatScreen', dHatS, 'xiScreen', xiS, 'qScreen', qScreen, ...
+    'nDropped', nDropped, 'worstRow', worstRow, 'worstNorm', worstNorm, 'rowK', ROW_K, 'detail', detail);
 end
 
 %------------------------------------------------------------------------
@@ -263,6 +392,56 @@ typ(normV > 0.5 & normP < 0.1) = 2;
 end
 
 %------------------------------------------------------------------------
+function [drop, worst, worstNorm, worstEl] = rowScreen(H, y, R, rowK)
+% the range rows of one epoch fitted by one shift [N E D] and one clock per system (every column beyond the velocity a
+% range row uses), weighted by R; the row with the largest residual over its sigma is dropped while it exceeds rowK and
+% one degree of redundancy is left after the drop. worst is the row with the largest residual of the first fit (its
+% index in the record), worstNorm that residual over its sigma, worstEl the elevation its line of sight gives (deg)
+drop = zeros(1, 0);  worst = 0;  worstNorm = NaN;  worstEl = NaN;
+typ = rowTypes(H);  keep = find(typ == 1)';
+if numel(keep) < 2, return; end
+cols = [1 2 3, 6 + find(any(abs(H(keep, 7:end)) > 1e-9, 1))];
+first = true;
+while true
+    nK = numel(keep);
+    w = 1 ./ diag(R(keep, keep));
+    if any(~(w > 0) | ~isfinite(w)), break; end
+    Aw = H(keep, cols) .* repmat(sqrt(w), 1, numel(cols));  yw = y(keep) .* sqrt(w);
+    rk = rank(Aw);
+    if nK - rk < 1, break; end                               % no redundancy: nothing can be judged
+    hat = Aw * pinv(Aw);
+    rw = yw - hat * yw;
+    rn = rw ./ sqrt(max(1 - diag(hat), 1e-6));
+    [mx, i] = max(abs(rn));
+    if first
+        worst = keep(i);  worstNorm = mx;  worstEl = asin(min(abs(H(worst, 3)), 1)) * 180 / pi;  first = false;
+    end
+    if mx > rowK && (nK - 1) - rk >= 1
+        drop(end+1) = keep(i);  keep(i) = []; %#ok<AGROW>
+    else
+        break;
+    end
+end
+end
+
+function [e] = nedDelta(p, q)
+% p minus q, both [lat lon h] rows, in NED metres (WGS84 radii at p), as runCompare forms it
+L  = p(:, 1);  h = p(:, 3);
+a  = 6378137;  e2 = 6.69437999014e-3;
+RN = a * (1 - e2) ./ (1 - e2 * sin(L).^2).^1.5;
+RE = a ./ sqrt(1 - e2 * sin(L).^2);
+e = [(p(:, 1) - q(:, 1)) .* (RN + h), ...
+     (p(:, 2) - q(:, 2)) .* (RE + h) .* cos(L), ...
+    -(p(:, 3) - q(:, 3))];
+end
+
+function [y] = interpRows(tt, Y, tq)
+y = NaN(numel(tq), size(Y, 2));
+for c = 1:size(Y, 2)
+    y(:, c) = interp1(tt(:), Y(:, c), tq(:), 'linear', NaN);
+end
+end
+
 function [s] = num(x, fmt)
 if isnan(x), s = '-'; else, s = sprintf(fmt, x); end
 end

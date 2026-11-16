@@ -5,7 +5,10 @@ function test_cpiReplay()
 % sigma of the projection, xi = (12 - B)/sigma, the window sums must equal SPF_cpiMonitor's and the gate log's when
 % the log holds them, and must not when the log holds other numbers. With R inflated nine-fold on the spoofed range rows the
 % record mode must read the larger sigma and the nominal mode must give the clean sigma and sums back. Epochs cut to three
-% range rows with one 30 m row must read tens of metres without a row floor and nothing with a floor of 6. Run from the repo root (the stand-in matrixInv):
+% range rows with one 30 m row must read tens of metres without a row floor and nothing with a floor of 6. The row screen: the
+% consistent 12 m shift must drop no row and leave the sums as they are; one range row of 60 m among eight must be dropped on
+% every epoch it is in, the sums on the rows left must stay clean and the detailed window must name it; with a truth run the
+% detail must read the 12 m as the nav's own error and the single bad row as the ranges'. Run from the repo root (the stand-in matrixInv):
 % octave --no-gui --quiet --eval test_cpiReplay
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'tools'));  addpath(fullfile(here, '..', 'deploy'));  addpath(fullfile(here, '..'));
@@ -83,6 +86,30 @@ okP = size(r1.peaks{1}, 1) == 1 && abs(r1.peaks{1}(1, 2) - max(r1.qReplay(25:50,
 ok4 = okP && r5.nRangeRows(35) == 3 && r5.nRangeRows(20) == 8 && max(max(r5.qReplay(30:50, 1:2))) > 1 && max(max(abs(r5.dHat(30:45, 1:2)))) > 10 ...   % the bad row leaks on the axis its geometry favours
    && r6.minRows == 6 && all(r6.xi(30:45, 1) == 0) && all(isnan(r6.dHat(30:45, 1))) && max(r6.qReplay(30:50, 1)) == 0 && r6.qReplay(29, 1) == 0 ...
    && abs(r6.dHat(20, 1)) < 0.3;
-if ok1 && ok2 && ok3 && ok4, fprintf('=== test_cpiReplay PASS ===\n');
-else, fprintf('ok1 %d ok2 %d ok3 %d ok4 %d\n=== test_cpiReplay FAIL ===\n', ok1, ok2, ok3, ok4); end
+%% the row screen: a consistent shift drops nothing; one bad row among eight is dropped and the sums on the rows left stay clean
+logR = log;
+for k = 30:45
+    r = logR{k};  yk = r.innovation;  yk(1:17) = 0.1 * randn(17, 1);  yk(3) = yk(3) + 60;      % row 3 alone, 60 m
+    logR{k}.innovation = yk;
+end
+fprintf('--- one range row of 60 m among eight on epochs 30 to 45, B = 0 ---\n');
+r7 = cpiReplay(logR, tKf, [], [tKf(25) tKf(50)], [0 0 0]);
+% a truth run: the nav 12 m north of the truth on epochs 30 to 45 (the consistent case), and on the truth elsewhere
+lat0 = 0.5;  lon0 = 0.3;  h0 = 100;  RN = 6378137 * (1 - 6.69437999014e-3) / (1 - 6.69437999014e-3 * sin(lat0)^2)^1.5;
+truePos = repmat([lat0 lon0 h0], K, 1);  navPos = truePos;  navPos(30:45, 1) = lat0 + 12 / (RN + h0);
+run = struct('t', tKf, 'navPos', navPos, 'tTrue', tKf, 'truePos', truePos);
+fprintf('--- the 12 m north shift with the truth run: the nav carries it ---\n');
+r8 = cpiReplay(log, tKf, spfLog, [tKf(25) tKf(50)], B, 'record', 0, run);
+runT = run;  runT.navPos = truePos;                                          % the nav on the truth: the bad row is the ranges'
+fprintf('--- the bad row with the truth run: the ranges carry it ---\n');
+r9 = cpiReplay(logR, tKf, [], [tKf(25) tKf(50)], [0 0 0], 'record', 0, runT);
+ok5 = all(r1.nDropped(25:50) == 0) && max(max(abs(r1.qScreen(36:50, :) - r1.qReplay(36:50, :)))) < 1e-9 && abs(r1.dHatScreen(35, 1) - r1.dHat(35, 1)) < 1e-9 ...
+   && all(r7.nDropped(30:45) == 1) && all(r7.worstRow(30:45) == 3) && all(r7.worstNorm(30:45) > 3) && all(r7.nDropped(25:29) == 0) ...
+   && max(max(r7.qReplay(30:50, :))) > 1 && max(max(r7.qScreen(30:50, :))) < 0.1 && max(max(abs(r7.dHatScreen(30:45, :)))) < 1 ...
+   && max(max(abs(r7.dHat(30:45, :)))) > 5 && r7.rowK == 3 && ~isempty(r7.detail) && r7.detail(1).q >= 1 && r7.detail(1).qScreen < 0.1 ...
+   && r7.detail(1).nDropped == 10 && isnan(r7.detail(1).navErr) && isempty(r7.detail(1).verdict) ...
+   && numel(r8.detail) == 1 && strcmp(r8.detail(1).verdict, 'nav') && abs(r8.detail(1).navErr - 12) < 0.3 && abs(r8.detail(1).excess) < 0.5 ...
+   && ~isempty(r9.detail) && strcmp(r9.detail(1).verdict, 'ranges') && abs(r9.detail(1).navErr) < 1e-6 && r9.detail(1).excess > 5;
+if ok1 && ok2 && ok3 && ok4 && ok5, fprintf('=== test_cpiReplay PASS ===\n');
+else, fprintf('ok1 %d ok2 %d ok3 %d ok4 %d ok5 %d\n=== test_cpiReplay FAIL ===\n', ok1, ok2, ok3, ok4, ok5); end
 end

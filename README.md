@@ -422,7 +422,20 @@ keeps a partial outage's few reflected rows from reading as tens of
 metres in the one-axis projection, measured the same way. Per axis it
 lists every run of the ten-epoch sum above a quarter of the threshold
 with its time and value, so the near misses of a clean run are read
-along with the largest.
+along with the largest. Beside the replay it runs a row screen, a
+diagnostic that is not in the gate: per epoch the range rows are fitted
+by one position shift and one clock per system with the replay's R, a
+row beyond three sigma of the fit is dropped, the worst first, while the
+fit keeps a degree of redundancy, and the projection and the ten-epoch
+sums are read again on the rows left. A spoof that shifts the position
+moves every row together and drops nothing; a reflected or re-acquired
+satellite disagrees with the others and is dropped, so the two sums side
+by side say whether a window's reading is a position shift or a few bad
+rows. Every window whose sum crosses the threshold (the largest when none
+does) is printed epoch by epoch with its rows, the fit's worst row, the
+rows dropped and the reading on the rows left; given the run's truth
+arrays it adds the logged nav's error from the truth on the axis and says
+whether the ranges or the nav carry the reading.
 
 `runCompare` ends the outage at the first logged P that falls by more than
 30% inside the given interval (the first update back, or a reset): the

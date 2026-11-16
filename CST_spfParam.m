@@ -114,11 +114,11 @@
 % over a coast) and their walk, the position without noise, along the
 % host's own accumPhi, and the host's accumQ on every state the IMU does
 % not drive. The IMU_* values are the vehicle IMU's datasheet as its Allan
-% plots confirmed them; the COAST_*_STATES name the blocks in the host's
-% layout (here the simulation's, build_Phi_Q: accelerometer biases 10:12,
-% gyro biases 13:15; the host has the gyro biases first). The repository
-% value is false (the published design, the test references); the host
-% sets true, as with ARM_EPOCHS.
+% plots confirmed them; the COAST_*_STATES name the blocks in the state
+% layout, the same in the simulation and on the host: gyro biases 10:12,
+% accelerometer biases 13:15. The repository value is false (the
+% published design, the test references); the host sets true, as with
+% ARM_EPOCHS.
 % - COAST_SIGMA_FLOOR_STATES / _VALUES (the host's P as the gate reads it):
 % The gate starts every coast from the host's P and subtracts it in the
 % separation test. A host whose P underestimates its own errors on some
@@ -226,8 +226,8 @@ classdef CST_spfParam
         COAST_POS_STATES = [1 2 3];               % the blocks in the host's state layout (here the simulation's)
         COAST_VEL_STATES = [4 5 6];
         COAST_ATT_STATES = [7 8 9];
-        COAST_ACC_BIAS_STATES = [10 11 12];
-        COAST_GYRO_BIAS_STATES = [13 14 15];
+        COAST_GYRO_BIAS_STATES = [10 11 12];      % gyro biases first, as the host orders them
+        COAST_ACC_BIAS_STATES = [13 14 15];
         COAST_Q_INTERVAL = 0.5;                   % s: the interval when accumPhi carries no position-from-velocity entry
         COAST_SIGMA_FLOOR_STATES = zeros(1, 0);   % the host's P floored on these states (none here)
         COAST_SIGMA_FLOOR_VALUES = zeros(1, 0);   % at these sigmas, in the states' units

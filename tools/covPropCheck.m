@@ -28,8 +28,8 @@ function [res] = covPropCheck(spfMeasLog, tKf, tOut, tReacq, run, pDiag, propTel
 %   A second chain propagates the P+ of tOut through the whole outage with the same Phi and rows, to show what a P that
 %   keeps its cross terms carries at each epoch next to the logged one.
 %
-%   State order assumed: position 1:3, velocity 4:6, attitude 7:9, accelerometer bias 10:12, gyro bias 13:15 (NED,
-%   metres, m/s, rad); set run.pGyroFirst = true when the host orders the gyro biases before the accelerometer biases.
+%   State order assumed: position 1:3, velocity 4:6, attitude 7:9, gyro bias 10:12, accelerometer bias 13:15 (NED,
+%   metres, m/s, rad); set run.pGyroFirst = false when the host orders the accelerometer biases before the gyro biases.
 %   tOut / tReacq: last aided epoch and first epoch back (s), [] for a run without an outage.
 %
 %   Result: res.t, res.ratio (K x 4: pos-vel, vel-tilt, vel-accel bias, tilt-gyro bias, logged / predicted),
@@ -65,8 +65,8 @@ n = size(spfMeasLog(1).postCov, 1);
 if n < 15 || size(spfMeasLog(1).postCov, 2) ~= n
     error('covPropCheck:postCov', 'postCov must be n x n with n >= 15; got %d x %d', size(spfMeasLog(1).postCov));
 end
-iPos = 1:3;  iVel = 4:6;  iAtt = 7:9;  iBa = 10:12;  iBg = 13:15;
-if ~isempty(run) && isfield(run, 'pGyroFirst') && run.pGyroFirst, iBa = 13:15;  iBg = 10:12; end
+iPos = 1:3;  iVel = 4:6;  iAtt = 7:9;  iBg = 10:12;  iBa = 13:15;                % gyro biases first
+if ~isempty(run) && isfield(run, 'pGyroFirst') && ~isempty(run.pGyroFirst) && ~run.pGyroFirst, iBa = 10:12;  iBg = 13:15; end
 haveNav = ~isempty(run) && isfield(run, 'navAtt') && isfield(run, 't') && isfield(run, 'navVel');
 hasOut  = ~isempty(tOut) && ~isempty(tReacq);
 if hasOut, inOutage = tKf > tOut + 1e-3 & tKf < tReacq - 1e-3; else, inOutage = false(K, 1); end   % tReacq given as the first epoch back excludes it

@@ -126,7 +126,7 @@ if nargin < 14, biasMode = 'const'; end
 % increment reaches biasEst only with applyBias. The records hold x- and x+.
 N = numel(t);  K = numel(tKf);  n = 22;  dt = t(2) - t(1);  DT = 0.5;
 lat0 = 0.8;  lon0 = 0.1;  h0 = 100;
-P = eye(n);  P(6, 12) = 0.5;  P(12, 6) = 0.5;  P(4, 10) = -0.3;  P(10, 4) = -0.3;  P(1, 4) = 0.7;  P(4, 1) = 0.7;
+P = eye(n);  P(6, 15) = 0.5;  P(15, 6) = 0.5;  P(4, 13) = -0.3;  P(13, 4) = -0.3;  P(1, 4) = 0.7;  P(4, 1) = 0.7;   % accelerometer biases 13:15
 tUndo = -Inf;  undoV = zeros(1, 3);
 e = [0.05 -0.03 0.21];  pErr = [1 -1 2];  biasFb = [1e-3 -2e-3 5e-3];
 MG = 9.80665e-3;
@@ -151,7 +151,7 @@ for i = 1:N
         pendP = pendP + gApplied * xp(1:3) * applyPos;
         if undoAt > 0, tUndo = tKf(kNext) + undoAt;  undoV = gApplied * xp(4:6) .* applyVel; end
         biasFb = biasFb - incB .* [1 1 applyBias];
-        x = zeros(n, 1);  x(1:6) = xp';  x(10:12) = incB';
+        x = zeros(n, 1);  x(1:6) = xp';  x(13:15) = incB';         % the accelerometer bias increments, gyro biases first
         xmRec = zeros(n, 1);  xmRec(1:6) = xm';
         log(kNext).priorState = xmRec;
         log(kNext).postState = x;

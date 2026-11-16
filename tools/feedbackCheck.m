@@ -10,7 +10,8 @@ function [res] = feedbackCheck(run, spfMeasLog, win)
 %   [N x 3] [lat lon h] (rad, rad, m), navVel [N x 3] NED (m/s), tKf [K x 1] the 2 Hz epochs,
 %   one per record of spfMeasLog; biasEst [N x 6] or [K x 6] optional, accelerometer then gyro
 %   (m/s^2, rad/s), the value the mechanisation subtracts plus the bias state; pGyroFirst
-%   optional (true when the gyro biases are states 10:12 and the accelerometer biases 13:15).
+%   optional (default true: the gyro biases are states 10:12 and the accelerometer biases
+%   13:15; false when the host orders the accelerometer biases first).
 %   spfMeasLog: struct array or cell of the per-epoch spfMeas records (priorState, postState,
 %   numMeas), host layout: position 1:3, velocity 4:6, attitude 7:9, biases 10:15, clock 16:17,
 %   pressure altitude 20.
@@ -79,8 +80,8 @@ hasTruth = isfield(run, 'tTrue') && isfield(run, 'trueVel') && ~isempty(run.true
     size(run.trueVel, 2) == 3 && size(run.trueVel, 1) == numel(run.tTrue);
 errVel = NaN(size(navVel));
 if hasTruth, errVel = navVel - interpRows(run.tTrue(:), run.trueVel, t); end
-iAcc = 10:12;  iGyr = 13:15;
-if isfield(run, 'pGyroFirst') && ~isempty(run.pGyroFirst) && run.pGyroFirst, iAcc = 13:15;  iGyr = 10:12; end
+iGyr = 10:12;  iAcc = 13:15;                                     % gyro biases first
+if isfield(run, 'pGyroFirst') && ~isempty(run.pGyroFirst) && ~run.pGyroFirst, iAcc = 10:12;  iGyr = 13:15; end
 n = numel(spfMeasLog(1).postState);
 iPrs = 20;
 if n < 20, iPrs = []; end

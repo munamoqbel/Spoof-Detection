@@ -10,8 +10,8 @@ addpath(fullfile(here, '..', 'tools'));
 rand('seed', 11);  randn('seed', 11);
 G = 9.80665;  n = 22;  K = 200;  tKf = 0.5 * (0:K-1)';
 tOut = tKf(100);  tReacq = tKf(161);
-sig0 = [2 2 2, 0.03 0.03 0.04, 0.5e-3 0.5e-3 2e-3, 7e-4*[1 1 1], 2e-6*[1 1 1], 3, 0.1, ones(1, 5)];
-F = zeros(n);  F(1:3,4:6) = eye(3);  F(4:6,7:9) = [0 G 0; -G 0 0; 0 0 0];  F(4:6,10:12) = eye(3);  F(7:9,13:15) = eye(3);
+sig0 = [2 2 2, 0.03 0.03 0.04, 0.5e-3 0.5e-3 2e-3, 2e-6*[1 1 1], 7e-4*[1 1 1], 3, 0.1, ones(1, 5)];   % gyro biases 10:12, accelerometer 13:15
+F = zeros(n);  F(1:3,4:6) = eye(3);  F(4:6,7:9) = [0 G 0; -G 0 0; 0 0 0];  F(4:6,13:15) = eye(3);  F(7:9,10:12) = eye(3);
 Phi = expm(F * 0.5);
 logA = cell(K, 1);  logB = cell(K, 1);
 PA = diag(sig0.^2);  PB = PA;

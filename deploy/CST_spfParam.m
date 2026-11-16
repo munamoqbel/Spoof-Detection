@@ -83,8 +83,8 @@ classdef CST_spfParam
         COAST_POS_STATES = [1 2 3];                       % the blocks in the host's state layout
         COAST_VEL_STATES = [4 5 6];
         COAST_ATT_STATES = [7 8 9];
-        COAST_ACC_BIAS_STATES = [10 11 12];
-        COAST_GYRO_BIAS_STATES = [13 14 15];
+        COAST_GYRO_BIAS_STATES = [10 11 12];              % gyro biases first
+        COAST_ACC_BIAS_STATES = [13 14 15];
         COAST_Q_INTERVAL = 0.5;                           % s, when accumPhi carries no position-from-velocity entry
         COAST_SIGMA_FLOOR_STATES = zeros(1, 0);           % the host's P floored on these states
         COAST_SIGMA_FLOOR_VALUES = zeros(1, 0);           % at these sigmas

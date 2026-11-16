@@ -113,7 +113,7 @@ function [r, yawExp] = makeRun(name, lags, dv, acc, jerk, attErr, dBias, yawCoup
     r.trueVel = [interp1(tTrue, trueVel(:,1), tTrue + sV) interp1(tTrue, trueVel(:,2), tTrue + sV) interp1(tTrue, trueVel(:,3), tTrue + sV)];
     r.trueAtt = [interp1(tTrue, trueAtt(:,1), tTrue + sA) interp1(tTrue, trueAtt(:,2), tTrue + sA) interp1(tTrue, trueAtt(:,3), tTrue + sA)];
     r.trueAtt(:, 3) = atan2(sin(r.trueAtt(:, 3)), cos(r.trueAtt(:, 3)));        % logged wrapped to +-pi
-    r.pDiag = repmat([ones(1,3) 0.05^2*ones(1,3) 1e-6*ones(1,3) (0.2e-3*9.80665)^2*ones(1,3) (1/3600*pi/180)^2*ones(1,3) ones(1,7)], numel(t), 1);
+    r.pDiag = repmat([ones(1,3) 0.05^2*ones(1,3) 1e-6*ones(1,3) (1/3600*pi/180)^2*ones(1,3) (0.2e-3*9.80665)^2*ones(1,3) ones(1,7)], numel(t), 1);   % gyro biases 10:12, accelerometer 13:15
 end
 
 dvA = [0.10 -0.05 0.02]; jerkA = [0 2e-5 0];
@@ -204,7 +204,7 @@ runW = runB;  runW.name = 'W biasTrue on tKf';  runW.biasTrue = repmat(runB.bias
 resW = runCompare(runW, [], 100, 250, [10 95; 255 295]);
 okC = abs(resV.run1.db(1) + 0.6e-3*G) < 1e-9 && all(abs(resW.run1.db - res.run2.db) < 1e-12) ...
    && abs(resC.run1.db(1) + 0.6e-3*G) < 1e-9 && abs(resC.run1.sig(4) - 0.05) < 1e-12 ...
-   && abs(resD.run1.db(1) + 0.6e-3*G) < 1e-9 && abs(resD.run1.sig(10)/(9.80665e-3) - 0.2) < 1e-9;
+   && abs(resD.run1.db(1) + 0.6e-3*G) < 1e-9 && abs(resD.run1.sig(13)/(9.80665e-3) - 0.2) < 1e-9;
 if okC, fprintf('=== no-tKf / single-value check PASS ===\n'); else, fprintf('=== no-tKf / single-value check FAIL ===\n'); end
 % truth velocity logged in ECEF (wrong frame): the tool must warn and fall back to d(truePos)/dt
 runE = runA;  runE.name = 'E ecef trueVel';
@@ -248,11 +248,11 @@ resQ = runCompare(runQ, [], 100, 250, [10 95; 255 295]);
 runR = runB;  runR.name = 'R short name pDig';  runR.pDig = runB.pDiag;  runR = rmfield(runR, 'pDiag');
 runS = runB;  runS.name = 'S num2cell pDiag';  runS.pDiag = num2cell(pDiagCat(runB.pDiag));
 resS = runCompare(runS, [], 100, 250, [10 95; 255 295]);
-runT = runD;  runT.name = 'T gyro biases first in P';  runT.pDiag = runD.pDiag([1:9 13:15 10:12 16:22]);  runT.pGyroFirst = true;
+runT = runD;  runT.name = 'T accelerometer biases first in P';  runT.pDiag = runD.pDiag([1:9 13:15 10:12 16:22]);  runT.pGyroFirst = false;
 resT = runCompare(runT, [], 100, 250);
 resR = runCompare(runR, [], 100, 250, [10 95; 255 295]);
 okP = abs(resP.run1.sig(4) - 0.05) < 1e-12 && ~any(isfinite(resQ.run1.sig)) && abs(resR.run1.sig(4) - 0.05) < 1e-12 ...
-   && abs(resS.run1.sig(4) - 0.05) < 1e-12 && abs(resT.run1.sig(10) / (9.80665e-3) - 0.2) < 1e-9;   % pDig, num2cell, pGyroFirst
+   && abs(resS.run1.sig(4) - 0.05) < 1e-12 && abs(resT.run1.sig(13) / (9.80665e-3) - 0.2) < 1e-9;   % pDig, num2cell, pGyroFirst false
 if okP, fprintf('=== pDiag shape / mismatch / misspelt check PASS ===\n'); else, fprintf('=== pDiag shape / mismatch / misspelt check FAIL ===\n'); end
 okG = resG.run1.tau == resG.run1.tauP && abs(resG.run1.tauP - 0.5) < 0.011;
 if okG, fprintf('=== unusable attitude fallback check PASS ===\n'); else, fprintf('=== unusable attitude fallback check FAIL ===\n'); end

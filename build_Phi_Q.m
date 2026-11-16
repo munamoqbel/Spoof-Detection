@@ -5,8 +5,8 @@ function [Phi, Q] = build_Phi_Q(prm)
 % In your REAL EKF, pass your own Phi_k/Q_k to dual_monitor instead -
 % this function only supplies matrices for the standalone simulation.
 %
-% State layout (Appendix A): 1:3 pos | 4:6 vel | 7:9 att |
-% 10:12 acc bias | 13:15 gyro bias | 16:17 clock | 18:end GNSS states.
+% State layout (Appendix A, with the host's bias order): 1:3 pos | 4:6 vel |
+% 7:9 att | 10:12 gyro bias | 13:15 acc bias | 16:17 clock | 18:end GNSS states.
 %#codegen
 
 n  = prm.n_states;
@@ -28,12 +28,12 @@ end
 for i = 7:9
     Q(i,i) = prm.ARW_sq * dt;
 end
-% IMU bias instabilities (Eq. A3)
+% IMU bias instabilities (Eq. A3): gyro biases first, as the host orders them
 for i = 10:12
-    Q(i,i) = prm.acc_bias_sq * dt;
+    Q(i,i) = prm.gyro_bias_sq * dt;
 end
 for i = 13:15
-    Q(i,i) = prm.gyro_bias_sq * dt;
+    Q(i,i) = prm.acc_bias_sq * dt;
 end
 % receiver clock (Eq. A7)
 Q(16,16) = 1.0e-4 * dt;

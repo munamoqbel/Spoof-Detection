@@ -23,7 +23,7 @@ function prm = kujur_params(N_min_in, CPI_threshold_in, k_FA_in, k_MD_in)
 % ----------------------------------------------------------------------
 %  A. Structural dimensions - EDIT to match your EKF
 %     State layout (paper Appendix A, Eq. A1/A4/A12/A13):
-%       1:3  pos | 4:6 vel | 7:9 att | 10:12 acc bias | 13:15 gyro bias
+%       1:3  pos | 4:6 vel | 7:9 att | 10:12 gyro bias | 13:15 acc bias (the host's order)
 %       16:17 rcvr clock | 18:end per-SV GNSS error states
 % ----------------------------------------------------------------------
 prm.n_states = CST_gnssHybrid.NO_STATES;     % 60. total KF states

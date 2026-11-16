@@ -33,8 +33,9 @@ function [res] = runCompare(runA, runB, tOut, tReacq, aidedWin)
 %                       {K x 1} holding per epoch either the 22 x 22 P or its
 %                       diagonal, or a single 22 x 22 P (or its diagonal) taken
 %                       at tOut. A field named pDig is accepted as pDiag.
-%     pGyroFirst  optional, true when the host's P orders the gyro biases
-%                       (10:12) before the accelerometer biases (13:15)
+%     pGyroFirst  optional, default true: the host's P orders the gyro biases
+%                       (10:12) before the accelerometer biases (13:15); false
+%                       when it orders the accelerometer biases first
 %     name     char, optional
 %   tOut     last GNSS-aided epoch before the outage (s); [] for a run
 %            without an outage (a clean aided run): sections 2 to 4 and the
@@ -549,8 +550,8 @@ else
     sig = NaN(22, 1);
     if ~isempty(P) && size(P, 1) == N
         sig = sqrt(max(P(iOut, :), 0))';
-        if isfield(r, 'pGyroFirst') && r.pGyroFirst
-            sig([10:12 13:15]) = sig([13:15 10:12]);               % host orders the gyro biases before the accelerometer biases
+        if isfield(r, 'pGyroFirst') && ~isempty(r.pGyroFirst) && ~r.pGyroFirst
+            sig([10:12 13:15]) = sig([13:15 10:12]);               % host orders the accelerometer biases first: brought to gyro first
         end
     end
     if ~any(isfinite(sig))
@@ -563,8 +564,8 @@ else
     fprintf(F2, 'velocity', 'm/s', dv, sigRow(sig(4:6), '%10.3f'));
     fprintf(F2, 'tilt psi', 'mrad', psi * 1e3, sigRow(sig(7:9) * 1e3, '%10.3f'));
     fprintf('   %-16s %-6s roll %+8.3f   pitch %+8.3f   yaw %+8.3f\n', 'euler', 'mrad', attErr(iOut, :) * 1e3);
-    fprintf(F2, 'accel bias err', 'mg', db(1:3) / (G * 1e-3), sigRow(sig(10:12) / (G * 1e-3), '%10.3f'));
-    fprintf(F2, 'gyro bias err', 'deg/h', db(4:6) * 180 / pi * 3600, sigRow(sig(13:15) * 180 / pi * 3600, '%10.3f'));
+    fprintf(F2, 'accel bias err', 'mg', db(1:3) / (G * 1e-3), sigRow(sig(13:15) / (G * 1e-3), '%10.3f'));
+    fprintf(F2, 'gyro bias err', 'deg/h', db(4:6) * 180 / pi * 3600, sigRow(sig(10:12) * 180 / pi * 3600, '%10.3f'));
     if all(biasTrue(iOut, :) == 0)
         fprintf('   NOTE: biasTrue is zero: the two bias rows are the estimates themselves, not errors, and the accel bias term of the\n');
         fprintf('         budget in section 4 treats the whole estimate as error. Judge the coast by the sigma line of section 3 instead.\n');
@@ -575,11 +576,11 @@ else
             db(4:6) / (G * 1e-3), db(1:3) * 180 / pi * 3600);
         fprintf('         accelerometer biases (m/s^2) in columns 1:3 and the gyro biases (rad/s) in 4:6.\n');
     end
-    if all(isfinite(sig(10:15))) && max(sig(10:12)) / (G * 1e-3) < 0.02 && min(sig(13:15)) * 180 / pi * 3600 > 100
+    if all(isfinite(sig(10:15))) && max(sig(13:15)) / (G * 1e-3) < 0.02 && min(sig(10:12)) * 180 / pi * 3600 > 100
         fprintf('   NOTE: sigma(accel bias) below 0.02 mg next to sigma(gyro bias) above 100 deg/h is not a plausible pair. Read with the two\n');
-        fprintf('         bias blocks swapped they are %.3f %.3f %.3f mg and %.2f %.2f %.2f deg/h. If the host orders the gyro biases before the\n', ...
-            sig(13:15) / (G * 1e-3), sig(10:12) * 180 / pi * 3600);
-        fprintf('         accelerometer biases in its state vector, set run.pGyroFirst = true.\n');
+        fprintf('         bias blocks swapped they are %.3f %.3f %.3f mg and %.2f %.2f %.2f deg/h. If the host orders the accelerometer biases\n', ...
+            sig(10:12) / (G * 1e-3), sig(13:15) * 180 / pi * 3600);
+        fprintf('         before the gyro biases in its state vector, set run.pGyroFirst = false.\n');
     end
 
     %% 3. outage trace fit
@@ -605,9 +606,9 @@ else
             % through g, the accelerometer bias; the host's own P must reach at least that if Phi carries the coupling
             if all(isfinite(sig(1:12)))
                 tilt = max(sig(7), sig(8));
-                implied = sqrt([sig(1)^2 + (sig(4) * T)^2 + (0.5 * G * tilt * T^2)^2 + (0.5 * sig(10) * T^2)^2, ...
-                                sig(2)^2 + (sig(5) * T)^2 + (0.5 * G * tilt * T^2)^2 + (0.5 * sig(11) * T^2)^2, ...
-                                sig(3)^2 + (sig(6) * T)^2 + (0.5 * sig(12) * T^2)^2]);
+                implied = sqrt([sig(1)^2 + (sig(4) * T)^2 + (0.5 * G * tilt * T^2)^2 + (0.5 * sig(13) * T^2)^2, ...
+                                sig(2)^2 + (sig(5) * T)^2 + (0.5 * G * tilt * T^2)^2 + (0.5 * sig(14) * T^2)^2, ...
+                                sig(3)^2 + (sig(6) * T)^2 + (0.5 * sig(15) * T^2)^2]);
             end
             % how the logged variance grows along the outage tells how P is propagated there: Q alone gives
             % P - P(tOut) ~ T (sigma ~ T^0.5); Phi's velocity coupling gives T^3 in position (sigma ~ T^1.5) and its

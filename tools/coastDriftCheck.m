@@ -15,23 +15,32 @@ function [res] = coastDriftCheck(run, tKf, tOut, tReacq, propTelLog, pAtOut, imu
 %   imu         the datasheet in its measured form: arw (deg/sqrt(h)), vrw (m/s/sqrt(h)), gyroBias (deg/h, the in-run
 %               sigma), accBias (micro-g), tauBias (s), gyroWalk (deg/h per sqrt(h)), accWalk (micro-g per sqrt(h)),
 %               gyroFirst (true: gyro biases on states 10:12, accelerometer on 13:15). Default, or []: the vehicle IMU,
-%               0.05, 0.0147, 0.03, 4, 300, 0.016, 10, gyro first.
+%               0.05, 0.0147, 0.03, 4, 300, 0.016, 10, gyro first. Optional: floorStates and floorSigmas, the gate's
+%               COAST_SIGMA_FLOOR lists, which add the column the gate itself carries (the host's P at tOut floored,
+%               the datasheet Q); headingState, the heading's index (default 9).
 %   runC        the same struct for the errors-off run: its coast error is the mechanisation's own
 %
 %   From tOut the host's P is propagated with the host's accumPhi three ways: with the host's accumQ (the P the host
 %   carries), with the datasheet Q on the inertial states (velocity from the VRW, tilt from the ARW, the bias states
 %   from the in-run stability and the walk, the host's accumQ on the other states) and with the datasheet Q from a
-%   zero P (what the sensor alone adds). The table gives, at 5, 10, 30, 60, 90 and 120 s into the coast and at its
-%   end, the measured nav error (N, E, D, horizontal), the logged horizontal sigma when pAtOut holds every epoch, the
-%   three predicted horizontal sigmas and the errors-off run's horizontal error; then the ratios at the end of the
-%   coast or at 120 s: the host's sigma over the measured error (a P three times the drift reads 3) and the
-%   datasheet's (near 1 when the datasheet and the host's errors at tOut explain the coast; below 1 the coast
-%   carries something the datasheet does not, and runC says whether it is the mechanisation).
-%   Result: t (the coast epochs), T (seconds from tOut), err [m x 3], errH, sigLogged, sigHost, sigDs, sigQ, errC,
-%   ratioHost, ratioDs, tEnd, note. MATLAB desktop tool, not codegen. Runs under Octave.
+%   zero P (what the sensor alone adds), and with the gate's floors on the P at tOut when they are given. The table
+%   gives, at 5, 10, 30, 60, 90 and 120 s into the coast and at its end, the measured nav error (N, E, D,
+%   horizontal), the logged horizontal sigma when pAtOut holds every epoch, the predicted horizontal sigmas and the
+%   errors-off run's horizontal error; then the ratios at 120 s or at the end: the host's sigma over the measured
+%   error (a P three times the drift reads 3), the datasheet's (near 1 when the datasheet and the host's errors at
+%   tOut explain the coast; below 1 the coast carries something the datasheet does not, and runC says whether it is
+%   the mechanisation) and the gate's. The heading is the state a wheeled vehicle's host cannot observe on straight
+%   legs and its P understates: the tool also solves for the heading sigma at tOut that would explain the coast at
+%   120 s with the datasheet Q along this Phi (the heading reaches the position only where the host's Phi couples
+%   it, in the manoeuvres of the coast), which is the heading floor the gate needs, read from one coast.
+%   Result: t (the coast epochs), T (seconds from tOut), err [m x 3], errH, sigLogged, sigHost, sigDs, sigQ, sigGate
+%   (NaN without floors), errC, ratioHost, ratioDs, ratioGate, headingSigmaHost, headingFloor, headingImplied (rad;
+%   0 when the datasheet already covers the coast, Inf when 0.5 rad does not), tEnd, note.
+%   MATLAB desktop tool, not codegen. Runs under Octave.
 G = 9.80665;  R2D = 180 / pi;
 if nargin < 7 || isempty(imu), imu = struct(); end
-def = struct('arw', 0.05, 'vrw', 0.0147, 'gyroBias', 0.03, 'accBias', 4, 'tauBias', 300, 'gyroWalk', 0.016, 'accWalk', 10, 'gyroFirst', true);
+def = struct('arw', 0.05, 'vrw', 0.0147, 'gyroBias', 0.03, 'accBias', 4, 'tauBias', 300, 'gyroWalk', 0.016, 'accWalk', 10, 'gyroFirst', true, ...
+    'floorStates', zeros(1, 0), 'floorSigmas', zeros(1, 0), 'headingState', 9);
 f = fieldnames(def);
 for i = 1:numel(f), if ~isfield(imu, f{i}) || isempty(imu.(f{i})), imu.(f{i}) = def.(f{i}); end, end
 if nargin < 8, runC = []; end
@@ -61,25 +70,22 @@ Qc = zeros(n);
 Qc(velIdx, velIdx) = qVel * eye(3);  Qc(attIdx, attIdx) = qAtt * eye(3);
 Qc(gyroIdx, gyroIdx) = qGyro * eye(3);  Qc(accIdx, accIdx) = qAcc * eye(3);
 
-%% the three predictions along the host's accumPhi
-PH = P0;  PD = P0;  PQ = zeros(n);
+%% the predictions along the host's accumPhi
 m = kEnd - kOut;
-sigHost = NaN(m, 1);  sigDs = NaN(m, 1);  sigQ = NaN(m, 1);  sigHostD = NaN(m, 1);  sigDsD = NaN(m, 1);
-for j = 1:m
-    k = kOut + j;
-    Phi = L(k).accumPhi;
-    if isfield(L, 'accumQ') && ~isempty(L(k).accumQ), Qh = L(k).accumQ; else, Qh = zeros(n); end
-    dt = Phi(1, 4);                                                    % the interval the accumulation covers
-    if ~(dt > 0) || ~isfinite(dt), dt = tKf(k) - tKf(k - 1); end
-    Qds = dt / 2 * (Phi * Qc * Phi' + Qc);                             % the datasheet Q over the interval
-    Qo = Qh;  Qo(inertial, :) = 0;  Qo(:, inertial) = 0;               % the host's Q on the states the IMU does not drive
-    Qds = Qds + Qo;
-    PH = sym(Phi * PH * Phi' + Qh);
-    PD = sym(Phi * PD * Phi' + Qds);
-    PQ = sym(Phi * PQ * Phi' + Qds);
-    sigHost(j) = sqrt(PH(1, 1) + PH(2, 2));  sigHostD(j) = sqrt(PH(3, 3));
-    sigDs(j) = sqrt(PD(1, 1) + PD(2, 2));    sigDsD(j) = sqrt(PD(3, 3));
-    sigQ(j) = sqrt(PQ(1, 1) + PQ(2, 2));
+prop = struct('L', L, 'kOut', kOut, 'kEnd', kEnd, 'tKf', tKf, 'Qc', Qc, 'inertial', inertial, 'n', n);
+[sigHost, sigHostD] = propagateSigma(prop, P0, true);
+[sigDs, sigDsD] = propagateSigma(prop, P0, false);
+sigQ = propagateSigma(prop, zeros(n), false);
+hasFloor = ~isempty(imu.floorStates);
+P0f = P0;
+if hasFloor
+    for k = 1:numel(imu.floorStates)
+        idx = imu.floorStates(k);
+        if P0f(idx, idx) < imu.floorSigmas(k)^2, P0f(idx, idx) = imu.floorSigmas(k)^2; end
+    end
+    sigGate = propagateSigma(prop, P0f, false);
+else
+    sigGate = NaN(m, 1);
 end
 t = tKf(kOut + 1:kEnd);  T = t - tKf(kOut);
 sigLogged = sigLoggedAll(kOut + 1:kEnd);
@@ -96,8 +102,11 @@ fprintf('coastDriftCheck: coast from %.1f s to %.1f s (%d epochs, %.1f s); the n
 fprintf('   datasheet: ARW %g deg/sqrt(h), VRW %g m/s/sqrt(h), bias sigma %g deg/h and %g micro-g with tau %g s, walks %g deg/h/sqrt(h) and %g micro-g/sqrt(h)\n', ...
     imu.arw, imu.vrw, imu.gyroBias, imu.accBias, imu.tauBias, imu.gyroWalk, imu.accWalk);
 if ~isempty(note), fprintf('   NOTE: %s\n', note); end
-fprintf('   %7s %9s %9s %9s %9s | %9s %9s %9s %9s | %9s\n', 'T [s]', 'err N', 'err E', 'err D', 'err H', 'logged', 'host P', 'datasheet', 'Q only', 'run C H');
-fprintf('   %7s %9s %9s %9s %9s | %9s %9s %9s %9s | %9s\n', '', '[m]', '[m]', '[m]', '[m]', 'sig H', 'sig H', 'sig H', 'sig H', '[m]');
+if hasFloor
+    fprintf('   the gate''s floors on the P at tOut: states %s at sigma %s\n', mat2str(imu.floorStates), mat2str(imu.floorSigmas, 3));
+end
+fprintf('   %7s %9s %9s %9s %9s | %9s %9s %9s %9s %9s | %9s\n', 'T [s]', 'err N', 'err E', 'err D', 'err H', 'logged', 'host P', 'datasheet', 'Q only', 'gate', 'run C H');
+fprintf('   %7s %9s %9s %9s %9s | %9s %9s %9s %9s %9s | %9s\n', '', '[m]', '[m]', '[m]', '[m]', 'sig H', 'sig H', 'sig H', 'sig H', 'sig H', '[m]');
 pick = [];
 for x = [5 10 30 60 90 120]
     j = find(T >= x, 1);
@@ -105,24 +114,98 @@ for x = [5 10 30 60 90 120]
 end
 pick = unique([pick, m]);
 for j = pick
-    fprintf('   %7.1f %9.2f %9.2f %9.2f %9.2f | %9s %9.2f %9.2f %9.2f | %9s\n', T(j), err(j, 1), err(j, 2), err(j, 3), errH(j), ...
-        num2(sigLogged(j)), sigHost(j), sigDs(j), sigQ(j), num2(errC(j)));
+    fprintf('   %7.1f %9.2f %9.2f %9.2f %9.2f | %9s %9.2f %9.2f %9.2f %9s | %9s\n', T(j), err(j, 1), err(j, 2), err(j, 3), errH(j), ...
+        num2(sigLogged(j)), sigHost(j), sigDs(j), sigQ(j), num2(sigGate(j)), num2(errC(j)));
 end
 jv = find(T >= 120, 1);  if isempty(jv), jv = m; end
-ratioHost = sigHost(jv) / errH(jv);  ratioDs = sigDs(jv) / errH(jv);
-fprintf('   at %.0f s: the host''s sigma is %.2f times the measured horizontal error, the datasheet''s %.2f times; the sensor alone gives %.2f m\n', ...
-    T(jv), ratioHost, ratioDs, sigQ(jv));
+ratioHost = sigHost(jv) / errH(jv);  ratioDs = sigDs(jv) / errH(jv);  ratioGate = sigGate(jv) / errH(jv);
+fprintf('   at %.0f s: the host''s sigma is %.2f times the measured horizontal error, the datasheet''s %.2f times', T(jv), ratioHost, ratioDs);
+if hasFloor, fprintf(', the gate''s %.2f times', ratioGate); end
+fprintf('; the sensor alone gives %.2f m\n', sigQ(jv));
 if isfinite(errC(jv)), fprintf('   the errors-off run drifted %.2f m by then: the mechanisation''s own share of the coast\n', errC(jv)); end
+% the heading sigma at tOut that would explain the coast: the floor the gate needs, from this one coast
+hs = imu.headingState;
+headingSigmaHost = sqrt(max(P0(hs, hs), 0));
+headingFloor = 0;
+if hasFloor
+    iH = find(imu.floorStates == hs, 1);
+    if ~isempty(iH), headingFloor = imu.floorSigmas(iH); end
+end
+headingImplied = impliedHeading(prop, P0f, hs, jv, errH(jv));
+fprintf('   heading at tOut: the host''s P carries %.1f mrad', headingSigmaHost * 1e3);
+if hasFloor, fprintf(', the floor in force %.1f mrad', headingFloor * 1e3); end
+if headingImplied == 0 && hasFloor
+    fprintf('; with the floors in force the datasheet Q covers the coast at %.0f s: the floors are enough for this coast\n', T(jv));
+elseif headingImplied == 0
+    fprintf('; the datasheet Q already covers the coast at %.0f s: no heading floor needed from this coast\n', T(jv));
+elseif isinf(headingImplied)
+    fprintf('; no heading sigma up to 500 mrad explains the coast at %.0f s along this Phi: the gap is not the heading\n', T(jv));
+    fprintf('           (the velocity, the tilt or the biases at tOut, or the mechanisation; run C and runCompare section 2 say which)\n');
+else
+    fprintf('; the heading sigma that explains the coast at %.0f s along this Phi is %.1f mrad\n', T(jv), headingImplied * 1e3);
+    fprintf('           (the heading floor this coast asks for, read from one coast: a sample with its scatter, not an rms)\n');
+end
 if ratioDs >= 0.7 && ratioDs <= 2
     fprintf('   VERDICT: the datasheet Q along the host''s Phi explains the coast; the host''s P overstates it %.1f times\n', ratioHost);
 elseif ratioDs < 0.7
-    fprintf('   VERDICT: the coast carries %.1f times what the datasheet and the tOut state predict: an error the datasheet does not describe\n', 1 / ratioDs);
-    fprintf('           (the mechanisation if run C shows it, the host''s state at tOut otherwise)\n');
+    if hasFloor && ratioGate >= 0.7 && ratioGate <= 2
+        fprintf('   VERDICT: the coast carries %.1f times what the datasheet and the host''s tOut state predict; with the gate''s floors it reads\n', 1 / ratioDs);
+        fprintf('           %.2f of the measured error: the floors carry the state the host''s P understates\n', ratioGate);
+    else
+        fprintf('   VERDICT: the coast carries %.1f times what the datasheet and the tOut state predict: an error the datasheet does not describe\n', 1 / ratioDs);
+        fprintf('           (the mechanisation if run C shows it, the host''s state at tOut otherwise; the heading line above says whether a floor covers it)\n');
+    end
 else
     fprintf('   VERDICT: even the datasheet Q overstates this coast %.1f times: the host''s P at tOut carries more than the real errors there\n', ratioDs);
 end
 res = struct('t', t, 'T', T, 'err', err, 'errH', errH, 'sigLogged', sigLogged, 'sigHost', sigHost, 'sigDs', sigDs, 'sigQ', sigQ, ...
-    'sigHostD', sigHostD, 'sigDsD', sigDsD, 'errC', errC, 'ratioHost', ratioHost, 'ratioDs', ratioDs, 'tEnd', tKf(kEnd), 'note', note, 'Qc', Qc);
+    'sigGate', sigGate, 'sigHostD', sigHostD, 'sigDsD', sigDsD, 'errC', errC, 'ratioHost', ratioHost, 'ratioDs', ratioDs, 'ratioGate', ratioGate, ...
+    'headingSigmaHost', headingSigmaHost, 'headingFloor', headingFloor, 'headingImplied', headingImplied, 'tEnd', tKf(kEnd), 'note', note, 'Qc', Qc);
+end
+
+function [sigH, sigD] = propagateSigma(prop, P0, useHostQ)
+% the horizontal and vertical position sigma along the coast from P0 with the host's accumPhi, and the host's accumQ or
+% the datasheet Q on the inertial states (the host's Q on the others)
+m = prop.kEnd - prop.kOut;  n = prop.n;
+sigH = NaN(m, 1);  sigD = NaN(m, 1);
+P = (P0 + P0') / 2;
+for j = 1:m
+    k = prop.kOut + j;
+    Phi = prop.L(k).accumPhi;
+    if isfield(prop.L, 'accumQ') && ~isempty(prop.L(k).accumQ), Qh = prop.L(k).accumQ; else, Qh = zeros(n); end
+    if useHostQ
+        Q = Qh;
+    else
+        dt = Phi(1, 4);                                                % the interval the accumulation covers
+        if ~(dt > 0) || ~isfinite(dt), dt = prop.tKf(k) - prop.tKf(k - 1); end
+        Q = dt / 2 * (Phi * prop.Qc * Phi' + prop.Qc);
+        Qo = Qh;  Qo(prop.inertial, :) = 0;  Qo(:, prop.inertial) = 0;
+        Q = Q + Qo;
+    end
+    P = Phi * P * Phi' + Q;  P = (P + P') / 2;
+    sigH(j) = sqrt(P(1, 1) + P(2, 2));  sigD(j) = sqrt(P(3, 3));
+end
+end
+
+function [s] = impliedHeading(prop, P0, hs, jv, target)
+% the heading sigma at tOut at which the datasheet prediction meets the measured horizontal error at epoch jv:
+% 0 when the prediction already covers it, Inf when 0.5 rad does not, else by bisection on the (hs, hs) entry
+sig0 = propagateSigma(prop, P0, false);
+if sig0(jv) >= target, s = 0; return; end
+sMax = 0.5;
+if predictAt(prop, P0, hs, sMax, jv) < target, s = Inf; return; end
+lo = sqrt(max(P0(hs, hs), 0));  hi = sMax;
+for it = 1:40
+    mid = 0.5 * (lo + hi);
+    if predictAt(prop, P0, hs, mid, jv) < target, lo = mid; else, hi = mid; end
+end
+s = 0.5 * (lo + hi);
+end
+
+function [v] = predictAt(prop, P0, hs, s, jv)
+P = P0;  P(hs, hs) = max(P(hs, hs), s^2);
+sig = propagateSigma(prop, P, false);
+v = sig(jv);
 end
 
 function [P0, sigLogged, note] = pAtEpochs(pAtOut, kOut, K, n)

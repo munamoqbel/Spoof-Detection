@@ -70,9 +70,43 @@ fprintf('--- propTel as one struct with the epochs along the third dimension ---
 P3 = struct('accumPhi', repmat(Phi, [1 1 K]), 'accumQ', repmat(Qhost, [1 1 K]));
 evalc('r3 = coastDriftCheck(run, tKf, tOut, [], P3, P0, imu);');
 okForm = max(abs(r3.sigDs - r1.sigDs)) < 1e-9;
-fprintf('datasheet sigma within 10 %% of the ensemble: %s | host sigma above it: %s | measured column and run C: %s | Q alone below the full prediction: %s | diagonal P with its note: %s | third-dimension propTel: %s\n', ...
-    pf(okDs), pf(okHost), pf(okMeas), pf(okQ), pf(okDiag), pf(okForm));
-if okDs && okHost && okMeas && okQ && okDiag && okForm, fprintf('=== test_coastDriftCheck PASS ===\n');
+%% the gate's floors and the implied heading
+% a heading that the host's P states at 0.1 mrad but that is 10 mrad at tOut, on a vehicle accelerating north at 1 m/s^2
+% through the coast (the heading error then drifts the east velocity: F(5, 9) = -a): the floors column must exceed the
+% datasheet one, and the heading the tool solves for must read the 10 mrad the ensemble was drawn with
+okNone = r1.headingImplied == 0 && all(isnan(r1.sigGate));                       % the plain coast: nothing the datasheet misses
+aN = 1.0;
+Fh = F;  Fh(5, 9) = -aN;
+PhiH = expm(Fh * dt);  PhiH(1, 4) = dt;
+QdsH = dt / 2 * (PhiH * Qc * PhiH' + Qc);  QdsH = (QdsH + QdsH') / 2;
+[Vh, Dh] = eig(QdsH);  SqH = Vh * sqrt(max(Dh, 0));
+sigH0 = sig0;  sigH0(9) = 10e-3;                                                % the true heading sigma at tOut
+posH = zeros(m, nMc);
+for r = 1:nMc
+    x = sigH0 .* randn(n, 1);
+    for j = 1:m
+        x = PhiH * x + SqH * randn(n, 1);
+        posH(j, r) = sqrt(x(1)^2 + x(2)^2);
+    end
+end
+rmsPath = sqrt(mean(posH .^ 2, 2));                                             % the ensemble rms path as the "measured" coast
+errH = zeros(K, 1);  errH(kOut + 1:end) = rmsPath;
+runH = struct('t', t, 'navPos', [lat0 + zeros(K, 1), lon0 + errH / ((Rn + h0) * cos(lat0)), h0 * ones(K, 1)], ...
+    'tTrue', [0; t(end) + 1], 'truePos', [lat0 lon0 h0; lat0 lon0 h0]);
+propH = repmat(struct('accumPhi', PhiH, 'accumQ', 9 * QdsH), K, 1);
+imuF = imu;  imuF.floorStates = [7 8 9];  imuF.floorSigmas = [1e-4 1e-4 10e-3];
+fprintf('--- a heading of 10 mrad the host''s P states at 0.1 mrad, with the gate''s floors ---\n');
+rH = coastDriftCheck(runH, tKf, tOut, [], propH, P0, imuF);
+jH = find(rH.T >= 120, 1);
+okGate = rH.sigGate(jH) > 1.5 * rH.sigDs(jH) && abs(rH.sigGate(jH) / rH.errH(jH) - 1) < 0.15 && abs(rH.headingFloor - 10e-3) < 1e-12;
+fprintf('--- the same coast without the floors: the heading the tool solves for ---\n');
+rH0 = coastDriftCheck(runH, tKf, tOut, [], propH, P0, imu);
+okImplied = abs(rH0.headingImplied / 10e-3 - 1) < 0.3 && all(isnan(rH0.sigGate)) && rH0.ratioDs < 0.7;
+fprintf('   implied heading sigma %.1f mrad against the 10 mrad drawn; gate column %.1f m against the measured %.1f m at 120 s\n', ...
+    rH0.headingImplied * 1e3, rH.sigGate(jH), rH.errH(jH));
+fprintf('datasheet sigma within 10 %% of the ensemble: %s | host sigma above it: %s | measured column and run C: %s | Q alone below the full prediction: %s | diagonal P with its note: %s | third-dimension propTel: %s | no floor needed on the plain coast: %s | floors column meets the coupled coast: %s | implied heading within 30 %%: %s\n', ...
+    pf(okDs), pf(okHost), pf(okMeas), pf(okQ), pf(okDiag), pf(okForm), pf(okNone), pf(okGate), pf(okImplied));
+if okDs && okHost && okMeas && okQ && okDiag && okForm && okNone && okGate && okImplied, fprintf('=== test_coastDriftCheck PASS ===\n');
 else, fprintf('=== test_coastDriftCheck FAIL ===\n'); end
 end
 

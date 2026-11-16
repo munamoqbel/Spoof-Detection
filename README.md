@@ -374,9 +374,12 @@ states from the in-run stability and the walk). It tabulates the measured
 nav error, the logged sigma, the two predictions and the sensor-only
 growth at 5 to 120 s into the coast and at its end, with the errors-off
 run's error beside them, and says whether the datasheet explains the
-coast and by how much the host's P overstates it. This is the measurement
-the gate's own Q is validated against, on the twin and later on the
-vehicle.
+coast and by how much the host's P overstates it. Given the gate's floor
+lists it adds the column the gate itself carries, the host's P at tOut
+floored with the datasheet Q, and it solves for the heading sigma at tOut
+that would explain the coast along the host's Phi: the heading floor one
+coast asks for. This is the measurement the gate's own Q is validated
+against, on the twin and later on the vehicle.
 
 `tools/navConsistency.m` asks whether the host's P describes its own
 errors: per state group (position, velocity, tilt, heading, the two bias

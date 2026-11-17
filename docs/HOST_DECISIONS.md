@@ -376,3 +376,51 @@ coasts from the sensor, and the host's P floored where its own
 consistency read says so. `test_coastQ` checks the Q against the formula
 and the floor against its definition; the test references, run with the
 flag off and empty floors, stand unchanged.
+
+## 14. The monitors' S carries the gate's covariance
+
+Two latches survived on the clean 2000 s run with B at [8 8 10] and the
+floors in, at 446 s on D and at 1262 s on E, and the host's R was scaled
+on neither (`tools/measNoiseCheck`; `tools/cpiReplay` with the mode
+`host` reads the same sums): what the gate reads is the host's S with
+the nominal R, normalised by the host's P, and the host's P is honest
+about the clock only right after a gap. At 446 s two satellites dropped
+and the clock shift of both systems stepped by 16 m together for two
+epochs, back by 447 s, a common mode the CPI projection, holding the
+clocks at the host's P after seven minutes of aiding, read as 26 m on D;
+with the clocks free the rows put the shift at 1.4 m. A 58 m step at
+322 s, right after a gap, latched nothing, because the host's clock P had
+grown there. At 1262 s the rows agreed on a 16 m east shift of their own
+solution while the nav sat 9 m east of the truth: a real disagreement,
+held in the innovations for nine epochs by a host that takes about a
+tenth of it per epoch.
+
+Decision: the S the monitors read is the host's S plus H dP H'
+(`SPF_floorInnovCov`), dP the increase of the floored P over the host's
+on every state (`COAST_SIGMA_FLOOR_*`) and, on the receiver clock bias
+states (`CPI_CLOCK_STATES`), the variance of `CPI_CLOCK_SIGMA` over the
+host's. It is applied once per epoch at the top of the gate, so the CPI
+in NOMINAL and the monitors on the trial in PROBATION read it, and to
+the S the CPI against the coast reads in COAST; the re-validation keeps
+the bounded clock of section 9, since a vertical spoof is mostly a
+common mode and must not be re-admitted. A shift common to every range
+is a clock by definition: with the clock free the projection reads the
+position shift the rows agree on, the same quantity at every epoch of
+every run, where before it read a common mode as position by a share
+that followed the aiding history. That share is sigma^2 over sigma^2 +
+R / n, the rows' own clock resolution: 56 % at the host's 2 m, 89 % at
+5 m, 97 % at 10 m, 99.7 % at 30 m; above ten times
+sqrt(R_range / REVAL_MIN_MEAS) the value is immaterial, 25 m with 5 m
+rows and four of them, 30 m for the host, and no run is involved in it.
+
+Measured on the clean run (`tools/cpiReplay` with the floors as its
+ninth argument): the two windows read 0.81 and 0.00 against 1.42 and
+1.84, no other window rises, the sigma of the reading goes from 2.84,
+2.31, 2.26 m to 3.92, 3.37, 5.47 m on N, E, D, and the offset one window
+latches on from 14.1, 12.9, 14.8 m to 16.4, 15.2, 21.7 m: 2 m on the
+horizontal axes, 7 m on the vertical, where the clock and the altitude
+share a signature and the SS and the baro row keep the vertical. The
+repository leaves the clock states empty and the sigma at 0, and the
+floor lists empty, so the references stand; `test_floorInnovCov` checks
+the matrix against its formula and the two CPI readings, a clock jump
+and a position step.

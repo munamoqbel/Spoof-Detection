@@ -81,6 +81,9 @@ navState        = kfMeas.postState;       % x+ handed to setKF on a latch or a c
 propTel = SPF_coastPropTel(propTel);                     % the gate's own Q on its coasts (CST_spfParam.COAST_Q_DATASHEET)
 postCovHost    = kfMeas.postCov;                         % the host's P as it came: handed back as it came at a commit
 kfMeas.postCov = SPF_coastStartCov(kfMeas.postCov);      % the host's P as the gate reads it, floored (CST_spfParam.COAST_SIGMA_FLOOR_*)
+kfMeas.innovationCov = SPF_floorInnovCov(kfMeas.innovationCov, kfMeas.obsMatrix, kfMeas.numMeas, postCovHost, kfMeas.postCov, ...
+    CST_spfParam.CPI_CLOCK_STATES, CST_spfParam.CPI_CLOCK_SIGMA);   % and the S its monitors read: the same increase, the clock
+                                                         % carried free (section 14); the re-validation keeps the bounded clock
 Phi = propTel.accumPhi;
 Q   = propTel.accumQ;
 kfIncrement = kfMeas.postState - kfMeas.priorState;      % K y of the active filter
@@ -258,6 +261,8 @@ switch sys.mode
         kfMeasCoast = kfMeas;
         kfMeasCoast.innovation    = kfMeas.innovation - kfMeas.obsMatrix * coastMinusPrior;
         kfMeasCoast.innovationCov = (coastS + coastS') / 2;
+        kfMeasCoast.innovationCov = SPF_floorInnovCov(kfMeasCoast.innovationCov, kfMeas.obsMatrix, kfMeas.numMeas, ...
+            coastCovBound, coastCovBound, CST_spfParam.CPI_CLOCK_STATES, CST_spfParam.CPI_CLOCK_SIGMA);   % the clock free for the CPI here too
         kfMeasCoast.postState     = kfMeas.priorState;
         [sys.pool, report] = SPF_monitorPool(sys.pool, kfMeasCoast, propTel);
         sys.pool = STRUCT_SPF.openWindow(sys.pool, kfMeasCoast);

@@ -57,9 +57,14 @@ the states its own consistency read shows it underestimates (the heading
 of a wheeled vehicle without heading aiding), once per epoch, before a
 coast starts from it and before the separation test subtracts it; at a
 commit the host takes its own P back. `SPF_coastPropTel`, `SPF_coastQ`,
-`SPF_coastStartCov` and `SPF_floorCov` are the four files; the flag, the
-`IMU_*` values and the `COAST_*_STATES` in the host's layout are the
-host's constants.
+`SPF_coastStartCov`, `SPF_floorCov` and `SPF_floorInnovCov` are the five
+files; the flag, the `IMU_*` values and the `COAST_*_STATES` in the host's
+layout are the host's constants. The S the monitors read is the host's S
+plus H dP H' (`SPF_floorInnovCov`): the floors' increase and, on the
+receiver clock bias states, a clock floor (`CPI_CLOCK_STATES`,
+`CPI_CLOCK_SIGMA`, 30 m): a shift common to every range is a clock, and
+the CPI projection reads it as such instead of as position; the
+re-validation keeps the bounded clock.
 
 The return path: `RETURN_BANK` long INS-only coasts are kept beside the
 anchor, the oldest spanning 80 to 120 s. At a latch and on every COAST

@@ -48,6 +48,7 @@ tests = { ...
     'test_kfMeasBoth',       '=== test_kfMeasBoth PASS ===';
     'test_coastBound',       '=== test_coastBound PASS ===';
     'test_coastQ',           '=== test_coastQ PASS ===';
+    'test_floorInnovCov',    '=== test_floorInnovCov PASS ===';
     'test_shadowArm',        '=== test_shadowArm PASS ===';
     'test_feedbackCheck',    '=== test_feedbackCheck PASS ===';
     'test_gravityCheck',     '=== test_gravityCheck PASS ==='};

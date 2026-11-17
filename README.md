@@ -334,7 +334,13 @@ the IMU datasheet along the host's Phi (section 13, `SPF_coastQ`, under
 `COAST_Q_DATASHEET`), and the host's P is read with sigma floors on the
 states its own consistency read shows it underestimates
 (`COAST_SIGMA_FLOOR_*`); both are off in the repository, so the test
-references stand, and on in the host's constants.
+references stand, and on in the host's constants. The S the monitors
+read carries the same covariance (section 14, `SPF_floorInnovCov`): the
+floors' increase and a clock floor on the receiver clock bias states
+(`CPI_CLOCK_STATES`, `CPI_CLOCK_SIGMA`) added as H dP H', so that a
+shift common to every range reads as the clock it is and not as
+position, which a clock held at the host's P after minutes of aiding
+made it do; off in the repository likewise.
 
 `tools/measNoiseCheck.m` shows the measurement noise the gate was handed,
 epoch by epoch over a window: the range rows in the record, the largest

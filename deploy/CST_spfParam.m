@@ -88,6 +88,8 @@ classdef CST_spfParam
         COAST_Q_INTERVAL = 0.5;                           % s, when accumPhi carries no position-from-velocity entry
         COAST_SIGMA_FLOOR_STATES = zeros(1, 0);           % the host's P floored on these states
         COAST_SIGMA_FLOOR_VALUES = zeros(1, 0);           % at these sigmas
+        CPI_CLOCK_STATES = zeros(1, 0);                   % the receiver clock bias states the monitors' S carries free (host: e.g. [16 18])
+        CPI_CLOCK_SIGMA = 0.0;                            % m, the clock sigma carried into the monitors' S (SPF_floorInnovCov); 0 off
         MAX_MEAS = CST_gnssHybrid.MAX_MEASURES;           % rows per epoch, the host's bound
 
     end

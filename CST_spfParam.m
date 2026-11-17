@@ -157,6 +157,24 @@
 % metres later. The repository value is 0 (the design as published, the
 % test references); the host sets its own, as with ARM_EPOCHS.
 %
+% - CPI_CLOCK_STATES / CPI_CLOCK_SIGMA (the monitors' S carries the gate's
+% covariance): S = H P H' + R comes from the host with its own P. The gate
+% reads that P floored (COAST_SIGMA_FLOOR_*) and adds the same increase to
+% the S its monitors read, S + H dP H' (SPF_floorInnovCov), and on the
+% receiver clock bias states it carries CPI_CLOCK_SIGMA. A shift common to
+% every range is a clock, by definition; with the clock held at the host's
+% P after minutes of aiding the CPI projection reads it as position
+% (measured: a 16 m common-mode excursion of two epochs read as 26 m on D
+% and latched, while with the clocks free the rows put the shift at 1.4 m).
+% The share of a common mode the projection gives the clock is sigma^2 over
+% sigma^2 + R / n, so above ten times sqrt(R_range / REVAL_MIN_MEAS), 25 m
+% with 5 m rows and four of them, the reading is the free-clock one and the
+% value is immaterial. The repository leaves both off (the references); the
+% host lists its clock bias states and 30 m. The re-validation keeps the
+% bounded clock (COAST_BOUND_STATES): a vertical spoof is mostly a common
+% mode and must not be re-admitted; the CPI against the coast reads the
+% clock free like the CPI in NOMINAL (docs/HOST_DECISIONS.md section 14).
+%
 % REQUIREMENT TRACEABILITY:
 %
 %******************************************************************************************
@@ -231,6 +249,11 @@ classdef CST_spfParam
         COAST_Q_INTERVAL = 0.5;                   % s: the interval when accumPhi carries no position-from-velocity entry
         COAST_SIGMA_FLOOR_STATES = zeros(1, 0);   % the host's P floored on these states (none here)
         COAST_SIGMA_FLOOR_VALUES = zeros(1, 0);   % at these sigmas, in the states' units
+        CPI_CLOCK_STATES = zeros(1, 0);           % the receiver clock bias states the monitors' S carries free (none here;
+                                                  % the host lists its clock bias states, e.g. [16 18])
+        CPI_CLOCK_SIGMA = 0.0;                    % m: the clock sigma carried into the monitors' S (SPF_floorInnovCov); 0 off.
+                                                  % Above ten times sqrt(R_range / REVAL_MIN_MEAS), 25 m with 5 m rows and
+                                                  % four of them, the projection is the free-clock one and the value is immaterial
         MAX_MEAS = CST_gnssHybrid.MAX_MEASURES;   % max measurement rows per epoch (host class, uint8(51))
 
 

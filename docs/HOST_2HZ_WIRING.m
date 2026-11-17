@@ -33,6 +33,10 @@
 %                 accumulates them. With CST_spfParam.COAST_Q_DATASHEET the
 %                 gate replaces accumQ for its own coasts (SPF_coastQ); the
 %                 host's filter never sees that Q.
+%   kfMeas S      the nominal S as the host builds it. The gate adds its
+%                 own floors and a clock floor to the copy its monitors
+%                 read (SPF_floorInnovCov, CST_spfParam.CPI_CLOCK_*); the
+%                 host's filter never sees that S.
 %   LATCH/COMMIT  nav.applyCorrection: (nav.state, nav.covar) through the
 %                 NORMAL setKF case, nothing else that epoch. A RETURN (the
 %                 end of a followed spoof, read against the gate's long

@@ -223,7 +223,8 @@ classdef CST_spfParam
         COAST_SIGMA_MAX = 3.0;                    % m: the coast sigma the re-admission tests (re-validation,
                                                   % first probation window) may use at most, per bounded state
         COAST_BOUND_STATES = [1 2 3 16];          % the states bounded: the NED position and the receiver
-                                                  % clock bias (host indices, like MONITORED_AXES)
+                                                  % clock bias (host indices, like MONITORED_AXES; a multi-system
+                                                  % host lists one clock bias per constellation, e.g. [1 2 3 16 18 21])
         RETURN_BANK = uint8(3);                   % long coasts kept beside the anchor, restarted in turn
         RETURN_RESTART = uint32(80);              % epochs between restarts: the oldest long coast spans
                                                   % RETURN_RESTART * (RETURN_BANK - 1) to RETURN_RESTART * RETURN_BANK
@@ -250,7 +251,8 @@ classdef CST_spfParam
         COAST_SIGMA_FLOOR_STATES = zeros(1, 0);   % the host's P floored on these states (none here)
         COAST_SIGMA_FLOOR_VALUES = zeros(1, 0);   % at these sigmas, in the states' units
         CPI_CLOCK_STATES = zeros(1, 0);           % the receiver clock bias states the monitors' S carries free (none here;
-                                                  % the host lists its clock bias states, e.g. [16 18])
+                                                  % the host lists one per constellation, e.g. [16 18 21]; the drifts are the
+                                                  % rate rows' and stay out)
         CPI_CLOCK_SIGMA = 0.0;                    % m: the clock sigma carried into the monitors' S (SPF_floorInnovCov); 0 off.
                                                   % Above ten times sqrt(R_range / REVAL_MIN_MEAS), 25 m with 5 m rows and
                                                   % four of them, the projection is the free-clock one and the value is immaterial

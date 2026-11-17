@@ -412,6 +412,13 @@ R / n, the rows' own clock resolution: 56 % at the host's 2 m, 89 % at
 5 m, 97 % at 10 m, 99.7 % at 30 m; above ten times
 sqrt(R_range / REVAL_MIN_MEAS) the value is immaterial, 25 m with 5 m
 rows and four of them, 30 m for the host, and no run is involved in it.
+The host lists one clock bias state per constellation it ranges on
+([16 18 21] in its layout): each system's rows carry their own column,
+so a floor on one system alone would still read the other's common mode
+as position; a state whose rows are absent adds nothing, and the clock
+drift states belong to the rate rows and stay out. The same holds for
+`COAST_BOUND_STATES` of section 9, which bounds one clock per
+constellation on such a host.
 
 Measured on the clean run (`tools/cpiReplay` with the floors as its
 ninth argument): the two windows read 0.81 and 0.00 against 1.42 and

@@ -6,7 +6,10 @@
 %      restarts the count so the gate arms ARM_EPOCHS epochs after the last shadow alarm, and the 30 m step at 60 still
 %      latches within two epochs;
 %   C  the same transient and a 30 m step from epoch 30: the pool carried over the arming, the step latches within two
-%      epochs of its onset.
+%      epochs of its onset;
+%   D  a gap without rows from epoch 60 to 300, long enough for the protection level to pass ARM_PL_MAX: the monitors
+%      return to shadow once it does, a 150 m jump at the reacquisition alarms in shadow and raises no latch, the gate re-arms ARM_EPOCHS
+%      epochs after the last shadow alarm, and a 30 m step at 380 latches within two epochs.
 % Run from the repo root (MATLAB, or Octave with tools/octave_shim).
 
 n = CST_gnssHybrid.NO_STATES;  nArm = double(CST_spfParam.ARM_EPOCHS);
@@ -18,8 +21,9 @@ el = 0.3 + 0.6 * rand(m, 1);  az = 2 * pi * rand(m, 1);
 u = [cos(el) .* cos(az), cos(el) .* sin(az), -sin(el)];
 H = zeros(m, n);  H(:, 1:3) = -u;
 P0 = 0.01 * eye(n);  P0(1:3, 1:3) = eye(3);
-function [res] = runSched(offN, n, m, N, H, R, P0, propTel)
-    % offN(k): the north offset the ranges describe at epoch k
+function [res] = runSched(offN, n, m, N, H, R, P0, propTel, gap)
+    % offN(k): the north offset the ranges describe at epoch k; gap(k): no rows at epoch k (the KF propagates only)
+    if nargin < 9, gap = false(1, N); end
     sys = STRUCT_SPF.zeroSys;  sys.coastCov = P0;
     sys.anchor = STRUCT_SPF.setAnchor(true, zeros(n, 1), P0, uint32(0));
     kf_x = zeros(n, 1);  kf_P = P0;  tr_x = kf_x;  tr_P = P0;  mode = CST_spfMode.NOMINAL;
@@ -27,12 +31,18 @@ function [res] = runSched(offN, n, m, N, H, R, P0, propTel)
     for k = 1:N
         z = 5 * randn(m, 1) + H(:, 1:3) * [offN(k) 0 0]';
         inProb = (mode == CST_spfMode.PROBATION);  kfUpd = (mode == CST_spfMode.NOMINAL);
-        if inProb
-            [tr_x, tr_P, y, ~, ~, xp, xpP] = kalman_update_step(tr_x, tr_P, z, H, propTel, R);  post = tr_x;  postP = tr_P;
+        if gap(k)
+            xp = propTel.accumPhi * kf_x;  xpP = propTel.accumPhi * kf_P * propTel.accumPhi' + propTel.accumQ;  xpP = (xpP + xpP') / 2;
+            post = xp;  postP = xpP;  ax = xp;  aP = xpP;
+            kfMeas = STRUCT_SPF.kfMeasFromUpdate(zeros(0, 1), zeros(0, n), zeros(0, 0), 0, xp, xpP, post, postP);
         else
-            [ax, aP, y, ~, ~, xp, xpP] = kalman_update_step(kf_x, kf_P, z, H, propTel, R);  post = ax;  postP = aP;
+            if inProb
+                [tr_x, tr_P, y, ~, ~, xp, xpP] = kalman_update_step(tr_x, tr_P, z, H, propTel, R);  post = tr_x;  postP = tr_P;
+            else
+                [ax, aP, y, ~, ~, xp, xpP] = kalman_update_step(kf_x, kf_P, z, H, propTel, R);  post = ax;  postP = aP;
+            end
+            kfMeas = STRUCT_SPF.kfMeasFromUpdate(y, H, R, m, xp, xpP, post, postP);
         end
-        kfMeas = STRUCT_SPF.kfMeasFromUpdate(y, H, R, m, xp, xpP, post, postP);
         [sys, tel] = SPF_protectedNav(sys, kfMeas, propTel, k);
         mode = tel.info.mode;
         if kfUpd, kf_x = post;  kf_P = postP; else, [kf_x, kf_P] = SPF_insCoast(kf_x, kf_P, propTel); end
@@ -50,6 +60,8 @@ offB = offA;  offB(4:7) = 40;
 offC = zeros(1, N);  offC(4:7) = 40;  offC(30:90) = 30;
 rA = runSched(offA, n, m, N, H, R, P0, propTel);
 rB = runSched(offB, n, m, N, H, R, P0, propTel);
+ND = 420;  offD = zeros(1, ND);  offD(301:ND) = 150;  offD(380:ND) = 180;  gapD = false(1, ND);  gapD(60:300) = true;   % 150 m at the reacquisition: a shadow alarm
+rD = runSched(offD, n, m, ND, H, R, P0, propTel, gapD);
 rC = runSched(offC, n, m, N, H, R, P0, propTel);
 kArmA = find(rA.armed, 1);  kArmB = find(rB.armed, 1);  kArmC = find(rC.armed, 1);
 lastShadowB = find(rB.marg > 1 & ~rB.armed, 1, 'last');
@@ -57,12 +69,20 @@ fprintf('A clean: armed from epoch %d (ARM_EPOCHS %d), latch %s, hand-backs %s\n
 fprintf('B transient 4..7: shadow margins above 1 on epochs %s, alarm flags while unarmed %d, armed from epoch %d, latch %s\n', ...
     mat2str(find(rB.marg > 1 & ~rB.armed)), nnz(rB.alarm & ~rB.armed), kArmB, mat2str(rB.det));
 fprintf('C transient 4..7, step from 30: armed from epoch %d, latch %s\n', kArmC, mat2str(rC.det));
+kDis = find(~rD.armed(60:300), 1) + 59;  kRe = find(rD.armed(301:ND), 1) + 300;
+if isempty(kDis), kDis = 0; end
+if isempty(kRe), kRe = 0; end
+fprintf('D gap 60..300, 150 m jump at 301, step at 380: armed from epoch %d, shadow again from %d (PL above the limit), armed again from %d, latch %s, alarm flags while unarmed %d\n', ...
+    find(rD.armed, 1), kDis, kRe, mat2str(rD.det), nnz(rD.alarm & ~rD.armed));
 okA = kArmA == nArm && ~isempty(rA.det) && rA.det(1) >= 60 && rA.det(1) <= 61 && all(rA.st(1:59) == 1) && ~any(rA.hb <= 120);
 okB = ~isempty(lastShadowB) && lastShadowB >= 4 && kArmB >= lastShadowB + nArm && kArmB <= lastShadowB + nArm + 2 ...
     && ~any(rB.alarm & ~rB.armed) && ~any(rB.det < 60) && all(rB.st(1:59) == 1) && ~isempty(rB.det) && rB.det(1) >= 60 && rB.det(1) <= 61;
 okC = kArmC < 30 && ~isempty(rC.det) && rC.det(1) >= 30 && rC.det(1) <= 31 && ~any(rC.hb <= 90);
-fprintf('A %s | B %s | C %s\n', pf(okA), pf(okB), pf(okC));
-if okA && okB && okC, fprintf('=== test_shadowArm PASS ===\n'); else, fprintf('=== test_shadowArm FAIL ===\n'); end
+okD = find(rD.armed, 1) == nArm && kDis >= 270 && kDis <= 295 && all(rD.armed(nArm:kDis-1)) && ~any(rD.armed(kDis:300)) ...
+    && ~any(rD.det < 380) && max(rD.marg(301:305)) > 1 && kRe >= 301 + nArm - 1 && kRe <= 301 + nArm + 12 && ~isempty(rD.det) && rD.det(1) >= 380 && rD.det(1) <= 381 ...
+    && ~any(rD.alarm & ~rD.armed) && all(rD.st(1:379) == 1);
+fprintf('A %s | B %s | C %s | D %s\n', pf(okA), pf(okB), pf(okC), pf(okD));
+if okA && okB && okC && okD, fprintf('=== test_shadowArm PASS ===\n'); else, fprintf('=== test_shadowArm FAIL ===\n'); end
 
 function s = pf(ok)
 if ok, s = 'PASS'; else, s = 'FAIL'; end

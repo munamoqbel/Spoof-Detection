@@ -26,8 +26,13 @@
 % which it would not have alarmed: a transient the host's covariance does
 % not admit (a heading still converging, a constellation joining the
 % solution) delays the arming instead of latching right after it.
-% Arming is sticky (an outage does not disarm; a re-initialisation does).
-% info.armed reports the state. The host runs ARM_EPOCHS = 120 (60 s): its
+% A protection level above ARM_PL_MAX on an armed NOMINAL epoch returns
+% the monitors to shadow, the count from zero (a long gap: the INS-only
+% solution has grown past what the monitors can certify, and the GNSS met
+% at the reacquisition cannot be judged against it; measured on the long
+% vehicle run, a 350 m jump after a 450 s gap read 14 sigma, latched, and
+% the coast to hold was the drifted INS). A re-initialisation does the
+% same. info.armed reports the state. The host runs ARM_EPOCHS = 120 (60 s): its
 % bias convergence after a protective reset takes that long; 10 is the
 % value the simulation references were built with.
 % - Coast budget (Implementation Guide rule 4, on the PL, not on time):

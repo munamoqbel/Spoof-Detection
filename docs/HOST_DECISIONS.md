@@ -431,3 +431,38 @@ repository leaves the clock states empty and the sigma at 0, and the
 floor lists empty, so the references stand; `test_floorInnovCov` checks
 the matrix against its formula and the two CPI readings, a clock jump
 and a position step.
+
+## 15. The monitors return to shadow above the protection level limit
+
+On the long vehicle run the receiver is gone for 450 s (2400 to 2850 s).
+The INS drifts 383 m north and 328 m east in the gap, the heading being
+2.5 degrees off, while the host's position sigma reaches about 25 m and
+the protection level passes 100 m for 342 s (`coastBudgetExceeded` on
+684 epochs). At the reacquisition the first window reads the 350 m jump
+at 14 sigma on N and latches (`tools/matrixRow`: CPI 2.77 at 2870.48 s).
+The run was in shadow, so the host went on updating and the gate's coast
+was the host's own prior, back on the GNSS: the re-validation then read
+the host's innovations, 0.49 of its threshold on 31 rows once the spike
+filter released them, and handed back at 2905.52 s. An acting gate would
+have held the nav on the drifted INS, 500 m from the truth, and the
+re-validation against that coast would have failed until the coast
+budget and the host's reset.
+
+The arming rule already says what the gate can certify: the monitors arm
+only when the protection level is below `ARM_PL_MAX`, because above it
+the INS-only solution cannot judge the GNSS. Arming was sticky, so a gap
+in which the PL passes the limit left the monitors armed on a solution
+they could not judge. Decision: on an armed NOMINAL epoch whose
+protection level exceeds `ARM_PL_MAX` the monitors return to shadow, the
+count from zero, exactly as after a re-initialisation; the windows and
+margins go on being logged, nothing latches, a shadow alarm restarts the
+count, and the gate re-arms after `ARM_EPOCHS` qualifying epochs on the
+re-converged host. `info.armed` says so through the gap and for the
+60 s after it, which is the honest statement: after a gap that long the
+INS cannot certify the first fix, and a spoofer who jams and then
+transmits is met by the host's own filter, not by a coast that is 500 m
+wrong. `test_shadowArm` case D: a gap long enough for the PL to pass the
+limit disarms the monitors, an 80 m jump at the reacquisition raises no
+latch, the gate re-arms `ARM_EPOCHS` epochs after the last shadow alarm
+and a 30 m step afterwards latches within two epochs. No constant was
+added.

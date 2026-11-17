@@ -87,15 +87,26 @@ switch sys.mode
         %          delays the arming instead of latching right after it
         %          (measured on the vehicle data: a latch at 83 s, 7 s after
         %          the arming, on the start transient of 82.6 to 84.6 s).
-        %          Sticky once armed; the pool carries over into NOMINAL.
+        %          Armed until the protection level passes ARM_PL_MAX (below);
+        %          the pool carries over into NOMINAL.
+        sigmaPosMax = 0.0;
+        for idx = 1:numel(CST_spfParam.MONITORED_AXES)
+            axisIdx = CST_spfParam.MONITORED_AXES(idx);
+            sigmaPosMax = max(sigmaPosMax, sqrt(max(kfMeas.postCov(axisIdx, axisIdx), 0.0)));
+        end
+        plInside = (CST_spfParam.K_MISSED_DETECTION * sigmaPosMax < CST_spfParam.ARM_PL_MAX);
+        if (sys.armed) && (~plInside)
+            % a protection level above ARM_PL_MAX while armed: a gap in which
+            % the INS-only solution grew past what the monitors can certify,
+            % so the GNSS met at the reacquisition cannot be judged against it
+            % (measured: a 350 m jump after a 450 s gap read 14 sigma, latched,
+            % and the coast to hold was the drifted INS). Back to shadow, the
+            % count from zero, as after a re-initialisation (section 15)
+            sys.armed    = false;
+            sys.armCount = 0;
+        end % ELSE: armed with the PL inside, or not armed yet
         armedBefore = sys.armed;
         if (~sys.armed)
-            sigmaPosMax = 0.0;
-            for idx = 1:numel(CST_spfParam.MONITORED_AXES)
-                axisIdx = CST_spfParam.MONITORED_AXES(idx);
-                sigmaPosMax = max(sigmaPosMax, sqrt(max(kfMeas.postCov(axisIdx, axisIdx), 0.0)));
-            end
-            plInside   = (CST_spfParam.K_MISSED_DETECTION * sigmaPosMax < CST_spfParam.ARM_PL_MAX);
             enoughRows = (kfMeas.numMeas >= CST_spfParam.REVAL_MIN_MEAS);
             [sys.pool, report] = SPF_monitorPool(sys.pool, kfMeas, propTel);
             info.maxProtectionLevel = report.maxProtectionLevel;

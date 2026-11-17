@@ -100,15 +100,19 @@ switch sys.mode
         % 1b. warm-up: a PL above ARM_PL_MAX restarts the count, a row dropout pauses it, and the monitors run in
         %     shadow (windows open and close as in NOMINAL, the margins logged, nothing latches and the alarm flags stay
         %     down): a shadow alarm restarts the count, so the gate arms only after ARM_EPOCHS epochs on which it
-        %     would not have alarmed
+        %     would not have alarmed. A PL above ARM_PL_MAX while armed (a long gap) returns the monitors to shadow
+        sigmaPosMax = 0.0;
+        for idx = 1:numel(CST_spfParam.MONITORED_AXES)
+            axisIdx = CST_spfParam.MONITORED_AXES(idx);
+            sigmaPosMax = max(sigmaPosMax, sqrt(max(kfMeas.postCov(axisIdx, axisIdx), 0.0)));
+        end
+        plInside = (CST_spfParam.K_MISSED_DETECTION * sigmaPosMax < CST_spfParam.ARM_PL_MAX);   % Eq. 51 term
+        if (sys.armed) && (~plInside)
+            sys.armed    = false;
+            sys.armCount = 0;
+        end
         armedBefore = sys.armed;
         if (~sys.armed)
-            sigmaPosMax = 0.0;
-            for idx = 1:numel(CST_spfParam.MONITORED_AXES)
-                axisIdx = CST_spfParam.MONITORED_AXES(idx);
-                sigmaPosMax = max(sigmaPosMax, sqrt(max(kfMeas.postCov(axisIdx, axisIdx), 0.0)));
-            end
-            plInside   = (CST_spfParam.K_MISSED_DETECTION * sigmaPosMax < CST_spfParam.ARM_PL_MAX);   % Eq. 51 term
             enoughRows = (kfMeas.numMeas >= CST_spfParam.REVAL_MIN_MEAS);
             [sys.pool, report] = SPF_monitorPool(sys.pool, kfMeas, propTel);
             info.maxProtectionLevel = report.maxProtectionLevel;

@@ -81,7 +81,9 @@ false-latch investigation. The mode figure shades the warm-up: after a
 gate initialisation the monitors stay disarmed (`info.armed = false`, no
 latch possible) until the filter has had `ARM_EPOCHS` consecutive epochs
 with enough rows and a protection level below `ARM_PL_MAX`
-(`CST_spfParam`).
+(`CST_spfParam`), and they return to shadow whenever the protection
+level passes that limit again, a gap in which the INS-only solution has
+grown past what the monitors can certify (section 15).
 
 `tools/reacqChecks.m` is the re-acquisition diagnostic: given four `.mat`
 captures of the host's `kfUpdate` (last epoch before an outage, first call

@@ -1,4 +1,4 @@
-function [res] = cpiReplay(spfMeasLog, tKf, spfLog, tWin, nominalBias, rMode, minRows, run)
+function [res] = cpiReplay(spfMeasLog, tKf, spfLog, tWin, nominalBias, rMode, minRows, run, floors)
 %CPIREPLAY  The CPI monitor replayed on the saved spfMeas records: what its projection reads, epoch by epoch, against the gate log.
 %   res = cpiReplay(spfMeasLog, tKf, spfLog, tWin)               B from CST_spfParam on the path (the host's values)
 %   res = cpiReplay(spfMeasLog, tKf, spfLog, tWin, nominalBias)  B per NED position axis (m)
@@ -21,6 +21,13 @@ function [res] = cpiReplay(spfMeasLog, tKf, spfLog, tWin, nominalBias, rMode, mi
 %                                                 runCompare reads (t, navPos [lat lon h], tTrue, truePos), and each
 %                                                 detailed window prints the logged nav's error from the truth beside the
 %                                                 reading, so the printout says whether the ranges or the nav carry it
+%   res = cpiReplay(..., minRows, run, floors)   the replay with the gate's floors carried into S: floors is a struct with
+%                                                 states and sigmas (the host's COAST_SIGMA_FLOOR lists, or any) and, or
+%                                                 only, clockSigma, a sigma for the clock columns the range rows use; S
+%                                                 becomes S + H dP H' with dP the floor variance above the record's P on
+%                                                 those states, and the sums are read again (dHatFloor, sigFloor,
+%                                                 xiFloor, qFloor): what the CPI would read were its S to carry the
+%                                                 gate's covariance, with the step one window then latches on
 %   spfLog may be [] (no comparison with the log); tWin [tOn tOff] in s on tKf, the minute before it is the baseline.
 %   Per epoch and monitored axis, from the record's innovation gamma, S and H: dHat = f' S^-1 gamma / (f' S^-1 f), the
 %   offset the CPI projection reads on the axis (m); sig = 1 / sqrt(f' S^-1 f), the sigma of that reading (m); sigR =
@@ -43,7 +50,8 @@ function [res] = cpiReplay(spfMeasLog, tKf, spfLog, tWin, nominalBias, rMode, mi
 %   reading on the rows left and, with run, the logged nav's error from the truth (nav minus truth, NED) on the axis.
 %   Each detailed window ends with what carries the reading over the epochs that count: the rows dropped, a common
 %   mode of the set (a clock jump, the inter-channel biases of a new set) or the position the rows agree on; and, with
-%   run, whether the ranges or the nav carry it, or both.
+%   run, whether the ranges or the nav carry it, or both. The clock shifts of the fit, epoch to epoch, also give the
+%   receiver's common-mode steps over the window (rms and the largest, with its time): the size a clock floor must cover.
 %   Result: t, dHat, sig, sigR, xi, qReplay, qLog [K x nAxes], sigP [K x nAxes], matches, window, axes, rMode,
 %   rNominal, minRows, nRangeRows, peaks (a cell per axis of [t q] for every run of the ten-epoch sum above 0.25 in
 %   the window, one peak per run: the near misses, not only the largest), dHatScreen, xiScreen, qScreen [K x nAxes],
@@ -52,7 +60,9 @@ function [res] = cpiReplay(spfMeasLog, tKf, spfLog, tWin, nominalBias, rMode, mi
 %   and carrier, the free-clock shift on the axis over the counting epochs and what carries the reading, 'rows',
 %   'clock' or 'position'; navErr and excess, the medians over the counting epochs of nav minus truth on the axis and
 %   of |dHat| - |nav - truth|, NaN without run, and verdict, 'ranges' when the reading exceeds the nav's error by three
-%   sigma, 'nav' within 1.5 sigma of it, 'both' between).
+%   sigma, 'nav' within 1.5 sigma of it, 'both' between), sigFree [K x 3] (the sigma of the free-clock shift), clockStep
+%   (rms, max, tMax, col: the common-mode steps between consecutive epochs), and with floors dHatFloor, sigFloor, xiFloor,
+%   qFloor [K x nAxes] and detail.qFloor.
 %   Needs SPF_cpiMonitor, CST_spfParam and the host's matrixInv on the path. MATLAB desktop tool, not codegen. Runs under Octave.
 
 if iscell(spfMeasLog), spfMeasLog = [spfMeasLog{:}]; end
@@ -65,6 +75,7 @@ if nargin < 5 || isempty(nominalBias), nominalBias = CST_spfParam.NOMINAL_BIAS; 
 if nargin < 6 || isempty(rMode), rMode = 'record'; end
 if nargin < 7 || isempty(minRows), minRows = 0; end
 if nargin < 8, run = []; end
+if nargin < 9, floors = []; end
 useNom = strcmpi(rMode, 'nominal');
 useHost = strcmpi(rMode, 'host');
 if useHost && ~isfield(spfMeasLog, 'measNoiseCovHost')
@@ -85,6 +96,16 @@ dHatS = NaN(K, nA);  sigS = NaN(K, nA);  xiS = zeros(K, nA);  qScreen = NaN(K, n
 nDropped = zeros(K, 1);  worstRow = zeros(K, 1);  worstNorm = NaN(K, 1);  worstEl = NaN(K, 1);  dropList = cell(K, 1);
 shiftFit = NaN(K, 3);  clkFit = cell(K, 1);  sysRows = cell(K, 1);                                    % the free-clock fit
 haveRun = ~isempty(run);
+haveFloors = ~isempty(floors);
+if haveFloors
+    if ~isstruct(floors), error('cpiReplay:floors', 'floors is a struct with states and sigmas, or clockSigma, or both'); end
+    if ~isfield(floors, 'states'), floors.states = zeros(1, 0); end
+    if ~isfield(floors, 'sigmas'), floors.sigmas = zeros(1, 0); end
+    if ~isfield(floors, 'clockSigma'), floors.clockSigma = 0; end
+    if numel(floors.states) ~= numel(floors.sigmas), error('cpiReplay:floors', 'floors.states and floors.sigmas differ in length'); end
+end
+dHatF = NaN(K, nA);  sigF = NaN(K, nA);  xiF = zeros(K, nA);  qFloor = NaN(K, nA);                 % the floors in S
+sigFree = NaN(K, 3);  clkColsList = cell(K, 1);
 if haveRun && ~(isstruct(run) && all(isfield(run, {'t', 'navPos', 'tTrue', 'truePos'})))
     error('cpiReplay:run', 'run needs the fields t, navPos [lat lon h], tTrue and truePos, as runCompare reads them');
 end
@@ -127,9 +148,22 @@ for k = kAll'
         if r2 > 0 && isfinite(r2), sigR(k, a) = 1 / sqrt(r2); end
     end
     % the row screen: the range rows against one shift and one clock per system, the rows beyond ROW_K sigma dropped
-    [drop, wRow, wNorm, wEl, shiftK, clkK, sysK] = rowScreen(H, y, R, ROW_K);
+    [drop, wRow, wNorm, wEl, shiftK, clkK, sysK, clkColsK, sigFreeK] = rowScreen(H, y, R, ROW_K);
     dropList{k} = drop;  nDropped(k) = numel(drop);  worstRow(k) = wRow;  worstNorm(k) = wNorm;  worstEl(k) = wEl;
-    shiftFit(k, :) = shiftK;  clkFit{k} = clkK;  sysRows{k} = sysK;
+    shiftFit(k, :) = shiftK;  clkFit{k} = clkK;  sysRows{k} = sysK;  clkColsList{k} = clkColsK;  sigFree(k, :) = sigFreeK;
+    if haveFloors
+        SF = floorOf(S, H, s.postCov, floors, clkColsK);  SFy = SF \ y;
+        for a = 1:nA
+            f = H(:, axes(a));
+            if ~any(f), continue; end
+            s2 = f' * (SF \ f);
+            if s2 > 0 && isfinite(s2)
+                g = f' * SFy;
+                dHatF(k, a) = g / s2;  sigF(k, a) = 1 / sqrt(s2);
+                xiF(k, a) = max(abs(g) / sqrt(s2) - nominalBias(axes(a)) * sqrt(s2), 0);
+            end
+        end
+    end
     if isempty(drop)
         dHatS(k, :) = dHat(k, :);  sigS(k, :) = sig(k, :);  xiS(k, :) = xi(k, :);
     else
@@ -160,6 +194,19 @@ for k = kAll(kAll >= N)'
     for a = 1:nA
         [~, q] = SPF_cpiMonitor(innB, covB, obsB, numB, axes(a), nominalBias(axes(a)));
         qReplay(k, a) = q / T;
+    end
+    % the same sum with the gate's floors carried into S
+    if haveFloors
+        covF = covB;
+        for i = 1:N
+            s = spfMeasLog(idx(i));  mi = numB(i);
+            if mi < 1, continue; end
+            covF(1:mi, 1:mi, i) = floorOf(covB(1:mi, 1:mi, i), s.obsMatrix(1:mi, :), s.postCov, floors, clkColsList{idx(i)});
+        end
+        for a = 1:nA
+            [~, q] = SPF_cpiMonitor(innB, covF, obsB, numB, axes(a), nominalBias(axes(a)));
+            qFloor(k, a) = q / T;
+        end
     end
     % the same sum on the rows the screen leaves: each epoch's rows compacted without the dropped ones
     if any(nDropped(idx) > 0)
@@ -302,6 +349,41 @@ fprintf('   rows are dropped, on %d of %d epochs; the largest ten-epoch sum on t
 if nDropTot > 0
     fprintf('   (a spoof that shifts the position moves every row together and drops nothing; a row dropped is one that disagrees with the others)\n');
 end
+% the receiver's common-mode steps: the clock shift of the fit, per clock column, between consecutive epochs
+allCols = zeros(1, 0);
+for k = kW', allCols = union(allCols, clkColsList{k}); end
+clockStep = struct('rms', NaN, 'max', NaN, 'tMax', NaN, 'col', NaN);
+steps = zeros(0, 3);                                         % [step t col]
+for c = allCols
+    prev = NaN;
+    for k = kW'
+        j = find(clkColsList{k} == c, 1);
+        if isempty(j) || isempty(clkFit{k}) || ~isfinite(clkFit{k}(j)), continue; end
+        v = clkFit{k}(j);
+        if isfinite(prev), steps(end+1, :) = [v - prev, tKf(k), c]; end %#ok<AGROW>
+        prev = v;
+    end
+end
+if ~isempty(steps)
+    [mx, i] = max(abs(steps(:, 1)));
+    clockStep = struct('rms', sqrt(mean(steps(:, 1).^2)), 'max', mx, 'tMax', steps(i, 2), 'col', steps(i, 3));
+    fprintf('   the clock common mode per system (the free-clock fit) steps between consecutive epochs by %.1f m rms over the window; the largest step\n', clockStep.rms);
+    fprintf('   is %.1f m at %.2f s (state %d): a receiver clock or set-change step a clock floor in S has to cover, and what the host''s clock P must absorb\n', ...
+        clockStep.max, clockStep.tMax, clockStep.col);
+end
+if haveFloors
+    qF = qFloor(kW, :);  qF(~isfinite(qF)) = 0;
+    nomF = kW;
+    if haveLog && isfield(spfLog, 'mode'), nomF = kW(round(spfLog.mode(kW)) == 1); end
+    if isempty(nomF), nomF = kW; end
+    sig0 = medF3(sig(nomF, :));  sig1 = medF3(sigF(nomF, :));  stepFac = sqrt(T / N);
+    fprintf('   FLOORS IN S: S + H dP H'' with the floors on states [%s] at sigma [%s] and the clock columns at %g m, where they exceed the record''s P;\n', ...
+        strtrim(sprintf('%d ', floors.states)), strtrim(sprintf('%g ', floors.sigmas)), floors.clockSigma);
+    fprintf('   the largest ten-epoch sum with the floors in S is %.3f (N %.3f, E %.3f, D %.3f) against %.3f without them\n', max(max(qF)), max(qF), max(max(qR)));
+    fprintf('   the sigma of the reading, medians over the NOMINAL epochs: N %.2f E %.2f D %.2f m with the floors against %.2f %.2f %.2f m without;\n', sig1, sig0);
+    fprintf('   the offset one window latches on, B + %.2f sigma: N %.1f E %.1f D %.1f m with the floors against %.1f %.1f %.1f m without\n', stepFac, ...
+        nominalBias(axes) + stepFac * sig1, nominalBias(axes) + stepFac * sig0);
+end
 sel = zeros(0, 2);                                           % [k axis] of the windows to detail
 for a = 1:nA
     pk = peaks{a};
@@ -319,10 +401,12 @@ elseif size(sel, 1) > DETAIL_MAX
     fprintf('   %d windows cross 1; the first %d are detailed\n', size(sel, 1), DETAIL_MAX);
     sel = sel(1:DETAIL_MAX, :);
 end
-detail = struct('tEnd', {}, 'axis', {}, 'q', {}, 'qScreen', {}, 'nDropped', {}, 'shiftFree', {}, 'carrier', {}, 'navErr', {}, 'excess', {}, 'verdict', {});
+detail = struct('tEnd', {}, 'axis', {}, 'q', {}, 'qScreen', {}, 'qFloor', {}, 'nDropped', {}, 'shiftFree', {}, 'carrier', {}, 'navErr', {}, 'excess', {}, 'verdict', {});
 for i = 1:size(sel, 1)
     kE = sel(i, 1);  a = sel(i, 2);  idx = max(kE - N + 1, 1):kE;
-    fprintf('   window ending %.2f s on %s: q/T_N %.3f, on the rows left %.3f; B = %g m\n', tKf(kE), letters(a), qReplay(kE, a), qScreen(kE, a), nominalBias(axes(a)));
+    fl = '';
+    if haveFloors, fl = sprintf(', with the floors in S %.3f', qFloor(kE, a)); end
+    fprintf('   window ending %.2f s on %s: q/T_N %.3f, on the rows left %.3f%s; B = %g m\n', tKf(kE), letters(a), qReplay(kE, a), qScreen(kE, a), fl, nominalBias(axes(a)));
     fprintf('      %8s %4s %-9s | %6s %5s %5s | %s %6s %6s %6s  %-17s | %s %4s %5s %7s %7s | %6s %5s | %s\n', 't [s]', 'rows', 'rng/system', 'dHat', 'sig', 'xi', ...
         'clocks free:', 'N', 'E', 'D', 'clock per system', 'worst', 'row', 'elev', 'res/sig', 'dropped', 'dHat''', 'xi''', 'nav - truth N, E, D (m)');
     navErrW = NaN(numel(idx), 3);
@@ -345,13 +429,14 @@ for i = 1:size(sel, 1)
             num(xi(k, a), '%5.2f'), '            ', num(shiftFit(k, 1), '%+6.1f'), num(shiftFit(k, 2), '%+6.1f'), num(shiftFit(k, 3), '%+6.1f'), cs, ...
             '     ', wr, nDropped(k), num(dHatS(k, a), '%+6.1f'), num(xiS(k, a), '%5.2f'), te);
     end
-    d = struct('tEnd', tKf(kE), 'axis', a, 'q', qReplay(kE, a), 'qScreen', qScreen(kE, a), 'nDropped', sum(nDropped(idx)), 'shiftFree', NaN, 'carrier', '', ...
-        'navErr', NaN, 'excess', NaN, 'verdict', '');
+    d = struct('tEnd', tKf(kE), 'axis', a, 'q', qReplay(kE, a), 'qScreen', qScreen(kE, a), 'qFloor', qFloor(kE, a), 'nDropped', sum(nDropped(idx)), ...
+        'shiftFree', NaN, 'carrier', '', 'navErr', NaN, 'excess', NaN, 'verdict', '');
     % the epochs that count: those whose xi is above zero, else every epoch with a reading
     cnt = idx(xi(idx, a) > 0 & isfinite(dHat(idx, a)));
     if isempty(cnt), cnt = idx(isfinite(dHat(idx, a))); end
     if ~isempty(cnt)
         medD = median(abs(dHat(cnt, a)));  medS = medF(abs(dHatS(cnt, a)));  medFree = medF(shiftFit(cnt, a));  d.shiftFree = medFree;
+        sgFree = medF(sigFree(cnt, a));  sg0 = medF(sig(cnt, a));
         if isfinite(medS) && medS < 0.5 * medD
             d.carrier = 'rows';
             fprintf('      over the %d epochs that count the reading is %.1f m and %.1f m on the rows left: the rows dropped carry it\n', numel(cnt), medD, medS);
@@ -359,6 +444,7 @@ for i = 1:size(sel, 1)
             d.carrier = 'clock';
             fprintf('      over the %d epochs that count the reading is %.1f m while the rows with their clocks free put the shift on %s at %+.1f m: a common mode\n', numel(cnt), medD, letters(a), medFree);
             fprintf('      of the set carries it (the receiver clock, or the biases of a changed satellite set), read as position because the projection holds the clocks at the host''s P\n');
+            fprintf('      (the sigma of the shift with the clocks free is %.1f m on %s against the CPI''s %.1f m: what a clock floor in S costs on this axis)\n', sgFree, letters(a), sg0);
         elseif isfinite(medFree)
             d.carrier = 'position';
             fprintf('      over the %d epochs that count the reading is %.1f m and the rows with their clocks free put the shift on %s at %+.1f m: the rows agree on a position shift\n', numel(cnt), medD, letters(a), medFree);
@@ -408,7 +494,8 @@ end
 res = struct('t', tKf, 'dHat', dHat, 'sig', sig, 'sigR', sigR, 'xi', xi, 'qReplay', qReplay, 'qLog', qLog, 'sigP', sigP, ...
     'matches', matches, 'window', [tKf(kW(1)) tKf(kW(end))], 'axes', axes, 'rMode', rMode, 'rNominal', rNom, ...
     'minRows', minRows, 'nRangeRows', nRangeRows, 'peaks', {peaks}, 'dHatScreen', dHatS, 'xiScreen', xiS, 'qScreen', qScreen, ...
-    'nDropped', nDropped, 'worstRow', worstRow, 'worstNorm', worstNorm, 'shiftFree', shiftFit, 'clockFree', {clkFit}, 'rowK', ROW_K, 'detail', detail);
+    'nDropped', nDropped, 'worstRow', worstRow, 'worstNorm', worstNorm, 'shiftFree', shiftFit, 'clockFree', {clkFit}, 'sigFree', sigFree, ...
+    'clockStep', clockStep, 'dHatFloor', dHatF, 'sigFloor', sigF, 'xiFloor', xiF, 'qFloor', qFloor, 'rowK', ROW_K, 'detail', detail);
 end
 
 %------------------------------------------------------------------------
@@ -432,14 +519,15 @@ typ(normV > 0.5 & normP < 0.1) = 2;
 end
 
 %------------------------------------------------------------------------
-function [drop, worst, worstNorm, worstEl, shift, clk, sysK] = rowScreen(H, y, R, rowK)
+function [drop, worst, worstNorm, worstEl, shift, clk, sysK, clkCols, sigFree] = rowScreen(H, y, R, rowK)
 % the range rows of one epoch fitted by one shift [N E D] and one clock per system (every column beyond the velocity a
 % range row uses), weighted by R; the row with the largest residual over its sigma is dropped while it exceeds rowK and
 % one degree of redundancy is left after the drop. worst is the row with the largest residual of the first fit (its
 % index in the record), worstNorm that residual over its sigma, worstEl the elevation its line of sight gives (deg);
 % shift [N E D] and clk (one per clock column) are the last fit, on the rows left, NaN without one; sysK the range rows
-% per clock column
+% per clock column; clkCols the clock columns (state indices); sigFree the sigma of the fitted shift per axis
 drop = zeros(1, 0);  worst = 0;  worstNorm = NaN;  worstEl = NaN;  shift = NaN(1, 3);  clk = zeros(1, 0);  sysK = zeros(1, 0);
+clkCols = zeros(1, 0);  sigFree = NaN(1, 3);
 typ = rowTypes(H);  keep = find(typ == 1)';
 if numel(keep) < 2, return; end
 clkCols = 6 + find(any(abs(H(keep, 7:end)) > 1e-9, 1));
@@ -457,6 +545,7 @@ while true
     if nK - rk < 1, break; end                               % no redundancy: nothing can be judged
     pA = pinv(Aw);  hat = Aw * pA;
     delta = pA * yw;  shift = delta(1:3)';  clk = delta(4:end)';
+    cv = pinv(Aw' * Aw);  sigFree = sqrt(max(diag(cv(1:3, 1:3)), 0))';
     rw = yw - hat * yw;
     rn = rw ./ sqrt(max(1 - diag(hat), 1e-6));
     [mx, i] = max(abs(rn));
@@ -469,6 +558,28 @@ while true
         break;
     end
 end
+end
+
+function [SF] = floorOf(S, H, P, floors, clkCols)
+% S with the gate's floors carried in: S + H dP H', dP the floor variance above the record's P on the floored states and
+% on the clock columns the range rows use (the live rows only: S and H are m x m and m x n)
+n = size(H, 2);  dP = zeros(n, 1);
+for i = 1:numel(floors.states)
+    st = floors.states(i);
+    if st >= 1 && st <= n, dP(st) = max(dP(st), floors.sigmas(i)^2 - P(st, st)); end
+end
+if floors.clockSigma > 0
+    for c = clkCols, dP(c) = max(dP(c), floors.clockSigma^2 - P(c, c)); end
+end
+dP = max(dP, 0);
+SF = S + H * diag(dP) * H';
+SF = (SF + SF') / 2;
+end
+
+function [m] = medF3(X)
+% the median per column over the finite rows
+m = NaN(1, size(X, 2));
+for c = 1:size(X, 2), m(c) = medF(X(:, c)); end
 end
 
 function [e] = nedDelta(p, q)

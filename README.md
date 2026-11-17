@@ -440,7 +440,15 @@ the set (a receiver clock jump or the biases of a changed satellite set,
 which the CPI's projection reads as position because it holds the clocks
 at the host's P) or a position shift the rows agree on; given the run's
 truth arrays it adds the logged nav's error from the truth on the axis
-and says whether the ranges or the nav carry the reading, or both.
+and says whether the ranges or the nav carry the reading, or both. The
+clock shifts of the fit, epoch to epoch, give the receiver's common-mode
+steps over the window, rms and the largest with its time. Given a floors
+struct (states and sigmas, a clock sigma for the clock columns the range
+rows use, or both) it also replays the sums with those floors carried
+into S, as S plus H dP H' where they exceed the record's P: what the CPI
+would read were its S to carry the gate's covariance, with the offset one
+window then latches on, so the cost and the effect of that change are
+read on the log before the gate is touched.
 
 `runCompare` ends the outage at the first logged P that falls by more than
 30% inside the given interval (the first update back, or a reset): the

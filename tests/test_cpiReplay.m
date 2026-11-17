@@ -127,7 +127,21 @@ okF = max(max(r11.qFloor(36:50, :))) < 0.15 && max(max(r11.qReplay(36:50, :))) >
    && r12.sigFloor(35, 1) > 1.2 * r12.sig(35, 1) && r12.qFloor(45, 1) < 0.8 * r12.qReplay(45, 1) && r12.qFloor(45, 1) > 0.3 ...
    && abs(r12.dHatFloor(35, 1) - 12) < 0.5 && all(isfinite(r12.sigFree(35, :))) && r12.sigFree(35, 3) > r12.sigFree(35, 1) ...
    && isnan(r1.qFloor(45, 1)) && r12.detail(1).qFloor < r12.detail(1).q;
-ok5 = okC && okF && all(r1.nDropped(25:50) == 0) && max(max(abs(r1.qScreen(36:50, :) - r1.qReplay(36:50, :)))) < 1e-9 && abs(r1.dHatScreen(35, 1) - r1.dHat(35, 1)) < 1e-9 ...
+% a gate log that carries the floored sums must match the replay's floors column, and the unfloored log must not
+spfLogF = spfLog;
+for k = N:K
+    innB = zeros(mMax, N);  covB = zeros(mMax, mMax, N);  obsB = zeros(mMax, n, N);  numB = zeros(N, 1);
+    for i = 1:N
+        r = log{k - N + i};  mi = double(r.numMeas);
+        innB(:, i) = r.innovation;  obsB(:, :, i) = r.obsMatrix;  numB(i) = mi;
+        covB(:, :, i) = SPF_floorInnovCov(r.innovationCov, r.obsMatrix, uint8(mi), r.postCov, SPF_floorCov(r.postCov, [1 2 3], [2.5 2.5 2.5]), zeros(1, 0), 0.0);
+    end
+    for a = 1:3, [~, q] = SPF_cpiMonitor(innB, covB, obsB, numB, a, B(a));  spfLogF.cpiRatio(k, a) = q / T; end
+end
+fprintf('--- the 12 m north shift with the floors in S against a log that carries them ---\n');
+r13 = cpiReplay(log, tKf, spfLogF, [tKf(25) tKf(50)], B, 'record', 0, [], struct('states', [1 2 3], 'sigmas', [2.5 2.5 2.5]));
+okM = r13.matches == 1 && r12.matches == 0 && abs(r13.qFloor(45, 1) - spfLogF.cpiRatio(45, 1)) < 1e-9;
+ok5 = okC && okF && okM && all(r1.nDropped(25:50) == 0) && max(max(abs(r1.qScreen(36:50, :) - r1.qReplay(36:50, :)))) < 1e-9 && abs(r1.dHatScreen(35, 1) - r1.dHat(35, 1)) < 1e-9 ...
    && all(r7.nDropped(30:45) == 1) && all(r7.worstRow(30:45) == 3) && all(r7.worstNorm(30:45) > 3) && all(r7.nDropped(25:29) == 0) ...
    && max(max(r7.qReplay(30:50, :))) > 1 && max(max(r7.qScreen(30:50, :))) < 0.1 && max(max(abs(r7.dHatScreen(30:45, :)))) < 1 ...
    && max(max(abs(r7.dHat(30:45, :)))) > 5 && r7.rowK == 3 && ~isempty(r7.detail) && r7.detail(1).q >= 1 && r7.detail(1).qScreen < 0.1 ...
@@ -135,5 +149,5 @@ ok5 = okC && okF && all(r1.nDropped(25:50) == 0) && max(max(abs(r1.qScreen(36:50
    && numel(r8.detail) == 1 && strcmp(r8.detail(1).verdict, 'nav') && abs(r8.detail(1).navErr - 12) < 0.3 && abs(r8.detail(1).excess) < 0.5 ...
    && ~isempty(r9.detail) && strcmp(r9.detail(1).verdict, 'ranges') && abs(r9.detail(1).navErr) < 1e-6 && r9.detail(1).excess > 5;
 if ok1 && ok2 && ok3 && ok4 && ok5, fprintf('=== test_cpiReplay PASS ===\n');
-else, fprintf('ok1 %d ok2 %d ok3 %d ok4 %d ok5 %d okC %d okF %d\n=== test_cpiReplay FAIL ===\n', ok1, ok2, ok3, ok4, ok5, okC, okF); end
+else, fprintf('ok1 %d ok2 %d ok3 %d ok4 %d ok5 %d okC %d okF %d okM %d\n=== test_cpiReplay FAIL ===\n', ok1, ok2, ok3, ok4, ok5, okC, okF, okM); end
 end

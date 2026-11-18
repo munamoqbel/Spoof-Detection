@@ -31,6 +31,14 @@ function [res] = updateStepCheck(spfMeasLog, tKf, tWin)
 %   agree within each group but differ between the groups are a factor per state; the rest is a
 %   P in the gain that is not the P+ logged, or something between K y and the state.
 %
+%   Records written with STRUCT_SPF.kfMeasFromUpdateBoth carry the host's S and R beside the
+%   gate's, and then a second block checks the covariance step: H P- H' is the host's S minus
+%   its R, the logged H P+ H' comes from postCov, and a standard update would leave
+%   H P- H' - H P- H' S^-1 H P- H' with S built from the applied R or from the nominal R. The
+%   share of the predicted reduction that the logged P+ took, per row type, says which R the
+%   covariance was updated with: the applied one (covariance and state consistent) or the
+%   nominal one (the covariance books information the state did not use).
+%
 %   Verdict lines:
 %     whole      every group with signal has a slope within 0.9..1.1 and a fit above 0.9
 %     R          the row-type coefficients agree across the groups within 25 % and fit above 0.8:
@@ -41,7 +49,9 @@ function [res] = updateStepCheck(spfMeasLog, tKf, tWin)
 %   res: t, step [K x n] (Kalman step per epoch and state), incr [K x n] (recorded increment),
 %   groups {name, idx, unit}, slope, fit, rmsStep, rmsIncr (per group), aRow [G x 3] (range,
 %   range-rate, pressure; NaN where immaterial), fitRow, cRow (1 ./ median material a per row
-%   type), verdict ('whole' | 'R' | 'per state' | 'other' | 'no signal').
+%   type), verdict ('whole' | 'R' | 'per state' | 'other' | 'no signal'), covShare [2 x 3] (share of
+%   the predicted reduction taken, rows applied / nominal R, columns range / range-rate / pressure),
+%   covVerdict ('applied' | 'nominal' | 'neither' | 'same R' | 'no host S on record').
 %   MATLAB desktop tool, not codegen. Runs under Octave.
 
 if iscell(spfMeasLog), spfMeasLog = [spfMeasLog{:}]; end
@@ -59,6 +69,9 @@ MG = 9.80665e-3;
 step = NaN(K, n);  incr = NaN(K, n);
 bRange = NaN(K, n);  bRate = NaN(K, n);  bBaro = NaN(K, n);
 nRows = zeros(K, 3);
+hasBoth = useHostR && isfield(spfMeasLog, 'innovationCovHost');
+cvPrior = NaN(K, 3);  cvLogged = NaN(K, 3);  cvApplied = NaN(K, 3);  cvNominal = NaN(K, 3);
+shApplied = NaN(K, 3);  shNominal = NaN(K, 3);  rDiffers = false(K, 1);
 for k = 1:K
     if t(k) < tWin(1) || t(k) > tWin(2), continue; end
     s = spfMeasLog(k);
@@ -80,6 +93,27 @@ for k = 1:K
     bRange(k, :) = typeStep(P, H, R, y, isPr);
     bRate(k, :)  = typeStep(P, H, R, y, isRr);
     bBaro(k, :)  = typeStep(P, H, R, y, isBaro);
+    if hasBoth
+        % the covariance step: H P- H' from the host's S minus its R, the logged H P+ H', and the H P+ H' a
+        % standard update would leave with the applied R and with the nominal R
+        Rn = s.measNoiseCov(1:m, 1:m);
+        Sh = s.innovationCovHost(1:m, 1:m);  Sn = s.innovationCov(1:m, 1:m);
+        rDiffers(k) = max(abs(diag(R) - diag(Rn))) > 1e-9 * max(1, max(abs(diag(Rn))));
+        HPmH = Sh - R;  HPmH = (HPmH + HPmH') / 2;
+        A = HPmH - HPmH * (Sh \ HPmH);  B = HPmH - HPmH * (Sn \ HPmH);  L = H * P * H';
+        dPrior = diag(HPmH);  dL = diag(L);  dA = diag(A);  dB = diag(B);
+        sel = {isPr, isRr, isBaro};
+        for c = 1:3
+            i = sel{c};
+            if ~any(i), continue; end
+            cvPrior(k, c) = median(dPrior(i));  cvLogged(k, c) = median(dL(i));
+            cvApplied(k, c) = median(dA(i));    cvNominal(k, c) = median(dB(i));
+            redA = dPrior(i) - dA(i);  redB = dPrior(i) - dB(i);  redL = dPrior(i) - dL(i);
+            okA = redA > 1e-12 * max(dPrior(i));  okB = redB > 1e-12 * max(dPrior(i));
+            if any(okA), shApplied(k, c) = median(redL(okA) ./ redA(okA)); end
+            if any(okB), shNominal(k, c) = median(redL(okB) ./ redB(okB)); end
+        end
+    end
 end
 valid = all(isfinite(step), 2) & all(isfinite(incr), 2);
 
@@ -199,9 +233,46 @@ switch verdict
         fprintf('   VERDICT: no epoch with rows and a finite step in the window\n');
 end
 
+% the covariance step, when the records carry the host's S and R beside the gate's
+covVerdict = 'no host S on record';
+covShare = NaN(2, 3);
+if hasBoth && nv > 0
+    if ~any(rDiffers(valid))
+        covVerdict = 'same R';
+        fprintf('   covariance step: the host''s R on record equals the gate''s on every epoch, so the P''s R cannot be told apart here\n');
+    else
+        typeName = {'range rows', 'range-rate rows', 'pressure row'};
+        typeUnit = {'m', 'm/s', 'm'};
+        fprintf('   covariance step: H P- H'' from the host''s S minus its R, the logged H P+ H'', and the H P+ H'' a standard update leaves\n');
+        fprintf('   with the applied R and with the nominal R (sqrt of the median diagonal; share = the logged reduction over the predicted one)\n');
+        fprintf('                         prior        logged       applied R: predicted  share    nominal R: predicted  share\n');
+        for c = 1:3
+            v = valid & isfinite(cvPrior(:, c));
+            if ~any(v), continue; end
+            covShare(1, c) = median(shApplied(v, c));  covShare(2, c) = median(shNominal(v, c));
+            fprintf('      %-16s %8.4f %-4s %8.4f %-4s %8.4f %-4s          %5.2f    %8.4f %-4s          %5.2f\n', typeName{c}, ...
+                sqrt(median(cvPrior(v, c))), typeUnit{c}, sqrt(median(cvLogged(v, c))), typeUnit{c}, ...
+                sqrt(median(cvApplied(v, c))), typeUnit{c}, covShare(1, c), sqrt(median(cvNominal(v, c))), typeUnit{c}, covShare(2, c));
+        end
+        sA = covShare(1, isfinite(covShare(1, :)));  sB = covShare(2, isfinite(covShare(2, :)));
+        if ~isempty(sA) && all(abs(sA - 1) < 0.15)
+            covVerdict = 'applied';
+            fprintf('   VERDICT: the logged P+ is the posterior of an update with the applied R: the covariance and the state used the same R\n');
+        elseif ~isempty(sB) && all(abs(sB - 1) < 0.15)
+            covVerdict = 'nominal';
+            fprintf('   VERDICT: the logged P+ is the posterior of an update with the NOMINAL R: the covariance books the information of an R\n');
+            fprintf('            the state did not use, and shrinks faster than the state moves\n');
+        else
+            covVerdict = 'neither';
+            fprintf('   VERDICT: the logged P+ matches neither posterior: the P update does not follow the standard form with either R\n');
+        end
+    end
+end
+
 res = struct('t', t, 'step', step, 'incr', incr, 'groups', {groups}, 'slope', slope, 'fit', fit, ...
     'rmsStep', rmsStep, 'rmsIncr', rmsIncr, 'aRow', aRow, 'fitRow', fitRow, 'share', share, 'cRow', cRow, ...
-    'signal', signal, 'valid', valid, 'nRows', nRows, 'verdict', verdict);
+    'signal', signal, 'valid', valid, 'nRows', nRows, 'verdict', verdict, ...
+    'covShare', covShare, 'covVerdict', covVerdict, 'shApplied', shApplied, 'shNominal', shNominal);
 end
 
 %------------------------------------------------------------------------

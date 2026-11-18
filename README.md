@@ -161,8 +161,16 @@ whole) and its fit, then the increment regressed on the step of each row type
 (range, range-rate, pressure), since the step is linear in R^-1: the same
 coefficient across the groups is a gain built with R scaled by its inverse on
 that row type, coefficients that agree within a group but differ between the
-groups are a factor per state. `tests/test_updateStepCheck.m` runs three
-synthetic hosts, whole, R scaled and factor per state, through it.
+groups are a factor per state. Records written with
+`STRUCT_SPF.kfMeasFromUpdateBoth` carry the host's S and R beside the gate's,
+and then a second block checks the covariance step: from the host's S minus
+its R (H P- H'), the logged H P+ H' and the two posteriors a standard update
+would leave with the applied R and with the nominal R, it says which R the
+covariance was updated with, the applied one (covariance and state
+consistent) or the nominal one (the covariance books information the state
+did not use). `tests/test_updateStepCheck.m` runs five synthetic hosts
+through it: whole, R scaled, factor per state, the scaled-R host recorded the
+Both way, and a state on the scaled R with a P on the nominal one.
 `tools/feedbackCheck.m` asks whether the KF update reaches the mechanisation,
 when, and in full. Per nav sample the change of the logged position minus the
 integral of the logged velocity is the part of the motion the velocity does

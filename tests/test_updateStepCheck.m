@@ -1,9 +1,11 @@
 %% test_updateStepCheck.m
-% Synthetic spfMeas records from three hosts with the same rows, P- and innovations: one whose
-% state takes the whole Kalman step, one whose gain was built with an R scaled per row type
-% (range-rate rows x 10, range rows x 4) while the record carries the unscaled R, and one that
-% puts a factor per state between K y and the state. Checks the slopes, the row-type
-% coefficients and the verdict of tools/updateStepCheck.
+% Synthetic spfMeas records from hosts with the same rows, P- and innovations: one whose state
+% takes the whole Kalman step, one whose gain was built with an R scaled per row type (range-rate
+% rows x 10, range rows x 4) while the record carries the unscaled R, one that puts a factor per
+% state between K y and the state, the scaled-R host recorded the Both way (applied R and S on
+% record, P consistent with them), and a host whose state uses the scaled R but whose P is
+% updated with the nominal one. Checks the slopes, the row-type coefficients, the covariance
+% step and the verdicts of tools/updateStepCheck.
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'tools'));
 randn('seed', 7);  rand('seed', 7);
@@ -30,9 +32,12 @@ R = diag(Rd(1:m));
 Hm = H(1:m, :);
 
 function [log] = makeHost(mode, K, n, mMax, m, Hm, R, Pm, isRate, isRange)
-    % mode: 'whole' | 'R' | 'perState'
+    % mode: 'whole' | 'R' | 'perState' | 'bothConsistent' | 'bothNominalP'
+    %   R:              gain and P from a scaled R, the record carries the nominal R as both (single-R record call)
+    %   bothConsistent: the same host recording the applied R and S beside the nominal ones (the Both call)
+    %   bothNominalP:   state from the scaled R, but P updated with the nominal R; recorded the Both way
     cR = ones(m, 1);
-    if strcmp(mode, 'R'), cR(isRate) = 10;  cR(isRange) = 4; end
+    if any(strcmp(mode, {'R', 'bothConsistent', 'bothNominalP'})), cR(isRate) = 10;  cR(isRange) = 4; end
     Rused = diag(cR) * R;
     F = ones(n, 1);
     if strcmp(mode, 'perState'), F(1:3) = 0.25;  F(4:6) = 0.10;  F(7:9) = 0.14; end
@@ -42,6 +47,13 @@ function [log] = makeHost(mode, K, n, mMax, m, Hm, R, Pm, isRate, isRange)
     Pp = (I - Kg * Hm) * Pm * (I - Kg * Hm)' + Kg * Rused * Kg';     % Joseph form with the R the gain used
     Pp = (Pp + Pp') / 2;
     Sl = Hm * Pm * Hm' + R;  Sl = (Sl + Sl') / 2;                  % what the record carries: the host's prior P with the handed-over R
+    if strcmp(mode, 'bothNominalP')
+        Kn = Pm * Hm' / Sl;
+        Pp = (I - Kn * Hm) * Pm * (I - Kn * Hm)' + Kn * R * Kn';     % the P a nominal-R update leaves, booked against a scaled-R state step
+        Pp = (Pp + Pp') / 2;
+    end
+    recordBoth = any(strcmp(mode, {'bothConsistent', 'bothNominalP'}));
+    if recordBoth, Rrec = Rused;  Srec = S; else, Rrec = R;  Srec = Sl; end
     log = cell(K, 1);
     xm = zeros(n, 1);
     for k = 1:K
@@ -57,8 +69,10 @@ function [log] = makeHost(mode, K, n, mMax, m, Hm, R, Pm, isRate, isRange)
         Hpad = zeros(mMax, n);  Hpad(1:m, :) = Hm;
         Rpad = zeros(mMax);  Rpad(1:m, 1:m) = R;
         Spad = zeros(mMax);  Spad(1:m, 1:m) = Sl;
+        RpadH = zeros(mMax);  RpadH(1:m, 1:m) = Rrec;
+        SpadH = zeros(mMax);  SpadH(1:m, 1:m) = Srec;
         log{k} = struct('innovation', y, 'innovationCov', Spad, 'obsMatrix', Hpad, 'measNoiseCov', Rpad, ...
-            'measNoiseCovHost', Rpad, 'innovationCovHost', Spad, 'numMeas', numMeas, 'numMeasClamped', false, ...
+            'measNoiseCovHost', RpadH, 'innovationCovHost', SpadH, 'numMeas', numMeas, 'numMeasClamped', false, ...
             'priorState', xm, 'postState', xp, 'postCov', Pp);
         xm = 0.9 * xp;                                              % the split: a tenth leaves the state per epoch
     end
@@ -96,6 +110,20 @@ chk.slopeC   = abs(resC.slope(1) - 0.25) < 1e-6 && abs(resC.slope(2) - 0.10) < 1
     abs(resC.slope(7) - 1) < 1e-6 && abs(resC.slope(8) - 1) < 1e-6 && all(resC.fit(resC.signal) > 1 - 1e-6);
 aC = resC.aRow(2, :);  aC = aC(isfinite(aC));
 chk.coefC    = all(abs(aC - 0.10) < 1e-3);
+% E the scaled-R host recorded the Both way: the applied R makes the slope direct, and the covariance step is consistent
+logE = makeHost('bothConsistent', K, n, mMax, m, Hm, R, Pm, isRate, isRange);
+txtE = evalc('resE = updateStepCheck(logE, tK);');
+fprintf('%s', txtE);
+chk.verdictE = strcmp(resE.verdict, 'whole') && strcmp(resE.covVerdict, 'applied') && ~isempty(strfind(txtE, 'used the same R'));
+chk.slopeE   = all(abs(resE.slope(resE.signal) - 1) < 1e-6) && all(abs(resE.covShare(1, 1:2) - 1) < 1e-6) && ...
+    all(resE.covShare(2, 1:2) < 0.7);                      % the nominal R predicts a larger reduction than the logged P+ took
+% F state from the scaled R, P from the nominal R: the covariance books information the state did not use
+logF = makeHost('bothNominalP', K, n, mMax, m, Hm, R, Pm, isRate, isRange);
+txtF = evalc('resF = updateStepCheck(logF, tK);');
+chk.verdictF = strcmp(resF.covVerdict, 'nominal') && ~isempty(strfind(txtF, 'NOMINAL R'));
+chk.shareF   = all(abs(resF.covShare(2, 1:2) - 1) < 1e-6) && all(resF.covShare(1, 1:2) > 1.5);
+% G single-R records: the covariance block cannot tell the two R apart
+chk.sameG    = strcmp(resA.covVerdict, 'same R') && ~isempty(strfind(txtA, 'cannot be told apart'));
 % D window with no rows
 txtD = evalc('resD = updateStepCheck(logA, tK, [1e6 2e6]);');
 chk.emptyD   = strcmp(resD.verdict, 'no signal') && ~isempty(strfind(txtD, 'no epoch'));
@@ -104,8 +132,8 @@ names = fieldnames(chk);
 for i = 1:numel(names)
     if ~chk.(names{i}), fprintf('   FAILED sub-check: %s\n', names{i}); ok = false; end
 end
-fprintf('A %s, B %s (c_rate %.1f, c_range %.1f), C %s (slopes %.2f %.2f %.2f)\n', resA.verdict, resB.verdict, ...
-    resB.cRow(2), resB.cRow(1), resC.verdict, resC.slope(1), resC.slope(2), resC.slope(4));
+fprintf('A %s, B %s (c_rate %.1f, c_range %.1f), C %s (slopes %.2f %.2f %.2f), E %s / %s, F %s\n', resA.verdict, resB.verdict, ...
+    resB.cRow(2), resB.cRow(1), resC.verdict, resC.slope(1), resC.slope(2), resC.slope(4), resE.verdict, resE.covVerdict, resF.covVerdict);
 if ok
     fprintf('=== test_updateStepCheck PASS ===\n');
 else

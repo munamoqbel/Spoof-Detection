@@ -116,6 +116,14 @@
 %   (arrays may be exact-size or padded to CST_spfParam.MAX_MEAS, which is
 %    your CST_gnssHybrid.MAX_MEASURES = 51;
 %    a host that does have S can call STRUCT_SPF.setKfMeas instead)
+%   This single-R call records the same R as the gate's and as the host's
+%   (measNoiseCov and measNoiseCovHost are one matrix). A host whose update
+%   scales R on large innovations, weights rows, or drops satellites must
+%   use STRUCT_SPF.kfMeasFromUpdateBoth(y, H, R_nominal, R_applied, numMeas,
+%   xPrior, PPrior, xPost, PPost) with R_applied the matrix its gain was
+%   built from, taken after every scaling: the gate reads R_nominal, the
+%   record keeps R_applied, and the diagnostics (dopplerCheck, updateStepCheck,
+%   measNoiseCheck) read measNoiseCovHost as the R the update used.
 %
 % ----------------------------------------------------------------------
 %  2 Hz function (complete skeleton; ONE setKF per epoch, never two)

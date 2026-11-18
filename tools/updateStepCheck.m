@@ -9,7 +9,10 @@ function [res] = updateStepCheck(spfMeasLog, tKf, tWin)
 %   else measNoiseCov) and the state before and after the update, so per epoch they give the
 %   step the update should have added to the state with that P and that R, and the increment it
 %   did add. The host's own S and K are not in the records; this is the test that does not need
-%   them.
+%   them. With the single-R record call (STRUCT_SPF.kfMeasFromUpdate) measNoiseCovHost is a
+%   copy of the gate's R, so a scaling the host applies inside its update is not on record and
+%   shows here only through the row-type regression below; the Both call puts the applied R on
+%   record and makes the slope the direct test.
 %
 %   Row types from H with the host's state layout (position 1:3, velocity 4:6, attitude 7:9,
 %   gyro bias 10:12, accel bias 13:15, the rest clocks and others, NED error states in m, m/s,

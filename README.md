@@ -147,9 +147,10 @@ its own state, the innovation rms, the gain fraction applied, the NIS, the
 velocity correction per epoch, and whether the velocity partial of the
 range-rate rows shares the sign and frame of the position partial of the range
 rows. Verdict lines name an R far above the state uncertainty (rows switched
-off in effect), a range rate built from the nav solution itself, and an
-opposite-sign or wrong-frame derivative. `tests/test_dopplerCheck.m` covers
-the five cases.
+off in effect), a small share with R already at a receiver's Doppler noise
+(the share is then the velocity P the filter carries, not R), a range rate
+built from the nav solution itself, and an opposite-sign or wrong-frame
+derivative. `tests/test_dopplerCheck.m` covers the six cases.
 `tools/feedbackCheck.m` asks whether the KF update reaches the mechanisation,
 when, and in full. Per nav sample the change of the logged position minus the
 integral of the logged velocity is the part of the motion the velocity does

@@ -24,7 +24,9 @@ function [res] = dopplerCheck(spfMeasLog, tKf)
 %   sign, short of 1 in size for another frame.
 %
 %   Verdict lines are printed when a figure is out of range:
-%     gain fraction (range rate) < 0.1      R far above H P- H': the Doppler rows are switched off in effect
+%     gain fraction (range rate) < 0.1      with sqrt(R) above 0.15 m/s: R far above H P- H', the Doppler rows are
+%                                           switched off in effect; with R at a receiver's noise: the small share is
+%                                           the velocity P the filter carries, each row moves the state by that share
 %     innovation rms < 0.3 sqrt(H P- H')    the measured range rate is built from the nav solution itself
 %     NIS median > 3                        innovations larger than S allows: R too small, or biased rows (a wrong-sign H)
 %     pair dot < -0.99                      the velocity partial has the opposite sign to the position partial
@@ -39,6 +41,7 @@ if iscell(spfMeasLog), spfMeasLog = [spfMeasLog{:}]; end
 K = numel(spfMeasLog);
 if nargin < 2 || isempty(tKf), tKf = (1:K)'; end
 t = tKf(:);
+R_RECEIVER_MAX = 0.15;                                   % sqrt(R) on the range-rate rows above this is more than a receiver's Doppler noise
 
 nPr = zeros(K, 1);  nRr = zeros(K, 1);
 sR = NaN(K, 2);  sHph = NaN(K, 2);  innRms = NaN(K, 2);  gain = NaN(K, 2);  nis = NaN(K, 2);
@@ -109,9 +112,13 @@ end
 if nnz(use) == 0
     fprintf('   VERDICT: no range-rate rows found in H (no row with a unit velocity partial): the Doppler is not in the update\n');
 else
-    if sm.gain(2) < 0.1
+    if sm.gain(2) < 0.1 && sm.sR(2) > R_RECEIVER_MAX
         fprintf('   VERDICT: the range-rate gain fraction is %.3f: R (%.3f m/s) is far above what the filter expects from its own state\n', sm.gain(2), sm.sR(2));
         fprintf('            (%.3f m/s); the Doppler rows are switched off in effect. Set R from the receiver Doppler noise, ~0.05-0.1 m/s\n', sm.sHph(2));
+    elseif sm.gain(2) < 0.1
+        fprintf('   VERDICT: the range-rate gain fraction is %.3f with R (%.3f m/s) at a receiver''s Doppler noise: the filter expects only\n', sm.gain(2), sm.sR(2));
+        fprintf('            %.3f m/s from its own state, so each row moves the state by %.0f%% of its innovation. The share is set by the\n', sm.sHph(2), 100 * sm.gain(2));
+        fprintf('            velocity P the filter carries, not by R; a velocity error the INS builds is removed at that rate per row\n');
     end
     if sm.innRms(2) < 0.3 * sm.sHph(2)
         fprintf('   VERDICT: the range-rate innovations (%.3f m/s rms) are far below the velocity uncertainty the filter carries (%.3f m/s):\n', sm.innRms(2), sm.sHph(2));

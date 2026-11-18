@@ -1,7 +1,7 @@
 %% test_dopplerCheck.m
 % Synthetic spfMeas records (the struct STRUCT_SPF.setKfMeas builds, padded to the host layout)
-% for a healthy Doppler, an inflated R, a self-referential range rate, an opposite-sign and a
-% wrong-frame velocity partial. Checks the figures and the verdict lines of tools/dopplerCheck.
+% for a healthy Doppler, an inflated R, a small share with R at the receiver's noise, a self-referential
+% range rate, an opposite-sign and a wrong-frame velocity partial. Checks the figures and the verdict lines of tools/dopplerCheck.
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'tools'));
 randn('seed', 11);  rand('seed', 11);
@@ -62,6 +62,13 @@ chk.quietA  = isempty(strfind(txtA, 'VERDICT'));
 logB = makeLog(K, nSat, n, mMax, u, Pm, 1.0, 'ok', 0);
 txtB = evalc('resB = dopplerCheck([logB{:}]);');                   % struct array input
 chk.gainB   = resB.summary.gain(2) < 0.03 && ~isempty(strfind(txtB, 'switched off')) && abs(resB.summary.nis(2) - 0.92) < 0.12;
+% B2 small gain with R at the receiver's noise: a velocity P of 0.02 m/s against R = 0.1 m/s gives a share of 4%
+PmB2 = Pm;  PmB2(4:6, 4:6) = diag(0.02^2 * ones(3, 1));
+logB2 = makeLog(K, nSat, n, mMax, u, PmB2, 0.1, 'ok', 0);
+txtB2 = evalc('resB2 = dopplerCheck(logB2);');
+hphB2 = 0.02^2 + 0.01^2;
+chk.gainB2  = abs(resB2.summary.gain(2) - hphB2 / (hphB2 + 0.1^2)) < 1e-6 && isempty(strfind(txtB2, 'switched off')) && ...
+    ~isempty(strfind(txtB2, 'velocity P the filter carries')) && ~isempty(strfind(txtB2, 'by 5% of its innovation'));
 % C self-referential range rate: innovations near zero
 logC = makeLog(K, nSat, n, mMax, u, Pm, 0.05, 'self', 0);
 txtC = evalc('resC = dopplerCheck(logC);');

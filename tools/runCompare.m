@@ -735,7 +735,7 @@ function compareRuns(a, b, nameA, nameB)
 fprintf('\n==================== %s minus %s at tOut ====================\n', nameB, nameA);
 sig = b.sig;  sig(~isfinite(sig)) = a.sig(~isfinite(sig));
 d = [b.dv - a.dv; b.psi - a.psi; b.db - a.db];
-s = [sig(4:6); sig(7:9); sig(10:15)];
+s = [sig(4:6); sig(7:9); sig(13:15); sig(10:12)];           % sig is gyro first (10:12 gyro, 13:15 accel); d lists the accel biases first
 labels = {'vel N', 'vel E', 'vel D', 'psi N', 'psi E', 'psi D', 'ba X', 'ba Y', 'ba Z', 'bg X', 'bg Y', 'bg Z'};
 units  = [1 1 1, 1e3 1e3 1e3, 1/(9.80665e-3) 1/(9.80665e-3) 1/(9.80665e-3), 180/pi*3600 180/pi*3600 180/pi*3600];
 unitNames = {'m/s', 'm/s', 'm/s', 'mrad', 'mrad', 'mrad', 'mg', 'mg', 'mg', 'deg/h', 'deg/h', 'deg/h'};

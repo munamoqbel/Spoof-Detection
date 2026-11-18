@@ -16,6 +16,8 @@ function runAllTests()
 %  12. tests/test_spoofInject      the injection of a step, ramp or clock push into the host's slot arrays (tools/spoofInject)
 %  13. tests/test_feedbackCheck    the jump of the logged nav solution across each update against the KF increment (tools/feedbackCheck)
 %  14. tests/test_gravityCheck     the WGS84 normal gravity at a run's site and the error of a host constant (tools/gravityCheck)
+%  15. tests/test_dopplerCheck     what the range-rate rows do in the host update, from the spfMeas records (tools/dopplerCheck)
+%  16. tests/test_updateStepCheck  the state increment at each update against the Kalman step the logged P and R imply (tools/updateStepCheck)
 %
 % Each test is run in its own workspace (they may 'clear'); its console
 % output is captured and searched for its own PASS marker.
@@ -51,7 +53,9 @@ tests = { ...
     'test_floorInnovCov',    '=== test_floorInnovCov PASS ===';
     'test_shadowArm',        '=== test_shadowArm PASS ===';
     'test_feedbackCheck',    '=== test_feedbackCheck PASS ===';
-    'test_gravityCheck',     '=== test_gravityCheck PASS ==='};
+    'test_gravityCheck',     '=== test_gravityCheck PASS ===';
+    'test_dopplerCheck',     '=== test_dopplerCheck PASS ===';
+    'test_updateStepCheck',  '=== test_updateStepCheck PASS ==='};
 
 fprintf('==============================================\n');
 fprintf('  Spoof-detection pre-integration tests\n');

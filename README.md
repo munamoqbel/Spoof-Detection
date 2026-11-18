@@ -151,6 +151,18 @@ off in effect), a small share with R already at a receiver's Doppler noise
 (the share is then the velocity P the filter carries, not R), a range rate
 built from the nav solution itself, and an opposite-sign or wrong-frame
 derivative. `tests/test_dopplerCheck.m` covers the six cases.
+`tools/updateStepCheck.m` asks whether the state increment at each update is
+the Kalman step the logged P and R imply. For any standard update K y equals
+P+ H' R^-1 y, and the records carry P+, H, R and y, so the step the update
+should have added to the state and the increment it did add are both known
+per epoch, without the host's own S or K. Per state group it prints the two
+rms values, the slope of the increment on the step (1 when the update is
+whole) and its fit, then the increment regressed on the step of each row type
+(range, range-rate, pressure), since the step is linear in R^-1: the same
+coefficient across the groups is a gain built with R scaled by its inverse on
+that row type, coefficients that agree within a group but differ between the
+groups are a factor per state. `tests/test_updateStepCheck.m` runs three
+synthetic hosts, whole, R scaled and factor per state, through it.
 `tools/feedbackCheck.m` asks whether the KF update reaches the mechanisation,
 when, and in full. Per nav sample the change of the logged position minus the
 integral of the logged velocity is the part of the motion the velocity does

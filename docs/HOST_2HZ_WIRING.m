@@ -133,9 +133,12 @@
 %         numGnssRows, overrideFlag, CLOCK_STATES, DRIFT_STATES, [SQRT_R_RANGE SQRT_R_DOPPLER], SCREEN_K, DROP_FACTOR);
 %   with CLOCK_STATES the clock bias states (one per constellation, the
 %   host's [16 18 21]), DRIFT_STATES the drift states ([17 19 22]),
-%   SCREEN_K 3 and DROP_FACTOR 1e6 as host constants; R_applied is then
-%   diag(measVector) and R_nominal the same with the dropped rows at their
-%   nominal value.
+%   SCREEN_K 3 and DROP_FACTOR 1e6 as host constants. R is then
+%   diag(measVector) as before, and the gate reads the same matrix: a row
+%   the screen drops is a row the host did not apply (HOST_DECISIONS
+%   section 11), and a drop by consensus cannot hide a spoof, which moves
+%   every row together; the record call may stay the Both form with
+%   measVector for both R.
 %
 % ----------------------------------------------------------------------
 %  2 Hz function (complete skeleton; ONE setKF per epoch, never two)

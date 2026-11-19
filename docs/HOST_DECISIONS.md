@@ -466,3 +466,58 @@ limit disarms the monitors, an 80 m jump at the reacquisition raises no
 latch, the gate re-arms `ARM_EPOCHS` epochs after the last shadow alarm
 and a 30 m step afterwards latches within two epochs. No constant was
 added.
+
+## 16. The host's R rule and the row screen
+
+What the records showed (long run, the braking before the tunnel at 2355
+to 2396 s, and the quiet legs at 1000 to 1500 s). The host's measurement
+setup sets each row's R from the row's misclosure against the filter:
+nominal within one nominal sigma, the misclosure squared above it, a cap
+at three sigma on the ranges and at fifteen on the range rates. Read from
+the records with both R on them (`updateStepCheck`, `dopplerCheck`): the
+state takes exactly the Kalman step for the R the gain is built with, and
+the covariance is updated with the same R, so the host is a consistent
+filter, but two to seven times slower than the nominal R would make it,
+and slowest where the INS is most wrong. A row that disagrees with the
+filter by more than one sigma is weighted down until it counts as one
+sigma, so the filter never experiences a disagreement larger than one
+sigma on any row and corrects an error at the rate of a one-sigma
+innovation whatever its size. In the braking, 35 to 9 m/s under 21 mrad
+of heading error, the honest Doppler rows sat at four to six sigma, were
+weighted down 25 to 42 times, and the north velocity error grew to
+0.55 m/s, the heading error times the speed lost, against fifteen rows
+that pointed at it every epoch. The manoeuvres that should correct a
+heading are where the rule bites hardest; with the heading and gyro bias
+process noise small, P shrinks over the hour to 0.34 mrad against a 21 mrad
+error. The lock-in is these two together, both in the host.
+
+The rule confuses two things that need opposite treatment. One row
+disagreeing with the other rows is an outlier, multipath, a cycle slip, a
+bad satellite, and deserves to be weighted down or dropped. The rows
+agreeing among themselves and disagreeing with the filter together are the
+filter's own error, or under attack a spoof, and must pass at full weight:
+following consistent rows is the host's job, deciding whether they are
+honest is the gate's, and the gate reads the nominal R by design (sections
+11 and 14, `STRUCT_SPF.setKfMeasBoth`).
+
+Two steps, in order. First, constants only: the host's thresholds moved
+from one to three nominal sigma and the caps brought down to meet them, so
+the rule reads nominal weight within three sigma of the filter and a ninth
+beyond, on both row types. That restores the quiet legs and bounds the loss
+in a manoeuvre; it still cannot tell an outlier from a filter error.
+Second, when the manoeuvres still come up short, `SPF_rowScreen`: the rows
+of each type fitted alone, ranges to a position shift and one clock per
+constellation, range rates to a velocity and one drift per constellation,
+the worst row beyond `SCREEN_K` (3) times its residual's own sigma dropped
+(the standardised residual of Baarda's w-test, so a low satellite that
+pulls the fit toward itself is judged on what it hides), the fit repeated
+while a row of redundancy remains; kept rows at the nominal R whatever
+their misclosure, dropped rows at the nominal R times `DROP_FACTOR`. It is
+one call in the host's measurement setup after the rows are assembled and
+before the pressure row, with the loops left as they are; the host's
+override keeps its own branch. The same screen is the row screen of
+`cpiReplay`. `test_rowScreen`: a 60 m single row dropped; a 40 m row on a
+10 degree satellite dropped behind an 80 m one; 20 m and 0.5 m/s on every
+row, five sigma against the filter, nothing dropped and every row nominal;
+a 30 m jump on one constellation read as its clock; no redundancy, no
+decision; the override untouched.

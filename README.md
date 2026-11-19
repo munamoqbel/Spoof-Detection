@@ -171,6 +171,20 @@ consistent) or the nominal one (the covariance books information the state
 did not use). `tests/test_updateStepCheck.m` runs five synthetic hosts
 through it: whole, R scaled, factor per state, the scaled-R host recorded the
 Both way, and a state on the scaled R with a P on the nominal one.
+`SPF_rowScreen.m` (root and `deploy/`) is the host-side answer to what those
+reads found (`docs/HOST_DECISIONS.md` section 16): a measurement setup that
+sets a row's R from its misclosure against the filter cannot tell a bad row
+from a filter that is wrong, and slows the filter most where the INS is most
+wrong. The screen judges each row against the rows' own fit instead, ranges
+to a position shift and one clock per constellation, range rates to a
+velocity and one drift per constellation, drops the worst row beyond
+`SCREEN_K` times its residual's own sigma (Baarda's w-test) while a row of
+redundancy remains, and returns the R diagonal with kept rows at the nominal
+value and dropped rows at the nominal times `DROP_FACTOR`; the host's
+override is left alone. One call after the rows are assembled, the loops as
+they are. `tests/test_rowScreen.m` covers an outlier, two outliers with one
+hidden by leverage, a consistent shift at five sigma against the filter, a
+constellation clock jump, no redundancy and the override.
 `tools/feedbackCheck.m` asks whether the KF update reaches the mechanisation,
 when, and in full. Per nav sample the change of the logged position minus the
 integral of the logged velocity is the part of the motion the velocity does

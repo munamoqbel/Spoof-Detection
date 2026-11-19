@@ -124,6 +124,18 @@
 %   built from, taken after every scaling: the gate reads R_nominal, the
 %   record keeps R_applied, and the diagnostics (dopplerCheck, updateStepCheck,
 %   measNoiseCheck) read measNoiseCovHost as the R the update used.
+%   A host whose setup sets R from each row's misclosure against the
+%   filter slows its own corrections most where the INS is most wrong
+%   (docs/HOST_DECISIONS.md section 16). The alternative is one call in
+%   the measurement setup, after the rows are assembled and before the
+%   pressure row, the loops as they are:
+%     [measVector, numDropped, droppedFlag, fitShift] = SPF_rowScreen(measH, measZ, measVector, ...
+%         numGnssRows, overrideFlag, CLOCK_STATES, DRIFT_STATES, [SQRT_R_RANGE SQRT_R_DOPPLER], SCREEN_K, DROP_FACTOR);
+%   with CLOCK_STATES the clock bias states (one per constellation, the
+%   host's [16 18 21]), DRIFT_STATES the drift states ([17 19 22]),
+%   SCREEN_K 3 and DROP_FACTOR 1e6 as host constants; R_applied is then
+%   diag(measVector) and R_nominal the same with the dropped rows at their
+%   nominal value.
 %
 % ----------------------------------------------------------------------
 %  2 Hz function (complete skeleton; ONE setKF per epoch, never two)

@@ -59,7 +59,13 @@ coast starts from it and before the separation test subtracts it; at a
 commit the host takes its own P back. `SPF_coastPropTel`, `SPF_coastQ`,
 `SPF_coastStartCov`, `SPF_floorCov` and `SPF_floorInnovCov` are the five
 files; the flag, the `IMU_*` values and the `COAST_*_STATES` in the host's
-layout are the host's constants. The S the monitors read is the host's S
+layout are the host's constants. `SPF_rowScreen` is a sixth, optional file
+for the host's own measurement setup, not for the gate: the rows of each
+type judged against their own fit (ranges to a shift and one clock per
+constellation, range rates to a velocity and one drift), the worst row beyond
+`SCREEN_K` times its residual's sigma dropped while redundancy remains, kept
+rows at the nominal R whatever their misclosure against the filter
+(`docs/HOST_DECISIONS.md` section 16). The S the monitors read is the host's S
 plus H dP H' (`SPF_floorInnovCov`): the floors' increase and, on the
 receiver clock bias states, a clock floor (`CPI_CLOCK_STATES`,
 `CPI_CLOCK_SIGMA`, 30 m): a shift common to every range is a clock, and

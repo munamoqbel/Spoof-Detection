@@ -88,13 +88,16 @@ fprintf('%s', txt);
 ep = res.episodes;
 % the rows as recorded: the corners fire the screen, and the read-back is the arm plus the truth point's offset
 txtRaw = evalc('resRaw = dopplerEpisodeCheck(log, tKf, run);');
+% (nav minus rows also carries the heading error's work in the corners, so the host's arm reads to within 0.08 m)
 chk.armRaw   = all(abs(resRaw.armFit - (ARM + TS)) < 0.06) && any(resRaw.flag(tKf >= 118 & tKf <= 130)) && ...
-    ~isempty(strfind(txtRaw, 'emulates a corrected arm'));
+    all(abs(resRaw.armHost - ARM) < 0.08) && all(abs((resRaw.armFit - resRaw.armHost) - TS) < 0.1) && ...
+    ~isempty(strfind(txtRaw, 'pass opts.armSlope = [')) && ~isempty(strfind(txtRaw, 'and opts.truthSlope = ['));
 % the arm taken out alone: the screen is quiet in the corners but the scoring still sees the truth point's offset there
 txtArm = evalc('resArm = dopplerEpisodeCheck(log, tKf, run, struct(''armSlope'', ARM));');
 chk.armOnly  = all(abs(resArm.armFit - TS) < 0.05) && numel(resArm.episodes) == 4 && ~any(resArm.flag(tKf >= 95 & tKf < 170)) && ...
     ~isempty(strfind(txtArm, 'opts.truthSlope = these two numbers'));
-chk.armFixed = all(abs(res.armFit) < 0.05) && ~isempty(strfind(txt, 'after the arm correction')) && ~isempty(strfind(txt, 'truth point moved'));
+chk.armFixed = all(abs(res.armFit) < 0.05) && all(abs(res.armHost - ARM) < 0.08) && ~isempty(strfind(txt, 'after the arm correction')) && ...
+    ~isempty(strfind(txt, 'truth point moved'));
 % the records and the run on the same clock, and a run whose clock runs 1 s ahead, found and shifted back
 % (the state is persistent, so the lag of the feedback is read to within one epoch)
 chk.aligned  = res.alignLag >= 0 && res.alignLag <= 2 && isempty(strfind(txt, 'NOT ALIGNED'));

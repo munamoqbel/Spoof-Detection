@@ -46,9 +46,11 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 %   an error), the false flags (flagged while the rows were within 'cleanLevel' of the truth, not a tail)
 %   grouped into runs, and a per-epoch table around the largest episode. With run.navAtt it also regresses
 %   the rows' error against the truth on the yaw rate over the turning epochs: the lever-arm error the rows
-%   carry against the truth point, in leverArmCheck's convention, before or after the arm correction; what is
-%   left after it is the truth point's own offset from the rows' point, taken out of the scoring with
-%   opts.truthSlope (the printed read-back).
+%   carry against the truth point, in leverArmCheck's convention, before or after the arm correction; and nav
+%   minus the rows as recorded on the yaw rate, the host's own arm error in the chosen frame (the nav's heading
+%   error works on the corners too, so this read carries a few centimetres of it). With neither correction
+%   given the printout names the two vectors to pass: armSlope the host's arm error, truthSlope the truth's
+%   read-back less it, the truth point's offset from the nav's.
 %
 %   run: t, navVel (100 Hz), tTrue, trueVel (NED, m/s), navAtt ([roll pitch yaw], rad, for the arm); opts
 %   (defaults): span 10 epochs, avg 2, confirm 2, floor 0.20 m/s, headingSigma 5e-3 rad, hold 40 epochs,
@@ -63,7 +65,8 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 %   rowsErr [K x 3] (NaN without truth), episodes (struct array: tStart, tEnd, detected, delay, coverage),
 %   falseRuns (struct array: tStart, tEnd, epochs), nFlag, nFalse, nTail, fbGain, fbLag, fbScan ([3 x 3]: lag,
 %   share, t-statistic), yawRate [K x 1], armFit [1 x 2] (along, across, m per rad/s, NaN without navAtt or
-%   truth), armFitSig, fbScanWide ([25 x 3], lags -12 to 12), alignLag (its sharpest lag), fbScanSwap ([3 x 3],
+%   truth), armFitSig, armHost [1 x 2] (nav minus rows per rad/s, the host's arm error), armHostSig, fbScanWide
+%   ([25 x 3], lags -12 to 12), alignLag (its sharpest lag), fbScanSwap ([3 x 3],
 %   north and east swapped), frameOff (true when the share appears only swapped), jumpClusters ([n x 3]: start,
 %   end, count of the offset jumps 5 s apart or less), tauPair [K x 1] (the
 %   time offset per dynamic epoch, NaN elsewhere), pairShare (the share of them beyond 0.35 s), pairJump (the
@@ -185,6 +188,7 @@ dvIns = dNav + fbGain * xLag;
 vNavPre = vNavM;
 if fbLag == 0, vNavPre = vNavM + fbGain * xPlus; end
 vRows = vNavPre + o.sign * dv;
+vRowsRaw = vRows;
 if ~isempty(o.armSlope)
     armVel = yawRate .* (o.armSlope(1) * uAlong + o.armSlope(2) * uAcross);
     vRows(:, 1:2) = vRows(:, 1:2) + armVel;                                 % the rows as a correct arm would give them
@@ -283,19 +287,22 @@ end
 % the lever-arm error the rows carry against the truth point: the rows' error along and across the heading
 % regressed on the yaw rate over the turning epochs, with an intercept; reported as truth minus rows per rad/s,
 % which is leverArmCheck's convention (nav minus rows) when the truth is at the nav's point
-armFit = NaN(1, 2);  armFitSig = NaN(1, 2);  nTurn = 0;
+% and the host's own lever-arm error, nav minus the rows as recorded per rad/s, leverArmCheck's read in the
+% chosen frame; with neither correction given, the two vectors to pass follow: armSlope the host's arm error,
+% truthSlope the truth's read-back less it
+armFit = NaN(1, 2);  armFitSig = NaN(1, 2);  armHost = NaN(1, 2);  armHostSig = NaN(1, 2);  nTurn = 0;
+if hasAtt
+    navMinusRows = vNavPre(:, 1:2) - vRowsRaw(:, 1:2);
+    turnH = abs(yawRate) > 2 * pi / 180 & all(isfinite(navMinusRows), 2) & inWin;
+    if nnz(turnH) >= 10
+        [armHost, armHostSig] = slopeOnYaw(navMinusRows, yawRate, uAlong, uAcross, turnH);
+    end
+end
 if hasTruth && hasAtt
     turn = abs(yawRate) > 2 * pi / 180 & all(isfinite(rowsErr(:, 1:2)), 2) & inWin;
     nTurn = nnz(turn);
     if nTurn >= 10
-        eA = sum(rowsErr(turn, 1:2) .* uAlong(turn, :), 2);  eX = sum(rowsErr(turn, 1:2) .* uAcross(turn, :), 2);
-        A = [yawRate(turn), ones(nTurn, 1)];
-        for p = 1:2
-            if p == 1, yv = eA; else, yv = eX; end
-            c = A \ yv;  r = yv - A * c;
-            covC = (r' * r) / max(nTurn - 2, 1) * inv(A' * A);
-            armFit(p) = -c(1);  armFitSig(p) = sqrt(covC(1, 1));
-        end
+        [armFit, armFitSig] = slopeOnYaw(-rowsErr(:, 1:2), yawRate, uAlong, uAcross, turn);
     end
 end
 episodes = struct('tStart', {}, 'tEnd', {}, 'detected', {}, 'delay', {}, 'coverage', {});
@@ -333,6 +340,7 @@ end
 res = struct('t', t, 'vRows', vRows, 'dvIns', dvIns, 'onset', onset, 'thresh', thresh, 'flag', flag, 'sep', sep, ...
     'rowsErr', rowsErr, 'episodes', episodes, 'falseRuns', falseRuns, 'nFlag', nnz(flag), 'nFalse', nFalse, 'nTail', nTail, ...
     'fbGain', fbGain, 'fbLag', fbLag, 'fbScan', fbScan, 'yawRate', yawRate, 'armFit', armFit, 'armFitSig', armFitSig, ...
+    'armHost', armHost, 'armHostSig', armHostSig, ...
     'fbScanWide', fbScanWide, 'alignLag', alignLag, 'fbScanSwap', fbScanSwap, 'frameOff', frameOff, 'tauPair', tauPair, ...
     'pairShare', pairShare, 'pairJump', pairJump, 'jumpClusters', jumpClusters, 'opts', o);
 if o.quiet, return; end
@@ -368,6 +376,10 @@ if hasTruth && any(isfinite(fbScanSwap(:, 3)))
             pick(isENU, 'NED', 'ENU'));
     end
 end
+if hasAtt && all(isfinite(armHost))
+    fprintf('   nav minus rows per rad/s of yaw rate, the host''s lever-arm error in this frame (leverArmCheck''s read): along %+.2f m, across %+.2f m (sigma %.2f / %.2f)\n', ...
+        armHost(1), armHost(2), armHostSig(1), armHostSig(2));
+end
 if hasAtt && hasTruth
     if nTurn >= 10
         armTxt = '';
@@ -377,9 +389,13 @@ if hasAtt && hasTruth
         if ~isempty(o.truthSlope)
             fprintf('      (truth point moved by [%+.2f %+.2f] m per rad/s to the rows'' point)\n', o.truthSlope(1), o.truthSlope(2));
         end
-        if any(abs(armFit) > 2 * armFitSig & abs(armFit) > 0.1)
+        if isempty(o.armSlope) && isempty(o.truthSlope) && all(isfinite(armHost))
+            fprintf('      pass opts.armSlope = [%+.2f %+.2f] (the host''s arm error, out of the rows) and opts.truthSlope = [%+.2f %+.2f] (what is left, the\n', ...
+                armHost(1), armHost(2), armFit(1) - armHost(1), armFit(2) - armHost(2));
+            fprintf('      truth point''s offset from the nav''s, out of the scoring)\n');
+        elseif any(abs(armFit) > 2 * armFitSig & abs(armFit) > 0.1)
             if isempty(o.armSlope)
-                fprintf('      (the rows carry a lever-arm error against the truth point; opts.armSlope = leverArmCheck''s slopes emulates a corrected arm)\n');
+                fprintf('      (the rows carry a lever-arm error against the truth point; opts.armSlope = the host''s arm error above emulates a corrected arm)\n');
             else
                 fprintf('      (what is left is the truth point''s offset from the rows'' point; opts.truthSlope = these two numbers takes it out of the scoring)\n');
             end
@@ -456,6 +472,21 @@ end
 end
 
 %------------------------------------------------------------------------
+function [slope, sig] = slopeOnYaw(vec, yawRate, uAlong, uAcross, use)
+% a [K x 2] horizontal vector projected along and across the heading and regressed on the yaw rate over the
+% epochs 'use', with an intercept: [along across] slopes in m per rad/s and their sigma
+slope = NaN(1, 2);  sig = NaN(1, 2);
+n = nnz(use);
+eA = sum(vec(use, :) .* uAlong(use, :), 2);  eX = sum(vec(use, :) .* uAcross(use, :), 2);
+A = [yawRate(use), ones(n, 1)];
+for p = 1:2
+    if p == 1, yv = eA; else, yv = eX; end
+    c = A \ yv;  r = yv - A * c;
+    covC = (r' * r) / max(n - 2, 1) * inv(A' * A);
+    slope(p) = c(1);  sig(p) = sqrt(covC(1, 1));
+end
+end
+
 function [v] = toNED(v, isENU)
 % a [n x 3] vector set in the records' frame, returned in NED: ENU exchanges the first two and flips the third
 if isENU, v = [v(:, 2), v(:, 1), -v(:, 3)]; end

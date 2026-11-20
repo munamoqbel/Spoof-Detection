@@ -208,9 +208,10 @@ the records' (`opts.tShift`), and once more with north and east swapped,
 where a share appearing only then is a state vector recorded in ENU
 (`opts.frame`); the rows' error against the truth on the yaw
 rate, the lever-arm error the rows carry, taken out of the rows with
-`opts.armSlope` (leverArmCheck's slopes, as a corrected arm input would) and
+`opts.armSlope` (the host's arm error, as a corrected arm input would) and
 what is left of it, the truth point's own offset, taken out of the scoring
-with `opts.truthSlope`; and on the epochs faster than 1 m/s2 the rows' error
+with `opts.truthSlope`, both vectors named by a call without them; and on
+the epochs faster than 1 m/s2 the rows' error
 as a time offset, which jumping between consecutive epochs is rows paired
 with the wrong pulse, a fault no screen can fix.
 `tests/test_dopplerEpisodeCheck.m` runs a synthetic hour with two receiver

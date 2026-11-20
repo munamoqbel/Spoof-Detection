@@ -62,7 +62,9 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 %   (defaults): floor 0.20 m/s, driftRate 0.005 m/s2, headingSigma 5e-3 rad, alpha 0.05, confirm 2, release 4
 %   epochs, hold 40 epochs, sign -1, fbGain [] (fitted; a number is used as given, with its sign), fbLag [] (0, 1 or 2
 %   epochs; default the lag the fit finds, 1 without truth), fbModel '' ('state', 'profile' or 'logged'; default
-%   logged when run.fbVel is there, else the one implying the larger feedback), armSlope [] (no arm correction), truthSlope []
+%   logged when run.fbVel is there, else the one implying the larger feedback), fbLagWeights [] (for a per-epoch
+%   run.fbVel: the delivery given instead of fitted, weights by lag from 0, e.g. [0 1] for the whole correction in
+%   the next interval), armSlope [] (no arm correction), truthSlope []
 %   (no truth-point correction), tShift 0 s (added to the run's time stamps to put them on the records'
 %   clock), frame 'NED' (the records' position and velocity components; 'ENU' maps them to NED), episodeLevel
 %   0.25 m/s, episodeMin 4 epochs, cleanLevel 0.15 m/s, tWin [] (the
@@ -86,7 +88,7 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 if iscell(spfMeasLog), spfMeasLog = [spfMeasLog{:}]; end
 if nargin < 4 || isempty(opts), opts = struct(); end
 o = struct('floor', 0.20, 'driftRate', 0.005, 'headingSigma', 5e-3, 'alpha', 0.05, 'confirm', 2, 'release', 4, 'hold', 40, 'sign', -1, 'fbGain', [], ...
-    'fbLag', [], 'fbModel', '', 'armSlope', [], 'truthSlope', [], 'tShift', 0, 'episodeLevel', 0.25, 'episodeMin', 4, 'cleanLevel', 0.15, ...
+    'fbLag', [], 'fbModel', '', 'fbLagWeights', [], 'armSlope', [], 'truthSlope', [], 'tShift', 0, 'episodeLevel', 0.25, 'episodeMin', 4, 'cleanLevel', 0.15, ...
     'tWin', [], 'tTable', [], 'quiet', false, 'frame', 'NED');
 f = fieldnames(opts);
 for i = 1:numel(f), o.(f{i}) = opts.(f{i}); end
@@ -205,7 +207,16 @@ if hasFb
     elseif size(fbV, 1) == K
         fbLogged = fbV;  fbLogged(~isfinite(fbLogged)) = 0;
         [lgC, lgSe, lgTotal, lgTotalSe, lgOk, lgApplied, lgLag0Dropped] = firFit(fbLogged, dNav, dTrue, inWin, K, FIR_LAGS, T_MIN, hasTruth);
-        if ~hasTruth
+        if ~isempty(o.fbLagWeights)
+            % the delivery given, not fitted: weights per lag from 0, e.g. [0 1] for the whole correction in the
+            % next interval; the fitted profile stays in the printout as the check
+            w = o.fbLagWeights(:);
+            lgApplied = zeros(K, 3);
+            for j = 0:numel(w) - 1
+                lgApplied(j + 1:K, :) = lgApplied(j + 1:K, :) + w(j + 1) * fbLogged(1:K - j, :);
+            end
+            lgOk = true;
+        elseif ~hasTruth
             lgApplied = [zeros(1, 3); fbLogged(1:K - 1, :)];  lgOk = true;    % without truth: applied in the next interval
         end
     else
@@ -273,8 +284,10 @@ end
 % innovation velocity (predicted minus measured: the rows sit at nav - dv), then the lever-arm error taken out,
 % which puts the rows at the nav's point
 vNavPre = vNavM;
-if useLog && ~fbPerSample && isfinite(lgC(1))
-    vNavPre = vNavM + lgC(1) * fbLogged;                                 % the part of this epoch's correction already in the sample
+if useLog && ~fbPerSample && ~isempty(o.fbLagWeights)
+    vNavPre = vNavM + o.fbLagWeights(1) * fbLogged;                      % the part of this epoch's correction already in the sample
+elseif useLog && ~fbPerSample && isfinite(lgC(1))
+    vNavPre = vNavM + lgC(1) * fbLogged;
 elseif useFir
     vNavPre = vNavM + firC(1) * incZ;                                    % the part of this epoch's step already in the sample
 elseif fbLag == 0
@@ -490,6 +503,8 @@ if hasFb && hasTruth
 end
 if isempty(o.fbGain) && ~found
     fprintf('   USED: no feedback found under either model; the INS increment is taken as logged\n');
+elseif useLog && ~fbPerSample && ~isempty(o.fbLagWeights)
+    fprintf('   USED: the logged velocity correction, per epoch, delivered as given: weights by lag %s\n', sprintf('%.2f ', o.fbLagWeights));
 elseif useLog
     fprintf('   USED: the logged velocity correction%s\n', pick(fbPerSample, ', per sample', sprintf(', per epoch, delivered with total %+.2f over %d epochs', lgTotal, FIR_LAGS)));
 elseif useFir

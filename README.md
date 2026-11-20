@@ -201,9 +201,14 @@ sit in the episode. With the truth it scores itself: each true episode with
 its detection delay and coverage, the release tails, the false flags grouped
 into runs, and a per-epoch table around the largest episode. The emulation
 runs on the records of the clean hour before any screen goes into the host.
-`tests/test_dopplerEpisodeCheck.m` runs a synthetic hour with two receiver
-episodes, a braking and two turns under a heading error, a gap without rows,
-and a floor set above the smaller episode.
+The feedback share is fitted at the lag where the logged velocity shows it,
+and a lever-arm error read by `leverArmCheck` can be taken out of the rows
+with `opts.armSlope`, as a corrected arm input would: in the corners that
+error is yaw rate times arm, and without the correction it reads as episodes
+and false flags. `tests/test_dopplerEpisodeCheck.m` runs a synthetic hour
+with two receiver episodes, a braking, two turns and two sharp corners under
+a heading error and a wrong arm, a gap without rows, and a floor set above
+the smaller episode.
 `tools/feedbackCheck.m` asks whether the KF update reaches the mechanisation,
 when, and in full. Per nav sample the change of the logged position minus the
 integral of the logged velocity is the part of the motion the velocity does

@@ -10,8 +10,8 @@ function test_dopplerEpisodeCheck()
 % above the episode, reads a lever-arm error back from the truth in two sharp corners and takes it out of the rows
 % with opts.armSlope, takes the reference point's own offset out of the scoring with opts.truthSlope, finds a run
 % whose clock is 3 s ahead and shifts it back, reads rows paired with the wrong pulse as a time offset, finds a
-% state vector recorded in ENU by the share appearing only with north and east swapped, and a nav that took a
-% share of the update's increment rather than of the state.
+% state vector recorded in ENU by the share appearing only with north and east swapped, a nav that took a share
+% of the update's increment rather than of the state, and the host's correction logged per epoch or per sample.
 % Run from the repo root (MATLAB, or Octave with tools/octave_shim).
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'tools'));
@@ -44,7 +44,7 @@ vRowsTrue = vTrue + rowsErr + [armErr, zeros(N, 1)];
 psi = 5e-3;  G = 0.1;  KF = 0.5;
 tKf = (0.5:0.5:T - 0.5)';  K = numel(tKf);
 vNav = zeros(N, 3);  e = [0.02, -0.01, 0];  vNav(1, :) = vTrue(1, :) + e;
-xPlus = zeros(K, 3);  kNext = 1;
+xPlus = zeros(K, 3);  kNext = 1;  fbSample = zeros(N, 3);
 for j = 2:N
     dvT = vTrue(j, :) - vTrue(j - 1, :);
     e = e + psi * [-dvT(2), dvT(1), 0];                              % the increment rotated by the heading error
@@ -54,6 +54,7 @@ for j = 2:N
         dis = (vTrue(jm, :) + e) - vRowsTrue(jm, :);
         xPlus(kNext, :) = KF * dis;
         e = e - G * xPlus(kNext, :);
+        fbSample(j, :) = G * xPlus(kNext, :);                           % the correction, logged at the sample it was applied
         kNext = kNext + 1;
     end
     vNav(j, :) = vTrue(j, :) + e + 0.003 * randn(1, 3);             % the logged velocity carries a little noise
@@ -119,7 +120,8 @@ txt3 = evalc('res3p = dopplerEpisodeCheck(log3, tKf, run, CORR);');
 chk.pairing  = res.pairJump < 0.05 && isempty(strfind(txt, 'PAIRING')) && res3p.pairJump > 0.4 && ~isempty(strfind(txt3, 'PAIRING')) && ...
     ~isempty(res3p.jumpClusters) && ~isempty(strfind(txt3, 'the jumps cluster at'));
 % the same nav with records that carry a prior: the state accumulates a remainder of nine tenths, the nav took a
-% tenth of each update's increment, so the share of the state is diluted and the share of the increment is the one
+% tenth of each update's increment at lag 1, so the share of the state is diluted and the increment's delivery
+% profile, a tenth at lag 1 and nothing elsewhere, is the one used
 logI = log;  xAcc = zeros(1, 3);
 for k = 1:K
     xPri = 0.9 * xAcc;  xAcc = xPri + xPlus(k, :);
@@ -127,8 +129,19 @@ for k = 1:K
     logI{k}.postState  = [zeros(3, 1); xAcc'; zeros(n - 6, 1)];
 end
 txtI = evalc('resI = dopplerEpisodeCheck(logI, tKf, run, CORR);');
-chk.incModel = strcmp(resI.fbModel, 'increment') && abs(resI.fbGain - G) < 0.02 && ~isempty(strfind(txtI, 'share of the Kalman step')) && ...
-    abs(resI.fbScan(2, 2)) < 0.06 && numel(resI.episodes) == 2 && all([resI.episodes.detected]) && resI.nFalse <= 2;
+% (the synthetic increments are persistent, so the lags share the total between them; the total is what is read)
+chk.incModel = strcmp(resI.fbModel, 'profile') && abs(resI.firTotal - G) < 0.03 && resI.firTotal / resI.firTotalSe > 5 && ...
+    ~isempty(strfind(txtI, 'slews the Kalman step in')) && abs(resI.fbScan(2, 2)) < 0.06 && ...
+    numel(resI.episodes) == 2 && all([resI.episodes.detected]) && resI.nFalse <= 2;
+% the host's velocity correction logged, per epoch and per sample: nothing fitted, the flags as with the fitted share
+runL = run;  runL.fbVel = G * xPlus;
+txtL = evalc('resL = dopplerEpisodeCheck(log, tKf, runL, CORR);');
+runS = run;  runS.fbVel = fbSample;
+txtS2 = evalc('resS2b = dopplerEpisodeCheck(log, tKf, runS, CORR);');
+chk.logged   = strcmp(resL.fbModel, 'logged') && abs(resL.lgTotal - 1) < 0.1 && ~isempty(strfind(txtL, 'USED: the logged velocity correction, per epoch')) && ...
+    strcmp(resS2b.fbModel, 'logged') && abs(resS2b.lgTotal - 1) < 0.1 && ~isempty(strfind(txtS2, 'USED: the logged velocity correction, per sample')) && ...
+    numel(resL.episodes) == 2 && all([resL.episodes.detected]) && resL.nFalse <= 2 && ...
+    numel(resS2b.episodes) == 2 && all([resS2b.episodes.detected]) && resS2b.nFalse <= 2 && nnz(resS2b.flag ~= res.flag) <= 2;
 % the same records with the state vector and the H columns in ENU: read as NED the share is lost and the swap
 % finds it; read as ENU everything is as before
 logE = log;

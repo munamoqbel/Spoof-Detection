@@ -181,13 +181,14 @@ if hasInc
     end
 end
 incZ = xInc;  incZ(~isfinite(incZ)) = 0;                                  % no update, no increment
-[firC, firSe, firTotal, firTotalSe, firOk, firApplied] = firFit(incZ, dNav, dTrue, inWin, K, FIR_LAGS, T_MIN, hasTruth && hasInc);
+[firC, firSe, firTotal, firTotalSe, firOk, firApplied, firLag0Dropped] = firFit(incZ, dNav, dTrue, inWin, K, FIR_LAGS, T_MIN, hasTruth && hasInc);
 % the velocity correction the host logged per epoch (run.fbVel, [K x 3] NED m/s, the amount taken off the nav
 % velocity after that epoch's update) or per nav sample ([N x 3], at the sample it was applied): the first is
 % fitted for its delivery profile like the increment, the second is summed into the intervals and needs no fit
 hasFb = isfield(run, 'fbVel') && ~isempty(run.fbVel);
 fbLogged = zeros(K, 3);  fbPerSample = false;
 lgC = NaN(FIR_LAGS + 1, 1);  lgSe = NaN(FIR_LAGS + 1, 1);  lgTotal = NaN;  lgTotalSe = NaN;  lgOk = false;  lgApplied = zeros(K, 3);
+lgLag0Dropped = false;
 if hasFb
     fbV = toNED(run.fbVel, isENU);
     if size(fbV, 1) == numel(tNav)
@@ -203,7 +204,7 @@ if hasFb
         end
     elseif size(fbV, 1) == K
         fbLogged = fbV;  fbLogged(~isfinite(fbLogged)) = 0;
-        [lgC, lgSe, lgTotal, lgTotalSe, lgOk, lgApplied] = firFit(fbLogged, dNav, dTrue, inWin, K, FIR_LAGS, T_MIN, hasTruth);
+        [lgC, lgSe, lgTotal, lgTotalSe, lgOk, lgApplied, lgLag0Dropped] = firFit(fbLogged, dNav, dTrue, inWin, K, FIR_LAGS, T_MIN, hasTruth);
         if ~hasTruth
             lgApplied = [zeros(1, 3); fbLogged(1:K - 1, :)];  lgOk = true;    % without truth: applied in the next interval
         end
@@ -223,7 +224,7 @@ if scanOk, [tBest, iBest] = max(abs(fbScan(:, 3))); else, tBest = NaN;  iBest = 
 fbFound = isfinite(tBest) && tBest >= T_MIN;
 impliedState = 0;  impliedFir = 0;                                        % the feedback each model implies, m/s per epoch rms
 if fbFound, impliedState = abs(fbScan(iBest, 2)) * fbScan(iBest, 4); end
-if firOk, impliedFir = sqrt(mean(firApplied(isfinite(xInc(:, 1)) & inWin, 1:2)(:) .^ 2)); end
+if firOk, fa = firApplied(isfinite(xInc(:, 1)) & inWin, 1:2);  impliedFir = sqrt(mean(fa(:) .^ 2)); end
 if ~isempty(o.fbModel)
     fbModel = o.fbModel;
 elseif hasFb && lgOk
@@ -472,16 +473,16 @@ end
 if hasTruth && isfinite(firTotal)
     fprintf('   the update''s increment x+ minus x- delivered to the nav over the following epochs: total %+.2f (t %.1f) over %d epochs;\n', ...
         firTotal, firTotal / max(firTotalSe, eps), FIR_LAGS);
-    fprintf('      by lag 0 to 7: %s; implied feedback %.4f m/s per epoch against %.4f from the state''s share\n', ...
-        sprintf('%+.3f ', firC(1:8)), impliedFir, impliedState);
+    fprintf('      by lag 0 to 7: %s; implied feedback %.4f m/s per epoch against %.4f from the state''s share%s\n', ...
+        sprintf('%+.3f ', firC(1:8)), impliedFir, impliedState, pick(firLag0Dropped, ' (lag 0 read negative, cause and effect reversed, dropped)', ''));
 end
 if hasFb && hasTruth
     if fbPerSample
         fprintf('   the logged velocity correction, summed per interval: the nav''s change follows it with share %+.2f (t %.1f; 1 means the log and the sign are right)\n', ...
             lgTotal, lgTotal / max(lgTotalSe, eps));
     else
-        fprintf('   the logged velocity correction per epoch, delivered to the nav over the following epochs: total %+.2f (t %.1f); by lag 0 to 7: %s\n', ...
-            lgTotal, lgTotal / max(lgTotalSe, eps), sprintf('%+.3f ', lgC(1:8)));
+        fprintf('   the logged velocity correction per epoch, delivered to the nav over the following epochs: total %+.2f (t %.1f); by lag 0 to 7: %s%s\n', ...
+            lgTotal, lgTotal / max(lgTotalSe, eps), sprintf('%+.3f ', lgC(1:8)), pick(lgLag0Dropped, '(lag 0 read negative, cause and effect reversed, dropped)', ''));
     end
     if isfinite(lgTotal) && abs(lgTotal - 1) > 0.2
         fprintf('      (a total away from 1: the logged correction is not what reaches the velocity, or its sign or frame differ)\n');
@@ -592,11 +593,14 @@ end
 end
 
 %------------------------------------------------------------------------
-function [c, se, total, totalSe, ok, applied] = firFit(series, dNav, dTrue, inWin, K, nLags, tMin, doFit)
+function [c, se, total, totalSe, ok, applied, lag0Dropped] = firFit(series, dNav, dTrue, inWin, K, nLags, tMin, doFit)
 % the delivery profile of a per-epoch series into the nav's velocity: (nav change - truth change)(k) regressed
 % jointly on series(k - j), j = 0..nLags, both axes stacked, over the quiet epochs, with one trim; applied is the
-% series delivered with that profile, [K x 3]
+% series delivered with that profile, [K x 3]. A negative coefficient at lag 0 is the reverse of cause and
+% effect, the correction of an epoch answering the error that grew in the interval before it, not a delivery:
+% the fit is then repeated without lag 0
 c = NaN(nLags + 1, 1);  se = NaN(nLags + 1, 1);  total = NaN;  totalSe = NaN;  ok = false;  applied = zeros(K, 3);
+lag0Dropped = false;
 if ~doFit, return; end
 kk = (nLags + 2:K)';
 bb = dNav(kk, 1:2) - dTrue(kk, 1:2);
@@ -617,8 +621,16 @@ if nnz(keep) >= 10 * (nLags + 1)
     A = A(keep, :);  b = b(keep);
     cc = -(A \ b);  r = b + A * cc;
 end
-s2 = (r' * r) / max(numel(r) - nLags - 1, 1);
-covC = s2 * inv(A' * A);
+if cc(1) < 0
+    lag0Dropped = true;
+    A = A(:, 2:end);
+    cc = [0; -(A \ b)];  r = b + A * cc(2:end);
+    s2 = (r' * r) / max(numel(r) - nLags, 1);
+    covC = zeros(nLags + 1);  covC(2:end, 2:end) = s2 * inv(A' * A);
+else
+    s2 = (r' * r) / max(numel(r) - nLags - 1, 1);
+    covC = s2 * inv(A' * A);
+end
 c = cc;  se = sqrt(diag(covC));
 total = sum(cc);  totalSe = sqrt(max(sum(covC(:)), 0));
 ok = totalSe > 0 && abs(total) / totalSe >= tMin;

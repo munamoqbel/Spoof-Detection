@@ -9,8 +9,9 @@ function test_dopplerEpisodeCheck()
 % share at the lag the logged velocity shows it, survives a gap without rows, reports a miss when the floor is set
 % above the episode, reads a lever-arm error back from the truth in two sharp corners and takes it out of the rows
 % with opts.armSlope, takes the reference point's own offset out of the scoring with opts.truthSlope, finds a run
-% whose clock is 3 s ahead and shifts it back, reads rows paired with the wrong pulse as a time offset, and finds
-% a state vector recorded in ENU by the share appearing only with north and east swapped.
+% whose clock is 3 s ahead and shifts it back, reads rows paired with the wrong pulse as a time offset, finds a
+% state vector recorded in ENU by the share appearing only with north and east swapped, and a nav that took a
+% share of the update's increment rather than of the state.
 % Run from the repo root (MATLAB, or Octave with tools/octave_shim).
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'tools'));
@@ -117,6 +118,17 @@ end
 txt3 = evalc('res3p = dopplerEpisodeCheck(log3, tKf, run, CORR);');
 chk.pairing  = res.pairJump < 0.05 && isempty(strfind(txt, 'PAIRING')) && res3p.pairJump > 0.4 && ~isempty(strfind(txt3, 'PAIRING')) && ...
     ~isempty(res3p.jumpClusters) && ~isempty(strfind(txt3, 'the jumps cluster at'));
+% the same nav with records that carry a prior: the state accumulates a remainder of nine tenths, the nav took a
+% tenth of each update's increment, so the share of the state is diluted and the share of the increment is the one
+logI = log;  xAcc = zeros(1, 3);
+for k = 1:K
+    xPri = 0.9 * xAcc;  xAcc = xPri + xPlus(k, :);
+    logI{k}.priorState = [zeros(3, 1); xPri'; zeros(n - 6, 1)];
+    logI{k}.postState  = [zeros(3, 1); xAcc'; zeros(n - 6, 1)];
+end
+txtI = evalc('resI = dopplerEpisodeCheck(logI, tKf, run, CORR);');
+chk.incModel = strcmp(resI.fbModel, 'increment') && abs(resI.fbGain - G) < 0.02 && ~isempty(strfind(txtI, 'share of the Kalman step')) && ...
+    abs(resI.fbScan(2, 2)) < 0.06 && numel(resI.episodes) == 2 && all([resI.episodes.detected]) && resI.nFalse <= 2;
 % the same records with the state vector and the H columns in ENU: read as NED the share is lost and the swap
 % finds it; read as ENU everything is as before
 logE = log;

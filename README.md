@@ -193,8 +193,9 @@ into the tilt and the coast. It emulates a screen of the Doppler rows against
 the INS on the spfMeas records and the run: the rows' own velocity (the nav
 velocity before the update minus the least-squares velocity of the rate-row
 innovations) is held against an INS velocity coast that follows the INS
-increment, less the feedback the nav took (the share fitted against the truth
-or given), and is re-anchored slowly on every accepted epoch's rows; the rows
+increment, less the feedback the nav took (a share of the state or of the
+update's own increment, whichever the logged velocity follows, fitted against
+the truth or given), and is re-anchored slowly on every accepted epoch's rows; the rows
 are flagged while they sit further from the coast than a tolerance that grows
 with the time the coast has run on the INS alone, and released when they
 agree with it again or a hold runs out. With the truth it scores itself: each true episode with

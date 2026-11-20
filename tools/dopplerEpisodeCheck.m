@@ -11,10 +11,12 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 %     rows' velocity  v_rows(k) = v_nav-(k) - dv(k): the nav velocity before the update minus the least-squares
 %                     fit of the rate-row innovations to a velocity and one clock drift per constellation (the
 %                     host's innovation is predicted minus measured; opts.sign = +1 for the other convention)
-%     INS increment   dvIns(k) = v_nav-(k) - v_nav-(k-1) minus the feedback the nav took in between (fbGain
-%                     times the state's velocity, the gain fitted against the truth when it is given, at the lag
-%                     where the logged velocity shows it: lag 1 when the sample before an epoch precedes that
-%                     epoch's feedback, lag 0 when it already carries it)
+%     INS increment   dvIns(k) = v_nav-(k) - v_nav-(k-1) minus the feedback the nav took in between: fbGain times
+%                     the state's velocity, or times the update's own increment x+ - x- when the records carry
+%                     the prior and the logged velocity follows that sharper (a mechanisation that takes a share
+%                     of the Kalman step); the gain fitted against the truth when it is given, at the lag where
+%                     the logged velocity shows it: lag 1 when the sample before an epoch precedes that epoch's
+%                     feedback, lag 0 when it already carries it
 %     lever arm       with opts.armSlope = [along across] (m per rad/s of yaw rate, leverArmCheck's slopes) and
 %                     run.navAtt, the lever-arm error the rows carry is taken out of their velocity, as a
 %                     corrected arm input would: in the corners that error is yaw rate times arm and reads as
@@ -57,7 +59,8 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 %   run: t, navVel (100 Hz), tTrue, trueVel (NED, m/s), navAtt ([roll pitch yaw], rad, for the arm); opts
 %   (defaults): floor 0.20 m/s, driftRate 0.005 m/s2, headingSigma 5e-3 rad, alpha 0.05, confirm 2, release 4
 %   epochs, hold 40 epochs, sign -1, fbGain [] (fitted; a number is used as given, with its sign), fbLag [] (0, 1 or 2
-%   epochs; default the lag the fit finds, 1 without truth), armSlope [] (no arm correction), truthSlope []
+%   epochs; default the lag the fit finds, 1 without truth), fbModel '' ('state' or 'increment'; default the
+%   sharper fit), armSlope [] (no arm correction), truthSlope []
 %   (no truth-point correction), tShift 0 s (added to the run's time stamps to put them on the records'
 %   clock), frame 'NED' (the records' position and velocity components; 'ENU' maps them to NED), episodeLevel
 %   0.25 m/s, episodeMin 4 epochs, cleanLevel 0.15 m/s, tWin [] (the
@@ -66,7 +69,7 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 %   res: t, vRows [K x 3], dvIns [K x 3], sep [K x 1] (the rows' separation from the coast, onset the same),
 %   thresh [K x 1], flag [K x 1] logical,
 %   rowsErr [K x 3] (NaN without truth), episodes (struct array: tStart, tEnd, detected, delay, coverage),
-%   falseRuns (struct array: tStart, tEnd, epochs), nFlag, nFalse, nTail, fbGain, fbLag, fbScan ([3 x 3]: lag,
+%   falseRuns (struct array: tStart, tEnd, epochs), nFlag, nFalse, nTail, fbGain, fbLag, fbModel, fbScan ([3 x 3]: lag,
 %   share, t-statistic), yawRate [K x 1], armFit [1 x 2] (along, across, m per rad/s, NaN without navAtt or
 %   truth), armFitSig, armHost [1 x 2] (nav minus rows per rad/s, the host's arm error), armHostSig, fbScanWide
 %   ([25 x 3], lags -12 to 12), alignLag (its sharpest lag), fbScanSwap ([3 x 3],
@@ -80,7 +83,7 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 if iscell(spfMeasLog), spfMeasLog = [spfMeasLog{:}]; end
 if nargin < 4 || isempty(opts), opts = struct(); end
 o = struct('floor', 0.20, 'driftRate', 0.005, 'headingSigma', 5e-3, 'alpha', 0.05, 'confirm', 2, 'release', 4, 'hold', 40, 'sign', -1, 'fbGain', [], ...
-    'fbLag', [], 'armSlope', [], 'truthSlope', [], 'tShift', 0, 'episodeLevel', 0.25, 'episodeMin', 4, 'cleanLevel', 0.15, ...
+    'fbLag', [], 'fbModel', '', 'armSlope', [], 'truthSlope', [], 'tShift', 0, 'episodeLevel', 0.25, 'episodeMin', 4, 'cleanLevel', 0.15, ...
     'tWin', [], 'tTable', [], 'quiet', false, 'frame', 'NED');
 f = fieldnames(opts);
 for i = 1:numel(f), o.(f{i}) = opts.(f{i}); end
@@ -164,13 +167,15 @@ end
 % and the share of the update's own increment, x+ minus x-, when the records carry the prior: a mechanisation
 % that takes the whole Kalman step rather than a share of the state reads 1 here and nothing above
 fbScanInc = [LAGS(:), NaN(numel(LAGS), 2)];
-if hasTruth && isfield(spfMeasLog, 'priorState')
-    xInc = NaN(K, 3);
+xInc = NaN(K, 3);  hasInc = isfield(spfMeasLog, 'priorState');
+if hasInc
     for k = 1:K
         if double(spfMeasLog(k).numMeas) > 0 && ~isempty(spfMeasLog(k).priorState)
             xInc(k, :) = xPlus(k, :) - toNED(spfMeasLog(k).priorState(4:6)', isENU);
         end
     end
+end
+if hasTruth && hasInc
     for iL = 1:numel(LAGS)
         fbScanInc(iL, 2:3) = shareAtLag(xInc, dNav, dTrue, inWin, LAGS(iL), K);
     end
@@ -179,25 +184,41 @@ frameOff = false;
 if any(isfinite(fbScanSwap(:, 3))) && any(isfinite(fbScan(:, 3)))
     frameOff = max(abs(fbScanSwap(:, 3))) >= T_MIN && max(abs(fbScanSwap(:, 3))) > 1.5 * max(abs(fbScan(:, 3)));
 end
+% the model of the feedback: a share of the state, or a share of the update's increment, whichever the logged
+% velocity shows sharper; opts.fbModel forces one
 scanOk = any(isfinite(fbScan(:, 3)));
 if scanOk, [tBest, iBest] = max(abs(fbScan(:, 3))); else, tBest = NaN;  iBest = 2; end
+tInc = NaN;  iInc = 2;
+if any(isfinite(fbScanInc(:, 3))), [tInc, iInc] = max(abs(fbScanInc(:, 3))); end
 fbFound = isfinite(tBest) && tBest >= T_MIN;
+incFound = isfinite(tInc) && tInc >= T_MIN;
+if ~isempty(o.fbModel)
+    fbModel = o.fbModel;
+elseif incFound && (~fbFound || tInc > tBest)
+    fbModel = 'increment';
+else
+    fbModel = 'state';
+end
+if ~any(strcmp(fbModel, {'state', 'increment'})), error('dopplerEpisodeCheck:fbModel', 'opts.fbModel is ''state'' or ''increment'''); end
+useInc = strcmp(fbModel, 'increment');
+if useInc, fbBase = xInc;  scanUsed = fbScanInc;  iUsed = iInc;  found = incFound;
+else, fbBase = xPlus;  scanUsed = fbScan;  iUsed = iBest;  found = fbFound; end
 if isempty(o.fbGain)
     if ~hasTruth
         error('dopplerEpisodeCheck:fbGain', 'give opts.fbGain (the share of the state the nav takes per epoch, signed) when the run has no truth');
     end
-    if fbFound
-        fbGain = fbScan(iBest, 2);  fbLag = fbScan(iBest, 1);
+    if found
+        fbGain = scanUsed(iUsed, 2);  fbLag = scanUsed(iUsed, 1);
     else
-        fbGain = 0;  fbLag = 1;                                       % no feedback of the velocity state in the logged velocity
+        fbGain = 0;  fbLag = 1;                                       % no feedback in the logged velocity under either model
     end
 else
     fbGain = o.fbGain;
     if ~isempty(o.fbLag), fbLag = o.fbLag;
-    elseif fbFound, fbLag = fbScan(iBest, 1);
+    elseif found, fbLag = scanUsed(iUsed, 1);
     else, fbLag = 1; end
 end
-xLag = NaN(K, 3);  xLag(fbLag + 1:K, :) = xPlus(1:K - fbLag, :);
+xLag = NaN(K, 3);  xLag(fbLag + 1:K, :) = fbBase(1:K - fbLag, :);
 xLag(~isfinite(xLag)) = 0;                                                % no update, no feedback
 dvIns = dNav + fbGain * xLag;
 
@@ -205,7 +226,10 @@ dvIns = dNav + fbGain * xLag;
 % innovation velocity (predicted minus measured: the rows sit at nav - dv), then the lever-arm error taken out,
 % which puts the rows at the nav's point
 vNavPre = vNavM;
-if fbLag == 0, vNavPre = vNavM + fbGain * xPlus; end
+if fbLag == 0
+    xNow = fbBase;  xNow(~isfinite(xNow)) = 0;
+    vNavPre = vNavM + fbGain * xNow;
+end
 vRows = vNavPre + o.sign * dv;
 vRowsRaw = vRows;
 if ~isempty(o.armSlope)
@@ -359,7 +383,7 @@ end
 
 res = struct('t', t, 'vRows', vRows, 'dvIns', dvIns, 'onset', onset, 'thresh', thresh, 'flag', flag, 'sep', sep, ...
     'rowsErr', rowsErr, 'episodes', episodes, 'falseRuns', falseRuns, 'nFlag', nnz(flag), 'nFalse', nFalse, 'nTail', nTail, ...
-    'fbGain', fbGain, 'fbLag', fbLag, 'fbScan', fbScan, 'yawRate', yawRate, 'armFit', armFit, 'armFitSig', armFitSig, ...
+    'fbGain', fbGain, 'fbLag', fbLag, 'fbModel', fbModel, 'fbScan', fbScan, 'yawRate', yawRate, 'armFit', armFit, 'armFitSig', armFitSig, ...
     'armHost', armHost, 'armHostSig', armHostSig, ...
     'fbScanWide', fbScanWide, 'alignLag', alignLag, 'fbScanSwap', fbScanSwap, 'frameOff', frameOff, 'fbScanInc', fbScanInc, 'tauPair', tauPair, ...
     'pairShare', pairShare, 'pairJump', pairJump, 'jumpClusters', jumpClusters, 'opts', o);
@@ -372,12 +396,10 @@ scanTxt = '';
 if scanOk
     scanTxt = sprintf('lag %d %+.3f t %.1f, lag %d %+.3f t %.1f, lag %d %+.3f t %.1f', fbScan');
 end
-if isempty(o.fbGain) && ~fbFound
-    fprintf('   feedback share of the state per epoch in the nav velocity: NONE FOUND (%s): the logged velocity does not take the\n', scanTxt);
-    fprintf('      velocity state at any lag, or the records and the run are not on the same time; the INS increment is used as logged\n');
+if scanOk
+    fprintf('   feedback share of the state per epoch in the nav velocity: %+.3f at lag %d (t %.1f; %s)\n', fbScan(iBest, 2), fbScan(iBest, 1), tBest, scanTxt);
 else
-    fprintf('   feedback share of the state per epoch in the nav velocity: %+.3f at lag %d (%s; %s)\n', fbGain, fbLag, ...
-        pick(isempty(o.fbGain), 'fitted against the truth', 'given'), pick(scanOk, scanTxt, 'no scan without truth'));
+    fprintf('   feedback share of the state per epoch in the nav velocity: no scan without truth\n');
 end
 if hasTruth && isfinite(alignLag)
     iW = find(fbScanWide(:, 1) == alignLag, 1);
@@ -396,10 +418,14 @@ if hasTruth && any(isfinite(fbScanSwap(:, 3)))
             pick(isENU, 'NED', 'ENU'));
     end
 end
-if hasTruth && any(isfinite(fbScanInc(:, 3)))
-    [tIn, iIn] = max(abs(fbScanInc(:, 3)));
-    fprintf('   the nav''s change as a share of the update''s own increment, x+ minus x-: %+.3f at lag %d (t %.1f)%s\n', fbScanInc(iIn, 2), ...
-        fbScanInc(iIn, 1), tIn, pick(tIn >= T_MIN && abs(fbScanInc(iIn, 2)) > 0.5, ' (the mechanisation takes the Kalman step itself, not a share of the state)', ''));
+if hasTruth && isfinite(tInc)
+    fprintf('   the nav''s change as a share of the update''s own increment, x+ minus x-: %+.3f at lag %d (t %.1f)\n', fbScanInc(iInc, 2), fbScanInc(iInc, 1), tInc);
+end
+if isempty(o.fbGain) && ~found
+    fprintf('   USED: no feedback found under either model; the INS increment is taken as logged\n');
+else
+    fprintf('   USED: %+.3f of the %s at lag %d (%s)%s\n', fbGain, pick(useInc, 'update''s increment', 'state'), fbLag, pick(isempty(o.fbGain), 'fitted', 'given'), ...
+        pick(useInc && isempty(o.fbModel), '; the mechanisation takes a share of the Kalman step, not of the state', ''));
 end
 if hasAtt && all(isfinite(armHost))
     fprintf('   nav minus rows per rad/s of yaw rate, the host''s lever-arm error in this frame (leverArmCheck''s read): along %+.2f m, across %+.2f m (sigma %.2f / %.2f)\n', ...

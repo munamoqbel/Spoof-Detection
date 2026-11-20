@@ -25,13 +25,16 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 %                     (headingSigma * sum|dvIns| since the anchor)^2) grows with the time the coast has run on
 %                     the INS alone, for the tilt and bias drift and a heading error on the speed change
 %     flag            'confirm' consecutive epochs with |v_rows - v_c| > T flag the rows; while flagged the coast
-%                     runs on the INS; 'release' consecutive epochs back within T release them and re-anchor,
-%                     'hold' epochs at the latest, when the INS alone can no longer judge; the end of an episode
-%                     is a return to the coast, so nothing fires there
+%                     runs on the INS; 'release' consecutive epochs back within T release them, the coast kept,
+%                     so rows that only came half way back are flagged again at once; at 'hold' epochs the INS
+%                     alone can no longer judge and the coast is put back on the rows; the end of an episode is
+%                     a return to the coast, so nothing fires there
 %   Three reads on the inputs come first, since the screen is only as good as what it is fed:
 %     feedback share  fitted at lags 0 to 2 with a t-statistic each, NONE FOUND when no lag reaches 3; the same
 %                     fit with north and east swapped: a share that appears only then is a state vector in the
-%                     other frame (opts.frame = 'ENU' reads the records' states and H columns as east, north, up)
+%                     other frame (opts.frame = 'ENU' reads the records' states and H columns as east, north, up);
+%                     and the same fit on the update's own increment x+ - x- when the records carry the prior,
+%                     which reads 1 for a mechanisation that takes the whole Kalman step
 %     alignment       the same fit over lags -12 to 12: the share showing up sharpest well outside 0 to 2 is
 %                     the feedback where the run's clock put it, the records and the run not on the same
 %                     clock (opts.tShift moves the run)
@@ -52,7 +55,7 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 %   read-back less it, the truth point's offset from the nav's.
 %
 %   run: t, navVel (100 Hz), tTrue, trueVel (NED, m/s), navAtt ([roll pitch yaw], rad, for the arm); opts
-%   (defaults): floor 0.20 m/s, driftRate 0.005 m/s2, headingSigma 5e-3 rad, alpha 0.1, confirm 2, release 4
+%   (defaults): floor 0.20 m/s, driftRate 0.005 m/s2, headingSigma 5e-3 rad, alpha 0.05, confirm 2, release 4
 %   epochs, hold 40 epochs, sign -1, fbGain [] (fitted; a number is used as given, with its sign), fbLag [] (0, 1 or 2
 %   epochs; default the lag the fit finds, 1 without truth), armSlope [] (no arm correction), truthSlope []
 %   (no truth-point correction), tShift 0 s (added to the run's time stamps to put them on the records'
@@ -67,7 +70,8 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 %   share, t-statistic), yawRate [K x 1], armFit [1 x 2] (along, across, m per rad/s, NaN without navAtt or
 %   truth), armFitSig, armHost [1 x 2] (nav minus rows per rad/s, the host's arm error), armHostSig, fbScanWide
 %   ([25 x 3], lags -12 to 12), alignLag (its sharpest lag), fbScanSwap ([3 x 3],
-%   north and east swapped), frameOff (true when the share appears only swapped), jumpClusters ([n x 3]: start,
+%   north and east swapped), frameOff (true when the share appears only swapped), fbScanInc ([3 x 3], the share
+%   of the update's increment), jumpClusters ([n x 3]: start,
 %   end, count of the offset jumps 5 s apart or less), tauPair [K x 1] (the
 %   time offset per dynamic epoch, NaN elsewhere), pairShare (the share of them beyond 0.35 s), pairJump (the
 %   share of consecutive dynamic epochs whose offset jumps by more than 0.35 s), opts.
@@ -75,7 +79,7 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 
 if iscell(spfMeasLog), spfMeasLog = [spfMeasLog{:}]; end
 if nargin < 4 || isempty(opts), opts = struct(); end
-o = struct('floor', 0.20, 'driftRate', 0.005, 'headingSigma', 5e-3, 'alpha', 0.1, 'confirm', 2, 'release', 4, 'hold', 40, 'sign', -1, 'fbGain', [], ...
+o = struct('floor', 0.20, 'driftRate', 0.005, 'headingSigma', 5e-3, 'alpha', 0.05, 'confirm', 2, 'release', 4, 'hold', 40, 'sign', -1, 'fbGain', [], ...
     'fbLag', [], 'armSlope', [], 'truthSlope', [], 'tShift', 0, 'episodeLevel', 0.25, 'episodeMin', 4, 'cleanLevel', 0.15, ...
     'tWin', [], 'tTable', [], 'quiet', false, 'frame', 'NED');
 f = fieldnames(opts);
@@ -155,6 +159,20 @@ if hasTruth
     xSwap = xPlus(:, [2 1 3]);
     for iL = 1:numel(LAGS)
         fbScanSwap(iL, 2:3) = shareAtLag(xSwap, dNav, dTrue, inWin, LAGS(iL), K);
+    end
+end
+% and the share of the update's own increment, x+ minus x-, when the records carry the prior: a mechanisation
+% that takes the whole Kalman step rather than a share of the state reads 1 here and nothing above
+fbScanInc = [LAGS(:), NaN(numel(LAGS), 2)];
+if hasTruth && isfield(spfMeasLog, 'priorState')
+    xInc = NaN(K, 3);
+    for k = 1:K
+        if double(spfMeasLog(k).numMeas) > 0 && ~isempty(spfMeasLog(k).priorState)
+            xInc(k, :) = xPlus(k, :) - toNED(spfMeasLog(k).priorState(4:6)', isENU);
+        end
+    end
+    for iL = 1:numel(LAGS)
+        fbScanInc(iL, 2:3) = shareAtLag(xInc, dNav, dTrue, inWin, LAGS(iL), K);
     end
 end
 frameOff = false;
@@ -243,9 +261,13 @@ for k = 1:K
     else
         hold = hold + 1;  flag(k) = true;
         if sep(k) <= thresh(k), rel = rel + 1; else, rel = 0; end
-        if rel >= o.release || hold >= o.hold
-            inEp = false;  rel = 0;
-            vCoast = vRows(k, :);  tAnchor = 0;  speedSince = 0;              % back on the rows
+        if rel >= o.release
+            inEp = false;  rel = 0;                                           % released: the coast stays, the rows must keep agreeing
+            vCoast = vCoast + o.alpha * (vRows(k, :) - vCoast);
+            tAnchor = 0;  speedSince = 0;
+        elseif hold >= o.hold
+            inEp = false;  rel = 0;                                           % the INS alone can no longer judge: back on the rows
+            vCoast = vRows(k, :);  tAnchor = 0;  speedSince = 0;
         end
     end
 end
@@ -339,7 +361,7 @@ res = struct('t', t, 'vRows', vRows, 'dvIns', dvIns, 'onset', onset, 'thresh', t
     'rowsErr', rowsErr, 'episodes', episodes, 'falseRuns', falseRuns, 'nFlag', nnz(flag), 'nFalse', nFalse, 'nTail', nTail, ...
     'fbGain', fbGain, 'fbLag', fbLag, 'fbScan', fbScan, 'yawRate', yawRate, 'armFit', armFit, 'armFitSig', armFitSig, ...
     'armHost', armHost, 'armHostSig', armHostSig, ...
-    'fbScanWide', fbScanWide, 'alignLag', alignLag, 'fbScanSwap', fbScanSwap, 'frameOff', frameOff, 'tauPair', tauPair, ...
+    'fbScanWide', fbScanWide, 'alignLag', alignLag, 'fbScanSwap', fbScanSwap, 'frameOff', frameOff, 'fbScanInc', fbScanInc, 'tauPair', tauPair, ...
     'pairShare', pairShare, 'pairJump', pairJump, 'jumpClusters', jumpClusters, 'opts', o);
 if o.quiet, return; end
 
@@ -373,6 +395,11 @@ if hasTruth && any(isfinite(fbScanSwap(:, 3)))
         fprintf('      FRAME: the feedback appears only with the axes swapped: the records'' state vector is in the other frame, pass opts.frame = ''%s''\n', ...
             pick(isENU, 'NED', 'ENU'));
     end
+end
+if hasTruth && any(isfinite(fbScanInc(:, 3)))
+    [tIn, iIn] = max(abs(fbScanInc(:, 3)));
+    fprintf('   the nav''s change as a share of the update''s own increment, x+ minus x-: %+.3f at lag %d (t %.1f)%s\n', fbScanInc(iIn, 2), ...
+        fbScanInc(iIn, 1), tIn, pick(tIn >= T_MIN && abs(fbScanInc(iIn, 2)) > 0.5, ' (the mechanisation takes the Kalman step itself, not a share of the state)', ''));
 end
 if hasAtt && all(isfinite(armHost))
     fprintf('   nav minus rows per rad/s of yaw rate, the host''s lever-arm error in this frame (leverArmCheck''s read): along %+.2f m, across %+.2f m (sigma %.2f / %.2f)\n', ...

@@ -30,7 +30,9 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 %                     the onset test rests for span + avg epochs, since its reference epochs still sit in the
 %                     episode and the rows' return would otherwise fire it again
 %   Three reads on the inputs come first, since the screen is only as good as what it is fed:
-%     feedback share  fitted at lags 0 to 2 with a t-statistic each, NONE FOUND when no lag reaches 3
+%     feedback share  fitted at lags 0 to 2 with a t-statistic each, NONE FOUND when no lag reaches 3; the same
+%                     fit with north and east swapped: a share that appears only then is a state vector in the
+%                     other frame (opts.frame = 'ENU' reads the records' states and H columns as east, north, up)
 %     alignment       the same fit over lags -12 to 12: the share showing up sharpest well outside 0 to 2 is
 %                     the feedback where the run's clock put it, the records and the run not on the same
 %                     clock (opts.tShift moves the run)
@@ -53,14 +55,17 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 %   release 4 epochs, sign -1, fbGain [] (fitted; a number is used as given, with its sign), fbLag [] (0, 1 or 2
 %   epochs; default the lag the fit finds, 1 without truth), armSlope [] (no arm correction), truthSlope []
 %   (no truth-point correction), tShift 0 s (added to the run's time stamps to put them on the records'
-%   clock), episodeLevel 0.25 m/s, episodeMin 4 epochs, cleanLevel 0.15 m/s, tWin [] (the
+%   clock), frame 'NED' (the records' position and velocity components; 'ENU' maps them to NED), episodeLevel
+%   0.25 m/s, episodeMin 4 epochs, cleanLevel 0.15 m/s, tWin [] (the
 %   epochs to run on; default all), tTable [] (the window of the per-epoch table; default the largest episode
 %   with 10 s either side), quiet false.
 %   res: t, vRows [K x 3], dvIns [K x 3], onset [K x 1], thresh [K x 1], flag [K x 1] logical, sep [K x 1],
 %   rowsErr [K x 3] (NaN without truth), episodes (struct array: tStart, tEnd, detected, delay, coverage),
 %   falseRuns (struct array: tStart, tEnd, epochs), nFlag, nFalse, nTail, fbGain, fbLag, fbScan ([3 x 3]: lag,
 %   share, t-statistic), yawRate [K x 1], armFit [1 x 2] (along, across, m per rad/s, NaN without navAtt or
-%   truth), armFitSig, fbScanWide ([25 x 3], lags -12 to 12), alignLag (its sharpest lag), tauPair [K x 1] (the
+%   truth), armFitSig, fbScanWide ([25 x 3], lags -12 to 12), alignLag (its sharpest lag), fbScanSwap ([3 x 3],
+%   north and east swapped), frameOff (true when the share appears only swapped), jumpClusters ([n x 3]: start,
+%   end, count of the offset jumps 5 s apart or less), tauPair [K x 1] (the
 %   time offset per dynamic epoch, NaN elsewhere), pairShare (the share of them beyond 0.35 s), pairJump (the
 %   share of consecutive dynamic epochs whose offset jumps by more than 0.35 s), opts.
 %   MATLAB desktop tool, not codegen. Runs under Octave.
@@ -69,9 +74,11 @@ if iscell(spfMeasLog), spfMeasLog = [spfMeasLog{:}]; end
 if nargin < 4 || isempty(opts), opts = struct(); end
 o = struct('span', 10, 'avg', 2, 'confirm', 2, 'floor', 0.20, 'headingSigma', 5e-3, 'hold', 40, 'release', 4, 'sign', -1, 'fbGain', [], ...
     'fbLag', [], 'armSlope', [], 'truthSlope', [], 'tShift', 0, 'episodeLevel', 0.25, 'episodeMin', 4, 'cleanLevel', 0.15, ...
-    'tWin', [], 'tTable', [], 'quiet', false);
+    'tWin', [], 'tTable', [], 'quiet', false, 'frame', 'NED');
 f = fieldnames(opts);
 for i = 1:numel(f), o.(f{i}) = opts.(f{i}); end
+if ~any(strcmp(o.frame, {'NED', 'ENU'})), error('dopplerEpisodeCheck:frame', 'opts.frame is ''NED'' or ''ENU'''); end
+isENU = strcmp(o.frame, 'ENU');
 K = numel(spfMeasLog);
 t = tKf(:);  t = t(1:K);
 tNav = run.t(:) + o.tShift;  navVel = run.navVel;                       % the run on the records' clock
@@ -88,13 +95,13 @@ for k = 1:K
     vNavM(k, :) = navVel(j, :);  tSample(k) = tNav(j);               % the rows and the truth are read at this sample
     s = spfMeasLog(k);  m = double(s.numMeas);
     if m == 0, continue; end
-    xPlus(k, :) = s.postState(4:6)';
+    xPlus(k, :) = toNED(s.postState(4:6)', isENU);
     H = s.obsMatrix(1:m, :);  y = s.innovation(1:m);  y = y(:);
     rate = sqrt(sum(H(:, 4:6) .^ 2, 2)) > 0.5;
     if nnz(rate) < 4, continue; end
     cols = [4 5 6, 6 + find(any(H(rate, 7:end) ~= 0, 1))];
     sol = H(rate, cols) \ y(rate);
-    dv(k, :) = sol(1:3)';  nRate(k) = nnz(rate);
+    dv(k, :) = toNED(sol(1:3)', isENU);  nRate(k) = nnz(rate);
 end
 inWin = true(K, 1);
 if ~isempty(o.tWin), inWin = t >= o.tWin(1) & t <= o.tWin(2); end
@@ -137,6 +144,19 @@ if hasTruth
     for iL = 1:numel(LAGS)
         fbScan(iL, 2:3) = fbScanWide(WIDE == LAGS(iL), 2:3);
     end
+end
+% the same share with north and east swapped: a share that appears only then is a state vector in the other
+% frame (ENU against NED), the first two components exchanged
+fbScanSwap = [LAGS(:), NaN(numel(LAGS), 2)];
+if hasTruth
+    xSwap = xPlus(:, [2 1 3]);
+    for iL = 1:numel(LAGS)
+        fbScanSwap(iL, 2:3) = shareAtLag(xSwap, dNav, dTrue, inWin, LAGS(iL), K);
+    end
+end
+frameOff = false;
+if any(isfinite(fbScanSwap(:, 3))) && any(isfinite(fbScan(:, 3)))
+    frameOff = max(abs(fbScanSwap(:, 3))) >= T_MIN && max(abs(fbScanSwap(:, 3))) > 1.5 * max(abs(fbScan(:, 3)));
 end
 scanOk = any(isfinite(fbScan(:, 3)));
 if scanOk, [tBest, iBest] = max(abs(fbScan(:, 3))); else, tBest = NaN;  iBest = 2; end
@@ -234,6 +254,7 @@ rowsErr = vRows - vTrue;
 % acceleration is the time offset that would explain it; a receiver episode reads as a steady offset too, so the
 % mark of a pairing fault is the offset jumping between consecutive epochs
 tauPair = NaN(K, 1);  nDyn = 0;  pairShare = NaN;  pairHalf = NaN;  pairBig = NaN;  pairOk = NaN;  pairJump = NaN;  tauMed = NaN;
+jumpClusters = zeros(0, 3);
 if hasTruth
     DT_A = 0.25;
     vA = interp1(tTrueV, run.trueVel(:, 1:2), tSample + DT_A);  vB = interp1(tTrueV, run.trueVel(:, 1:2), tSample - DT_A);
@@ -248,7 +269,14 @@ if hasTruth
         pairShare = pairHalf + pairBig;  tauMed = median(tauPair(dyn));
         kd = find(dyn);  both = kd(1:end-1) + 1 == kd(2:end);
         if any(both)
-            pairJump = mean(abs(tauPair(kd([both; false])) - tauPair(kd([false; both]))) > 0.35);
+            dTau = abs(tauPair(kd([both; false])) - tauPair(kd([false; both])));
+            pairJump = mean(dTau > 0.35);
+            tJump = t(kd([false; both]));  tJump = tJump(dTau > 0.35);
+            if ~isempty(tJump)
+                gaps = find(diff(tJump) > 5);                                % clusters of jumps, 5 s apart or less
+                cStart = [1; gaps + 1];  cEnd = [gaps; numel(tJump)];
+                jumpClusters = [tJump(cStart), tJump(cEnd), cEnd - cStart + 1];
+            end
         end
     end
 end
@@ -305,7 +333,8 @@ end
 res = struct('t', t, 'vRows', vRows, 'dvIns', dvIns, 'onset', onset, 'thresh', thresh, 'flag', flag, 'sep', sep, ...
     'rowsErr', rowsErr, 'episodes', episodes, 'falseRuns', falseRuns, 'nFlag', nnz(flag), 'nFalse', nFalse, 'nTail', nTail, ...
     'fbGain', fbGain, 'fbLag', fbLag, 'fbScan', fbScan, 'yawRate', yawRate, 'armFit', armFit, 'armFitSig', armFitSig, ...
-    'fbScanWide', fbScanWide, 'alignLag', alignLag, 'tauPair', tauPair, 'pairShare', pairShare, 'pairJump', pairJump, 'opts', o);
+    'fbScanWide', fbScanWide, 'alignLag', alignLag, 'fbScanSwap', fbScanSwap, 'frameOff', frameOff, 'tauPair', tauPair, ...
+    'pairShare', pairShare, 'pairJump', pairJump, 'jumpClusters', jumpClusters, 'opts', o);
 if o.quiet, return; end
 
 % print
@@ -329,6 +358,14 @@ if hasTruth && isfinite(alignLag)
     if alignOff
         fprintf('      NOT ALIGNED: the feedback shows up %d epochs from where it belongs; the records and the run are not on the same clock,\n', alignLag - 1);
         fprintf('      give opts.tShift = %+.2f s (added to the run''s time)\n', o.tShift - (alignLag - 1) * median(diff(t)));
+    end
+end
+if hasTruth && any(isfinite(fbScanSwap(:, 3)))
+    [tSw, iSw] = max(abs(fbScanSwap(:, 3)));
+    fprintf('   the share with north and east swapped: %+.3f at lag %d (t %.1f); records read as %s\n', fbScanSwap(iSw, 2), fbScanSwap(iSw, 1), tSw, o.frame);
+    if frameOff
+        fprintf('      FRAME: the feedback appears only with the axes swapped: the records'' state vector is in the other frame, pass opts.frame = ''%s''\n', ...
+            pick(isENU, 'NED', 'ENU'));
     end
 end
 if hasAtt && hasTruth
@@ -357,6 +394,16 @@ if hasTruth && nDyn >= 10
     if pairJump > 0.2
         fprintf('      PAIRING: the offset jumps between consecutive epochs on %.0f%% of them: rows paired with the wrong pulse on some epochs, in the\n', 100 * pairJump);
         fprintf('      receiver''s time tag or in the host; a screen cannot fix a time tag, and these epochs read as episodes and flags below\n');
+    end
+    if ~isempty(jumpClusters)
+        [~, order] = sort(jumpClusters(:, 3), 'descend');
+        nShow = min(numel(order), 6);
+        fprintf('      the jumps cluster at:');
+        for i = 1:nShow
+            fprintf(' %.0f-%.0f s (%d)', jumpClusters(order(i), 1), jumpClusters(order(i), 2), jumpClusters(order(i), 3));
+            if i < nShow, fprintf(','); end
+        end
+        fprintf('\n');
     end
 end
 fprintf('   flagged: %d epochs (%.1f s), %.2f%% of the epochs with rows\n', nnz(flag), nnz(flag) * median(diff(t)), 100 * nnz(flag) / max(nnz(nRate > 0 & inWin), 1));
@@ -409,6 +456,11 @@ end
 end
 
 %------------------------------------------------------------------------
+function [v] = toNED(v, isENU)
+% a [n x 3] vector set in the records' frame, returned in NED: ENU exchanges the first two and flips the third
+if isENU, v = [v(:, 2), v(:, 1), -v(:, 3)]; end
+end
+
 function [out] = shareAtLag(xPlus, dNav, dTrue, inWin, L, K)
 % the share of the state x+(k - L) in (nav change - truth change)(k) over the quiet epochs, both axes stacked,
 % through the origin, with one trim of the outliers: [share, t-statistic]; NaN with too few epochs

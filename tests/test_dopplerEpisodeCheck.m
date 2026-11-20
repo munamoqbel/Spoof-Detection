@@ -9,7 +9,8 @@ function test_dopplerEpisodeCheck()
 % share at the lag the logged velocity shows it, survives a gap without rows, reports a miss when the floor is set
 % above the episode, reads a lever-arm error back from the truth in two sharp corners and takes it out of the rows
 % with opts.armSlope, takes the reference point's own offset out of the scoring with opts.truthSlope, finds a run
-% whose clock is 1 s ahead and shifts it back, and reads rows paired with the wrong pulse as a time offset.
+% whose clock is 3 s ahead and shifts it back, reads rows paired with the wrong pulse as a time offset, and finds
+% a state vector recorded in ENU by the share appearing only with north and east swapped.
 % Run from the repo root (MATLAB, or Octave with tools/octave_shim).
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'tools'));
@@ -111,7 +112,22 @@ for k = 3:3:K
     end
 end
 txt3 = evalc('res3p = dopplerEpisodeCheck(log3, tKf, run, CORR);');
-chk.pairing  = res.pairJump < 0.05 && isempty(strfind(txt, 'PAIRING')) && res3p.pairJump > 0.4 && ~isempty(strfind(txt3, 'PAIRING'));
+chk.pairing  = res.pairJump < 0.05 && isempty(strfind(txt, 'PAIRING')) && res3p.pairJump > 0.4 && ~isempty(strfind(txt3, 'PAIRING')) && ...
+    ~isempty(res3p.jumpClusters) && ~isempty(strfind(txt3, 'the jumps cluster at'));
+% the same records with the state vector and the H columns in ENU: read as NED the share is lost and the swap
+% finds it; read as ENU everything is as before
+logE = log;
+for k = 1:K
+    xk = log{k}.postState;  Hk = log{k}.obsMatrix;
+    logE{k}.postState = [xk(2); xk(1); -xk(3); xk(5); xk(4); -xk(6); xk(7:end)];
+    logE{k}.obsMatrix = [Hk(:, 2), Hk(:, 1), -Hk(:, 3), Hk(:, 5), Hk(:, 4), -Hk(:, 6), Hk(:, 7:end)];
+end
+txtEn = evalc('resEn = dopplerEpisodeCheck(logE, tKf, run, CORR);');
+resEe = dopplerEpisodeCheck(logE, tKf, run, setfield(setfield(CORR, 'frame', 'ENU'), 'quiet', true)); %#ok<SFLD>
+[~, iSw] = max(abs(resEn.fbScanSwap(:, 3)));
+chk.frame    = abs(resEn.fbGain) < 0.03 && resEn.frameOff && ~isempty(strfind(txtEn, 'pass opts.frame = ''ENU''')) && ...
+    abs(resEn.fbScanSwap(iSw, 2) - G) < 0.02 && abs(resEe.fbGain - G) < 0.02 && ~resEe.frameOff && ...
+    numel(resEe.episodes) == 2 && all([resEe.episodes.detected]) && resEe.nFalse <= 2 && isequal(resEe.flag, res.flag);
 % the feedback found at lag 1, and at lag 0 when the logged sample before an epoch already carries that epoch's feedback
 chk.fbLag    = res.fbLag <= 1 && res.fbScan(2, 3) > 10;             % a persistent state shows at every lag; the share is what matters
 res0 = dopplerEpisodeCheck(log, tKf + 0.011, run, setfield(CORR, 'quiet', true)); %#ok<SFLD>

@@ -521,3 +521,61 @@ override keeps its own branch. The same screen is the row screen of
 row, five sigma against the filter, nothing dropped and every row nominal;
 a 30 m jump on one constellation read as its clock; no redundancy, no
 decision; the override untouched.
+
+## 17. The Doppler episode screen
+
+What the records showed (long run, against the reference). The receiver's
+Doppler goes wrong on every row at once under strong transient dynamics:
+at the bend before the tunnel the rows sat 0.4 to 0.5 m/s from the
+reference for 20 s, the error turning from east to north with the heading,
+and the hour holds 36 such episodes of 1.5 to 7 s, most in the urban
+stretches, one 40 s stretch with the rows reversing by 0.4 m/s every epoch.
+No consensus test can see them, since the rows agree among themselves, and
+the row screen of section 16 passes them by construction. The filter
+believed the portal and put the disagreement on the tilt, and the tilt is
+most of what the 475 s coast integrated into the coast error of runs 9 and
+10. With the heading brought down by the process-noise changes, this one
+receiver fault is what is left of that error.
+
+The screen (`SPF_dopplerScreen`). The range-rate rows are fitted alone to
+a velocity and one clock drift per constellation, and the velocity they
+say, the mechanisation velocity less that fit, is held against a coast
+that follows the mechanisation's own increment every epoch with the
+velocity correction the host applied in between added back, so the coast
+is the IMU's alone. Every accepted epoch re-anchors the coast on the rows
+through a slow filter, a twentieth of the difference, so the anchor is the
+recent honest rows and not one epoch, and a slow drift of the rows passes
+by design. The tolerance is the floor, 0.2 m/s, grown with the time the
+coast has run on the IMU alone, 0.005 m/s per second for the tilt and bias
+drift, and with a 5 mrad heading error on the speed change since the
+anchor. Two consecutive epochs beyond it start an episode; while it lasts
+the rows are held out and the coast runs on the IMU; four consecutive
+epochs back within the tolerance end it, plus one more for every ten
+epochs the rows have been out, so rows that were wrong for long must agree
+for longer; the coast is kept at a release, so rows that came only half
+way back are flagged again at once; at forty epochs the episode is closed
+with the coast and its tolerance still growing, so a long fault is held
+out until the grown tolerance accepts it and its return costs little. The
+end of an episode is a return to the coast, and nothing fires there. The
+flag is one input to the measurement setup: the range-rate rows' R goes to
+the host's maximum while it is on, the layout stays, the ranges and the
+pressure row update as before, and the gate reads every row at the nominal
+R, as for the host's own reject (section 11). A wrong Doppler row in a
+turn does not help the heading, it damages it; in an honest turn the rows
+and the IMU agree and nothing is flagged, so the heading keeps the turns.
+
+Emulated offline on run 10 (`dopplerEpisodeCheck`, the same logic on the
+records and the run, with the host's velocity correction taken from a
+log): all 36 episodes caught, the portal half a second after the rows
+leave the reference and held to the tunnel; false flags 1.2 percent of
+the hour's Doppler, release tails 4 percent, and 5 percent in the band
+where the rows are 0.15 to 0.25 m/s off, which the screen holds out and
+the scoring counts as neither clean nor wrong. The emulation needed four
+reads on its inputs before it could be trusted, each a tool option now: a
+lever-arm term in the rows' velocity, the reference point's own offset
+from the IMU, how much of the host's velocity correction the logged
+velocity carries and when, and the time pairing of the rows, which is
+sound. In the host the screen reads the increment and the correction
+directly and needs none of them. Open: the floor, left at 0.2 for the
+first run with the screen; the reversing stretch at 304 to 344 s, a
+receiver behaviour to look at in its raw output.

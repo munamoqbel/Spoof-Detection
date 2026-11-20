@@ -607,6 +607,40 @@ classdef STRUCT_SPF
             nav = STRUCT_SPF.setNav(false, zeros(n, 1), zeros(n, 1), eye(n), zeros(3, 1));
         end
 
+        %% ---------------- host-side Doppler episode screen ----------------
+        function [screen] = dopplerScreenState
+
+            % Init values: no coast, no previous velocity, no episode (SPF_dopplerScreen)
+            screen = struct( ...
+                'anchored',   false, ...          % a coast exists
+                'inEpisode',  false, ...          % the range-rate rows are held out
+                'havePrev',   false, ...          % a previous velocity to difference against
+                'vCoast',     zeros(1, 3), ...    % [1 x 3] NED m/s, the coast
+                'velPrev',    zeros(1, 3), ...    % [1 x 3] NED m/s, the velocity of the previous call
+                'hold',       0, ...              % epochs in the episode
+                'rel',        0, ...              % consecutive epochs back within the tolerance
+                'above',      0, ...              % consecutive epochs beyond it, before an episode
+                'tAnchor',    0.0, ...            % s since the coast was anchored on the rows
+                'speedSince', 0.0);               % m/s of speed change since then
+        end
+
+        function [prm] = dopplerScreenParam
+
+            % the screen's constants (docs/HOST_DECISIONS.md section 17)
+            prm = struct( ...
+                'FLOOR',         0.20, ...        % m/s, the tolerance on a fresh anchor
+                'DRIFT_RATE',    0.005, ...       % m/s per s of coast, tilt and bias drift of the IMU
+                'HEADING_SIGMA', 5.0e-3, ...      % rad, a heading error on the speed change since the anchor
+                'ALPHA',         0.05, ...        % the anchor's share of each accepted epoch's rows
+                'CONFIRM',       2, ...           % epochs beyond the tolerance that start an episode
+                'RELEASE',       4, ...           % epochs within it that end one
+                'RELEASE_GROW',  10, ...          % one more release epoch per this many epochs held
+                'HOLD',          40, ...          % epochs after which the IMU alone can no longer judge
+                'EPOCH_DT',      0.5, ...         % s between calls
+                'MIN_RATE_ROWS', 4, ...           % rate rows needed for a fit with redundancy
+                'ROWS_SIGN',     -1);             % -1: the innovation is predicted minus measured
+        end
+
     end
 end
 

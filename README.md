@@ -222,6 +222,14 @@ episodes, a braking, two turns and two sharp corners under a heading error,
 a wrong arm and a reference 0.5 m from the IMU, a gap without rows, a floor
 set above the smaller episode, a run whose clock is 3 s ahead, every third
 epoch's rows paired with the pulse before, and the same records in ENU.
+`SPF_dopplerScreen.m` (root and `deploy/`) is that screen as a host
+function for the measurement setup: the same logic on the mechanisation's
+own increment and the correction the host applied, no fit, one call per
+epoch with a state struct carried by the host (`STRUCT_SPF.dopplerScreenState`,
+`dopplerScreenParam`), returning the flag that puts the range-rate rows' R
+at the host's maximum for the epoch. `tests/test_dopplerScreen.m` runs it
+epoch by epoch on a synthetic run and holds it against the offline tool on
+the same records: the two flag the same epochs.
 `tools/feedbackCheck.m` asks whether the KF update reaches the mechanisation,
 when, and in full. Per nav sample the change of the logged position minus the
 integral of the logged velocity is the part of the motion the velocity does

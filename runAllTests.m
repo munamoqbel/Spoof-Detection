@@ -20,6 +20,7 @@ function runAllTests()
 %  16. tests/test_updateStepCheck  the state increment at each update against the Kalman step the logged P and R imply (tools/updateStepCheck)
 %  17. tests/test_rowScreen       the host-side row screen: rows judged against the rows' own fit (SPF_rowScreen)
 %  18. tests/test_dopplerEpisodeCheck  the Doppler rows screened against the INS velocity: episodes caught and false flags, emulated offline (tools/dopplerEpisodeCheck)
+%  19. tests/test_dopplerScreen  the host-side Doppler episode screen, epoch by epoch, against the offline tool (SPF_dopplerScreen)
 %
 % Each test is run in its own workspace (they may 'clear'); its console
 % output is captured and searched for its own PASS marker.
@@ -59,7 +60,8 @@ tests = { ...
     'test_dopplerCheck',     '=== test_dopplerCheck PASS ===';
     'test_updateStepCheck',  '=== test_updateStepCheck PASS ===';
     'test_rowScreen',        '=== test_rowScreen PASS ===';
-    'test_dopplerEpisodeCheck', '=== test_dopplerEpisodeCheck PASS ==='};
+    'test_dopplerEpisodeCheck', '=== test_dopplerEpisodeCheck PASS ===';
+    'test_dopplerScreen',    '=== test_dopplerScreen PASS ==='};
 
 fprintf('==============================================\n');
 fprintf('  Spoof-detection pre-integration tests\n');

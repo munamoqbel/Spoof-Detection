@@ -168,7 +168,7 @@ chk.caught   = numel(ep) == 2 && all([ep.detected]) && all([ep.delay] <= 4.0);
 chk.covered  = numel(ep) == 2 && ep(1).coverage > 0.6 && ep(2).coverage > 0.7;
 chk.times    = numel(ep) == 2 && abs(ep(1).tStart - 200) < 1 && abs(ep(2).tStart - 301) < 2.5 && abs(ep(2).tEnd - 321) < 2.5;
 chk.noFalse  = res.nFalse <= 2;
-chk.tail     = res.nTail <= 2 * 4;                                    % the release latency: at most 'release' epochs per episode
+chk.tail     = res.nTail <= 4 + 7;                                    % the release latency: 4 after the short episode, 4 + 3 after the 19 s one
 chk.fbGain   = abs(res.fbGain - G) < 0.02;
 chk.gap      = ~any(res.flag(tKf >= 350 & tKf < 360)) && all(isnan(res.onset(tKf >= 350.5 & tKf < 355)));
 chk.verdict  = ~isempty(strfind(txt, 'every episode caught, no false flag'));

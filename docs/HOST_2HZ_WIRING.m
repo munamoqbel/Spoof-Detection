@@ -139,6 +139,19 @@
 %   section 11), and a drop by consensus cannot hide a spoof, which moves
 %   every row together; the record call may stay the Both form with
 %   measVector for both R.
+%   The Doppler episode screen (HOST_DECISIONS section 17) is one more call
+%   in the same place, before the R of the range-rate rows is final, with
+%   the mechanisation's own increment and the correction the host applied:
+%     [dopScreen, dropRateRows, dopInfo] = SPF_dopplerScreen(dopScreen, velNavPre, velCorrApplied, ...
+%         measH, measY, numGnssRows, DRIFT_STATES, STRUCT_SPF.dopplerScreenParam);
+%     % dropRateRows true: the range-rate rows' entries of measVector at the host's maximum R this epoch
+%   dopScreen persists in the 2 Hz function (STRUCT_SPF.dopplerScreenState at
+%   init, like trialKF); velNavPre is the NED mechanisation velocity the rows
+%   were predicted with, before this epoch's feedback; velCorrApplied the
+%   velocity part of the previous epoch's correction as the mechanisation
+%   applied it, zeros when there was none. The row layout stays, the ranges
+%   and the pressure row update as before, and the gate reads every row at
+%   the nominal R; the flag may go to it as telemetry, never as a blank row.
 %
 % ----------------------------------------------------------------------
 %  2 Hz function (complete skeleton; ONE setKF per epoch, never two)

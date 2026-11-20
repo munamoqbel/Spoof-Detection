@@ -65,7 +65,14 @@ type judged against their own fit (ranges to a shift and one clock per
 constellation, range rates to a velocity and one drift), the worst row beyond
 `SCREEN_K` times its residual's sigma dropped while redundancy remains, kept
 rows at the nominal R whatever their misclosure against the filter
-(`docs/HOST_DECISIONS.md` section 16). The S the monitors read is the host's S
+(`docs/HOST_DECISIONS.md` section 16). `SPF_dopplerScreen` is a seventh,
+also for the measurement setup: the range-rate rows held against a velocity
+coast that follows the mechanisation's own increment and is re-anchored on
+the rows it accepts, so a receiver whose Doppler goes wrong on every row at
+once is held out until it agrees with the IMU again; its state and constants
+come from `STRUCT_SPF.dopplerScreenState` and `dopplerScreenParam`, and the
+flag it returns puts the range-rate rows' R at the host's maximum for the
+epoch, nothing else (section 17). The S the monitors read is the host's S
 plus H dP H' (`SPF_floorInnovCov`): the floors' increase and, on the
 receiver clock bias states, a clock floor (`CPI_CLOCK_STATES`,
 `CPI_CLOCK_SIGMA`, 30 m): a shift common to every range is a clock, and

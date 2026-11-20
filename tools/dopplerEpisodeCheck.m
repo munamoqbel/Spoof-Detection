@@ -27,10 +27,13 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 %                     (headingSigma * sum|dvIns| since the anchor)^2) grows with the time the coast has run on
 %                     the INS alone, for the tilt and bias drift and a heading error on the speed change
 %     flag            'confirm' consecutive epochs with |v_rows - v_c| > T flag the rows; while flagged the coast
-%                     runs on the INS; 'release' consecutive epochs back within T release them, the coast kept,
-%                     so rows that only came half way back are flagged again at once; at 'hold' epochs the INS
-%                     alone can no longer judge and the coast is put back on the rows; the end of an episode is
-%                     a return to the coast, so nothing fires there
+%                     runs on the INS; 'release' consecutive epochs back within T release them, plus one more
+%                     for every 'releaseGrow' epochs the rows have been out, so rows that were wrong for long
+%                     must agree for longer before they are trusted; the coast is kept at a release, so rows
+%                     that only came half way back are flagged again at once; at 'hold' epochs the episode is
+%                     closed with the coast kept and its tolerance still growing, so rows still beyond it start a
+%                     new episode and rows within it re-anchor; the end of an episode is a return to the coast,
+%                     so nothing fires there
 %   Three reads on the inputs come first, since the screen is only as good as what it is fed:
 %     feedback share  fitted at lags 0 to 2 with a t-statistic each, NONE FOUND when no lag reaches 3; the same
 %                     fit with north and east swapped: a share that appears only then is a state vector in the
@@ -45,7 +48,7 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 %                     paired with the wrong pulse on some of them, which no screen can fix
 %   Scoring needs the truth (run.tTrue, run.trueVel): the rows' error v_rows - v_truth labels the epochs the
 %   receiver was actually wrong (above 'episodeLevel' for at least 'episodeMin' epochs); the printout gives
-%   each true episode with its detection delay and coverage, the release tails (flags within 'release' epochs
+%   each true episode with its detection delay and coverage, the release tails (flags within the longest release
 %   after an episode, the rows already back within 'cleanLevel' of the truth: the latency of the release, not
 %   an error), the false flags (flagged while the rows were within 'cleanLevel' of the truth, not a tail)
 %   grouped into runs, and a per-epoch table around the largest episode. With run.navAtt it also regresses
@@ -60,7 +63,7 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 %   velocity correction the host took off the nav velocity, NED m/s, [K x 3] per epoch or [N x 3] per nav sample;
 %   with it the feedback is known and nothing is fitted for it); opts
 %   (defaults): floor 0.20 m/s, driftRate 0.005 m/s2, headingSigma 5e-3 rad, alpha 0.05, confirm 2, release 4
-%   epochs, hold 40 epochs, sign -1, fbGain [] (fitted; a number is used as given, with its sign), fbLag [] (0, 1 or 2
+%   epochs, releaseGrow 10 epochs, hold 40 epochs, sign -1, fbGain [] (fitted; a number is used as given, with its sign), fbLag [] (0, 1 or 2
 %   epochs; default the lag the fit finds, 1 without truth), fbModel '' ('state', 'profile' or 'logged'; default
 %   logged when run.fbVel is there, else the one implying the larger feedback), fbLagWeights [] (for a per-epoch
 %   run.fbVel: the delivery given instead of fitted, weights by lag from 0, e.g. [0 1] for the whole correction in
@@ -87,7 +90,7 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 
 if iscell(spfMeasLog), spfMeasLog = [spfMeasLog{:}]; end
 if nargin < 4 || isempty(opts), opts = struct(); end
-o = struct('floor', 0.20, 'driftRate', 0.005, 'headingSigma', 5e-3, 'alpha', 0.05, 'confirm', 2, 'release', 4, 'hold', 40, 'sign', -1, 'fbGain', [], ...
+o = struct('floor', 0.20, 'driftRate', 0.005, 'headingSigma', 5e-3, 'alpha', 0.05, 'confirm', 2, 'release', 4, 'releaseGrow', 10, 'hold', 40, 'sign', -1, 'fbGain', [], ...
     'fbLag', [], 'fbModel', '', 'fbLagWeights', [], 'armSlope', [], 'truthSlope', [], 'tShift', 0, 'episodeLevel', 0.25, 'episodeMin', 4, 'cleanLevel', 0.15, ...
     'tWin', [], 'tTable', [], 'quiet', false, 'frame', 'NED');
 f = fieldnames(opts);
@@ -349,13 +352,12 @@ for k = 1:K
     else
         hold = hold + 1;  flag(k) = true;
         if sep(k) <= thresh(k), rel = rel + 1; else, rel = 0; end
-        if rel >= o.release
-            inEp = false;  rel = 0;                                           % released: the coast stays, the rows must keep agreeing
+        if rel >= o.release + floor(hold / o.releaseGrow)                     % the longer the rows were wrong, the longer they must agree
+            inEp = false;  rel = 0;  hold = 0;                                % released: the coast stays, the rows must keep agreeing
             vCoast = vCoast + o.alpha * (vRows(k, :) - vCoast);
             tAnchor = 0;  speedSince = 0;
         elseif hold >= o.hold
-            inEp = false;  rel = 0;                                           % the INS alone can no longer judge: back on the rows
-            vCoast = vRows(k, :);  tAnchor = 0;  speedSince = 0;
+            inEp = false;  rel = 0;  hold = 0;                                % the hold is up: the coast and its tolerance go on growing
         end
     end
 end
@@ -432,8 +434,9 @@ if hasTruth
     % after an episode, booked apart from the false flags
     cleanFlag = flag & errH < o.cleanLevel & inWin;
     tailFlag = false(K, 1);
+    tailWin = o.release + floor(o.hold / o.releaseGrow);                 % the longest release the rule can ask for
     for k = find(cleanFlag)'
-        a = max(k - o.release, 1);
+        a = max(k - tailWin, 1);
         tailFlag(k) = any(flag(a:k - 1) & errH(a:k - 1) >= o.cleanLevel);
     end
     falseFlag = cleanFlag & ~tailFlag;
@@ -455,8 +458,8 @@ res = struct('t', t, 'vRows', vRows, 'dvIns', dvIns, 'onset', onset, 'thresh', t
 if o.quiet, return; end
 
 % print
-fprintf('dopplerEpisodeCheck: %d epochs, %d with rate rows; floor %.2f m/s, drift %.3f m/s2, heading sigma %.1f mrad, anchor filter %.2f, confirm %d, release %d, hold %d\n', ...
-    nnz(inWin), nnz(nRate > 0 & inWin), o.floor, o.driftRate, o.headingSigma * 1e3, o.alpha, o.confirm, o.release, o.hold);
+fprintf('dopplerEpisodeCheck: %d epochs, %d with rate rows; floor %.2f m/s, drift %.3f m/s2, heading sigma %.1f mrad, anchor filter %.2f, confirm %d, release %d + 1 per %d held, hold %d\n', ...
+    nnz(inWin), nnz(nRate > 0 & inWin), o.floor, o.driftRate, o.headingSigma * 1e3, o.alpha, o.confirm, o.release, o.releaseGrow, o.hold);
 scanTxt = '';
 if scanOk
     scanTxt = sprintf('lag %d %+.3f t %.1f, lag %d %+.3f t %.1f, lag %d %+.3f t %.1f', fbScan(:, 1:3)');
@@ -567,7 +570,7 @@ if hasTruth
             pick(e.detected, 'caught ', 'MISSED '), e.delay, 100 * e.coverage);
     end
     fprintf('   release tails (flagged within %d epochs after an episode, with the rows back within %.2f m/s of the truth): %d epochs\n', ...
-        o.release, o.cleanLevel, nTail);
+        o.release + floor(o.hold / o.releaseGrow), o.cleanLevel, nTail);
     fprintf('   false flags (flagged while the rows were within %.2f m/s of the truth, not the tail of an episode): %d epochs in %d runs\n', ...
         o.cleanLevel, nFalse, numel(falseRuns));
     for i = 1:min(numel(falseRuns), 12)

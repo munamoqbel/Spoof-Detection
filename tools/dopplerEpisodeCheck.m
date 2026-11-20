@@ -6,9 +6,8 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 %
 %   The receiver's Doppler goes wrong in some episodes of strong transient dynamics (the vehicle data: 0.4 m/s
 %   for 20 s at a tunnel portal, all rows together, so no consensus screen sees it) and the filter, following
-%   its rows, carries the error into the states. The screen emulated here compares the rows' own velocity with
-%   the INS over a short span and, once they part, holds the Doppler rows out until they agree with an INS
-%   velocity coast again or a hold limit runs out:
+%   its rows, carries the error into the states. The screen emulated here keeps an INS velocity coast anchored
+%   on the rows it has accepted and holds the Doppler rows out while they sit away from it:
 %     rows' velocity  v_rows(k) = v_nav-(k) - dv(k): the nav velocity before the update minus the least-squares
 %                     fit of the rate-row innovations to a velocity and one clock drift per constellation (the
 %                     host's innovation is predicted minus measured; opts.sign = +1 for the other convention)
@@ -20,15 +19,15 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 %                     run.navAtt, the lever-arm error the rows carry is taken out of their velocity, as a
 %                     corrected arm input would: in the corners that error is yaw rate times arm and reads as
 %                     an episode otherwise
-%     onset test      d(k) = [v_rows(k) - v_rows(k-span)] - sum(dvIns) over the span, horizontal, averaged over
-%                     'avg' consecutive epochs, against T = sqrt(floor^2 + (headingSigma * sum|dvIns|)^2): the
-%                     rows changed by more than the INS says, beyond what the row noise and a heading error on
-%                     that much speed change allow; 'confirm' consecutive epochs above T fire the onset
-%     episode         from the onset, a coast v_c anchored at the rows' velocity before the span and propagated
-%                     with dvIns; the rows flagged while |v_rows - v_c| stays above the floor, released after
-%                     'release' consecutive epochs below it, or at 'hold' epochs at the latest; after a release
-%                     the onset test rests for span + avg epochs, since its reference epochs still sit in the
-%                     episode and the rows' return would otherwise fire it again
+%     coast           v_c follows the INS increment every epoch; each accepted epoch re-anchors it on the rows
+%                     through a first-order filter ('alpha' of the difference), so the anchor is the recent
+%                     honest rows, not one epoch; the tolerance T = sqrt(floor^2 + (driftRate * t_anchor)^2 +
+%                     (headingSigma * sum|dvIns| since the anchor)^2) grows with the time the coast has run on
+%                     the INS alone, for the tilt and bias drift and a heading error on the speed change
+%     flag            'confirm' consecutive epochs with |v_rows - v_c| > T flag the rows; while flagged the coast
+%                     runs on the INS; 'release' consecutive epochs back within T release them and re-anchor,
+%                     'hold' epochs at the latest, when the INS alone can no longer judge; the end of an episode
+%                     is a return to the coast, so nothing fires there
 %   Three reads on the inputs come first, since the screen is only as good as what it is fed:
 %     feedback share  fitted at lags 0 to 2 with a t-statistic each, NONE FOUND when no lag reaches 3; the same
 %                     fit with north and east swapped: a share that appears only then is a state vector in the
@@ -53,15 +52,16 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 %   read-back less it, the truth point's offset from the nav's.
 %
 %   run: t, navVel (100 Hz), tTrue, trueVel (NED, m/s), navAtt ([roll pitch yaw], rad, for the arm); opts
-%   (defaults): span 10 epochs, avg 2, confirm 2, floor 0.20 m/s, headingSigma 5e-3 rad, hold 40 epochs,
-%   release 4 epochs, sign -1, fbGain [] (fitted; a number is used as given, with its sign), fbLag [] (0, 1 or 2
+%   (defaults): floor 0.20 m/s, driftRate 0.005 m/s2, headingSigma 5e-3 rad, alpha 0.1, confirm 2, release 4
+%   epochs, hold 40 epochs, sign -1, fbGain [] (fitted; a number is used as given, with its sign), fbLag [] (0, 1 or 2
 %   epochs; default the lag the fit finds, 1 without truth), armSlope [] (no arm correction), truthSlope []
 %   (no truth-point correction), tShift 0 s (added to the run's time stamps to put them on the records'
 %   clock), frame 'NED' (the records' position and velocity components; 'ENU' maps them to NED), episodeLevel
 %   0.25 m/s, episodeMin 4 epochs, cleanLevel 0.15 m/s, tWin [] (the
 %   epochs to run on; default all), tTable [] (the window of the per-epoch table; default the largest episode
 %   with 10 s either side), quiet false.
-%   res: t, vRows [K x 3], dvIns [K x 3], onset [K x 1], thresh [K x 1], flag [K x 1] logical, sep [K x 1],
+%   res: t, vRows [K x 3], dvIns [K x 3], sep [K x 1] (the rows' separation from the coast, onset the same),
+%   thresh [K x 1], flag [K x 1] logical,
 %   rowsErr [K x 3] (NaN without truth), episodes (struct array: tStart, tEnd, detected, delay, coverage),
 %   falseRuns (struct array: tStart, tEnd, epochs), nFlag, nFalse, nTail, fbGain, fbLag, fbScan ([3 x 3]: lag,
 %   share, t-statistic), yawRate [K x 1], armFit [1 x 2] (along, across, m per rad/s, NaN without navAtt or
@@ -75,7 +75,7 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 
 if iscell(spfMeasLog), spfMeasLog = [spfMeasLog{:}]; end
 if nargin < 4 || isempty(opts), opts = struct(); end
-o = struct('span', 10, 'avg', 2, 'confirm', 2, 'floor', 0.20, 'headingSigma', 5e-3, 'hold', 40, 'release', 4, 'sign', -1, 'fbGain', [], ...
+o = struct('floor', 0.20, 'driftRate', 0.005, 'headingSigma', 5e-3, 'alpha', 0.1, 'confirm', 2, 'release', 4, 'hold', 40, 'sign', -1, 'fbGain', [], ...
     'fbLag', [], 'armSlope', [], 'truthSlope', [], 'tShift', 0, 'episodeLevel', 0.25, 'episodeMin', 4, 'cleanLevel', 0.15, ...
     'tWin', [], 'tTable', [], 'quiet', false, 'frame', 'NED');
 f = fieldnames(opts);
@@ -180,6 +180,7 @@ else
     else, fbLag = 1; end
 end
 xLag = NaN(K, 3);  xLag(fbLag + 1:K, :) = xPlus(1:K - fbLag, :);
+xLag(~isfinite(xLag)) = 0;                                                % no update, no feedback
 dvIns = dNav + fbGain * xLag;
 
 % the rows' velocity: the nav velocity the host predicted with, before that epoch's feedback, minus the fitted
@@ -204,50 +205,47 @@ if any(isfinite(fbScanWide(:, 3)))
     alignOff = tWide >= T_MIN && (alignLag < 0 || alignLag > 2) && (~isfinite(tNear) || tWide > 1.5 * tNear);
 end
 
-% the emulated screen
-% the single-epoch statistic: the rows' change over the span against the INS's
-dSingle = NaN(K, 2);  speedChange = NaN(K, 1);
-for k = o.span + 1:K
-    if ~inWin(k), continue; end
-    if all(isfinite(vRows(k, :))) && all(isfinite(vRows(k - o.span, :))) && all(all(isfinite(dvIns(k - o.span + 1:k, :))))
-        dSingle(k, :) = (vRows(k, 1:2) - vRows(k - o.span, 1:2)) - sum(dvIns(k - o.span + 1:k, 1:2), 1);
-        speedChange(k) = sum(sqrt(sum(dvIns(k - o.span + 1:k, 1:2) .^ 2, 2)));
-    end
-end
+% the emulated screen: an INS coast anchored on the accepted rows and propagated with the INS increment; the
+% rows flagged while they sit further from it than a tolerance that grows with the time the coast has run on
+% the INS alone, released when they agree with it again
 onset = NaN(K, 1);  thresh = NaN(K, 1);  flag = false(K, 1);  sep = NaN(K, 1);
-inEp = false;  vCoast = zeros(1, 3);  hold = 0;  rel = 0;  above = 0;  refractory = 0;
-for k = o.span + o.avg:K
+inEp = false;  anchored = false;  vCoast = zeros(1, 3);  hold = 0;  rel = 0;  above = 0;
+tAnchor = 0;  speedSince = 0;  dtEp = median(diff(t));
+for k = 1:K
     if ~inWin(k), continue; end
-    dWin = dSingle(k - o.avg + 1:k, :);
-    have = all(isfinite(dWin(:)));
-    if have
-        onset(k) = norm(mean(dWin, 1));                          % the statistic averaged over 'avg' epochs
-        thresh(k) = sqrt(o.floor ^ 2 + (o.headingSigma * speedChange(k)) ^ 2);
+    haveIns = all(isfinite(dvIns(k, :)));
+    haveRows = all(isfinite(vRows(k, :)));
+    if anchored && haveIns
+        vCoast = vCoast + dvIns(k, :);                                        % the coast follows the INS
+        tAnchor = tAnchor + dtEp;  speedSince = speedSince + norm(dvIns(k, 1:2));
+    elseif anchored
+        anchored = false;  inEp = false;  above = 0;                          % no INS increment: the coast is lost
     end
+    if ~haveRows, continue; end
+    if ~anchored
+        vCoast = vRows(k, :);  anchored = true;  tAnchor = 0;  speedSince = 0;   % the first rows anchor the coast
+        continue;
+    end
+    sep(k) = norm(vRows(k, 1:2) - vCoast(1:2));
+    thresh(k) = sqrt(o.floor ^ 2 + (o.driftRate * tAnchor) ^ 2 + (o.headingSigma * speedSince) ^ 2);
+    onset(k) = sep(k);
     if ~inEp
-        if refractory > 0
-            refractory = refractory - 1;                          % after a release the reference epochs still sit in the episode
-            above = 0;
-        elseif have && onset(k) > thresh(k)
-            above = above + 1;
+        if sep(k) > thresh(k)
+            above = above + 1;                                                % not accepted: the coast keeps to the INS
             if above >= o.confirm
-                inEp = true;  hold = 0;  rel = 0;  above = 0;
-                k0 = k - o.span - o.avg + 1;                      % the last epoch the rows and the INS agreed
-                vCoast = vRows(k0, :) + sum(dvIns(k0 + 1:k, :), 1);
-                flag(k) = true;  sep(k) = norm(vRows(k, 1:2) - vCoast(1:2));
+                inEp = true;  hold = 0;  rel = 0;  above = 0;  flag(k) = true;
             end
         else
             above = 0;
+            vCoast = vCoast + o.alpha * (vRows(k, :) - vCoast);               % accepted: the coast re-anchored, filtered
+            tAnchor = 0;  speedSince = 0;
         end
     else
-        if all(isfinite(dvIns(k, :))), vCoast = vCoast + dvIns(k, :); end
         hold = hold + 1;  flag(k) = true;
-        if all(isfinite(vRows(k, :)))
-            sep(k) = norm(vRows(k, 1:2) - vCoast(1:2));
-            if sep(k) < o.floor, rel = rel + 1; else, rel = 0; end
-        end
+        if sep(k) <= thresh(k), rel = rel + 1; else, rel = 0; end
         if rel >= o.release || hold >= o.hold
-            inEp = false;  refractory = o.span + o.avg;
+            inEp = false;  rel = 0;
+            vCoast = vRows(k, :);  tAnchor = 0;  speedSince = 0;              % back on the rows
         end
     end
 end
@@ -346,8 +344,8 @@ res = struct('t', t, 'vRows', vRows, 'dvIns', dvIns, 'onset', onset, 'thresh', t
 if o.quiet, return; end
 
 % print
-fprintf('dopplerEpisodeCheck: %d epochs, %d with rate rows; span %d epochs, averaged over %d, confirmed over %d, floor %.2f m/s, heading sigma %.1f mrad, hold %d, release %d\n', ...
-    nnz(inWin), nnz(nRate > 0 & inWin), o.span, o.avg, o.confirm, o.floor, o.headingSigma * 1e3, o.hold, o.release);
+fprintf('dopplerEpisodeCheck: %d epochs, %d with rate rows; floor %.2f m/s, drift %.3f m/s2, heading sigma %.1f mrad, anchor filter %.2f, confirm %d, release %d, hold %d\n', ...
+    nnz(inWin), nnz(nRate > 0 & inWin), o.floor, o.driftRate, o.headingSigma * 1e3, o.alpha, o.confirm, o.release, o.hold);
 scanTxt = '';
 if scanOk
     scanTxt = sprintf('lag %d %+.3f t %.1f, lag %d %+.3f t %.1f, lag %d %+.3f t %.1f', fbScan');
@@ -445,14 +443,14 @@ if hasTruth
         tt = [episodes(iBig).tStart - 10, episodes(iBig).tEnd + 10];
     end
     if ~isempty(tt)
-        fprintf('   per epoch, %.0f to %.0f s: rows - truth, the onset statistic against its threshold, the flag, the separation from the coast,\n', tt(1), tt(2));
+        fprintf('   per epoch, %.0f to %.0f s: rows - truth, the rows'' separation from the INS coast against the tolerance, the flag,\n', tt(1), tt(2));
         fprintf('   and on the epochs faster than 1 m/s2 the rows'' error as a time offset\n');
-        fprintf('        t      rows-truth N  E   |.|     onset  thresh   flag    sep    offset\n');
+        fprintf('        t      rows-truth N  E   |.|      sep  tolerance   flag   offset\n');
         for k = find(t >= tt(1) & t <= tt(2))'
             tauTxt = '      ';
             if isfinite(tauPair(k)), tauTxt = sprintf('%+6.2f', tauPair(k)); end
-            fprintf('   %8.2f    %+6.3f %+6.3f  %5.3f    %5.3f   %5.3f    %s   %5.3f   %s\n', t(k), rowsErr(k, 1), rowsErr(k, 2), errH(k), ...
-                onset(k), thresh(k), pick(flag(k), 'FLAG', '    '), sep(k), tauTxt);
+            fprintf('   %8.2f    %+6.3f %+6.3f  %5.3f    %5.3f   %5.3f     %s   %s\n', t(k), rowsErr(k, 1), rowsErr(k, 2), errH(k), ...
+                sep(k), thresh(k), pick(flag(k), 'FLAG', '    '), tauTxt);
         end
     end
     if isempty(episodes)
@@ -463,7 +461,7 @@ if hasTruth
         fprintf('   VERDICT: every episode caught; the false flags cost %.1f s of Doppler over the window, the release latency %.1f s\n', ...
             nFalse * median(diff(t)), nTail * median(diff(t)));
     else
-        fprintf('   VERDICT: %d of %d episodes missed: the floor or the span is too generous for this receiver, or the heading sigma hides it\n', ...
+        fprintf('   VERDICT: %d of %d episodes missed: the floor or the tolerance is too generous for this receiver\n', ...
             nnz(~[episodes.detected]), numel(episodes));
     end
 else

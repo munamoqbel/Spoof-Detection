@@ -192,12 +192,12 @@ consensus screen can see and which the filter, following its rows, carries
 into the tilt and the coast. It emulates a screen of the Doppler rows against
 the INS on the spfMeas records and the run: the rows' own velocity (the nav
 velocity before the update minus the least-squares velocity of the rate-row
-innovations) is compared with the INS increment over a short span, less the
-feedback the nav took in between (the share fitted against the truth or
-given); once they part beyond the row noise and a heading error on that much
-speed change, the rows are held out until they agree with an INS coast again
-or a hold runs out, and the onset test rests while its reference epochs still
-sit in the episode. With the truth it scores itself: each true episode with
+innovations) is held against an INS velocity coast that follows the INS
+increment, less the feedback the nav took (the share fitted against the truth
+or given), and is re-anchored slowly on every accepted epoch's rows; the rows
+are flagged while they sit further from the coast than a tolerance that grows
+with the time the coast has run on the INS alone, and released when they
+agree with it again or a hold runs out. With the truth it scores itself: each true episode with
 its detection delay and coverage, the release tails, the false flags grouped
 into runs, and a per-epoch table around the largest episode. The emulation
 runs on the records of the clean hour before any screen goes into the host.

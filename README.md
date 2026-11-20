@@ -201,14 +201,21 @@ sit in the episode. With the truth it scores itself: each true episode with
 its detection delay and coverage, the release tails, the false flags grouped
 into runs, and a per-epoch table around the largest episode. The emulation
 runs on the records of the clean hour before any screen goes into the host.
-The feedback share is fitted at the lag where the logged velocity shows it,
-and a lever-arm error read by `leverArmCheck` can be taken out of the rows
-with `opts.armSlope`, as a corrected arm input would: in the corners that
-error is yaw rate times arm, and without the correction it reads as episodes
-and false flags. `tests/test_dopplerEpisodeCheck.m` runs a synthetic hour
-with two receiver episodes, a braking, two turns and two sharp corners under
-a heading error and a wrong arm, a gap without rows, and a floor set above
-the smaller episode.
+Three reads on the inputs come first, since the screen is only as good as
+what it is fed: the feedback share fitted at lags 0 to 2 and over a wide lag
+range, where a share showing up far from its place is the run's clock off
+the records' (`opts.tShift`); the rows' error against the truth on the yaw
+rate, the lever-arm error the rows carry, taken out of the rows with
+`opts.armSlope` (leverArmCheck's slopes, as a corrected arm input would) and
+what is left of it, the truth point's own offset, taken out of the scoring
+with `opts.truthSlope`; and on the epochs faster than 1 m/s2 the rows' error
+as a time offset, which jumping between consecutive epochs is rows paired
+with the wrong pulse, a fault no screen can fix.
+`tests/test_dopplerEpisodeCheck.m` runs a synthetic hour with two receiver
+episodes, a braking, two turns and two sharp corners under a heading error,
+a wrong arm and a reference 0.5 m from the IMU, a gap without rows, a floor
+set above the smaller episode, a run whose clock is 3 s ahead, and every
+third epoch's rows paired with the pulse before.
 `tools/feedbackCheck.m` asks whether the KF update reaches the mechanisation,
 when, and in full. Per nav sample the change of the logged position minus the
 integral of the logged velocity is the part of the motion the velocity does

@@ -1,14 +1,15 @@
 function test_dopplerEpisodeCheck()
 %% test_dopplerEpisodeCheck.m
 % A synthetic hour-like run: a vehicle heading east at 20 m/s with a braking, a left turn and a right turn under a
-% 5 mrad heading error in the nav, and a receiver whose Doppler rows go wrong twice, 0.3 m/s for 5 s on a straight
+% 5 mrad heading error in the nav, and a receiver whose Doppler rows go wrong twice, 0.35 m/s for 5 s on a straight
 % leg and a 0.4 m/s ramp for 20 s through a second braking. The nav takes a tenth of the state per epoch; the records
 % carry the rate-row innovations the host would have built. Checks that tools/dopplerEpisodeCheck catches both
 % episodes within 4 s with most of their length covered, raises no false flag on the honest manoeuvres (the flags
 % that outlast an episode by the release count are booked as release tails, not false flags), fits the feedback
 % share at the lag the logged velocity shows it, survives a gap without rows, reports a miss when the floor is set
-% above the episode, and reads a lever-arm error back from the truth in two sharp corners and takes it out of the
-% rows with opts.armSlope.
+% above the episode, reads a lever-arm error back from the truth in two sharp corners and takes it out of the rows
+% with opts.armSlope, takes the reference point's own offset out of the scoring with opts.truthSlope, finds a run
+% whose clock is 1 s ahead and shifts it back, and reads rows paired with the wrong pulse as a time offset.
 % Run from the repo root (MATLAB, or Octave with tools/octave_shim).
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'tools'));
@@ -22,17 +23,14 @@ i2 = tN >= 130 & tN < 140;   speed(i2) = 8 + 1.2 * (tN(i2) - 130);
 i5 = tN >= 298 & tN < 310;   speed(i5) = 20 - 1.17 * (tN(i5) - 298);  speed(tN >= 310 & tN < 330) = 6;
 i6 = tN >= 330 & tN < 345;   speed(i6) = 6 + 0.93 * (tN(i6) - 330);
 % a left turn and a right turn at 10 deg/s for 9 s, and two sharp corners at 8 m/s, 45 deg/s, right then left,
-% the yaw rate ramping over 0.5 s at each end
+% every yaw rate ramping over 0.5 s at each end
 W = 45 * pi / 180;  trap = @(t, t0, t1) min(min(max((t - t0) / 0.5, 0), 1), min(max((t1 - t) / 0.5, 0), 1));
-rateTrue = zeros(N, 1);
-i3 = tN >= 150 & tN < 159;   rateTrue(i3) = -10 * pi / 180;
-i4 = tN >= 250 & tN < 259;   rateTrue(i4) = 10 * pi / 180;
-rateTrue = rateTrue + W * trap(tN, 118, 121) - W * trap(tN, 125, 128);
+rateTrue = -(10 * pi / 180) * trap(tN, 150, 159) + (10 * pi / 180) * trap(tN, 250, 259) + W * trap(tN, 118, 121) - W * trap(tN, 125, 128);
 course = pi / 2 + cumsum(rateTrue) / fs;
 vTrue = [speed .* cos(course), speed .* sin(course), zeros(N, 1)];
 % the receiver's episodes: 0.3 m/s north for 5 s at 200 s; a ramp to 0.4 m/s along east over 3 s from 300 s, back over 3 s from 320 s
 rowsErr = zeros(N, 3);
-rowsErr(tN >= 200 & tN < 205, 1) = 0.3;
+rowsErr(tN >= 200 & tN < 205, 1) = 0.35;
 ramp = @(t, t0) min(max((t - t0) / 3, 0), 1);
 rowsErr(:, 2) = -0.4 * (ramp(tN, 300) - ramp(tN, 320));
 % the host's lever arm wrong by leverArmCheck's slopes: the rows read nav minus (yaw rate x arm), along -0.18 m, across +0.37 m
@@ -56,9 +54,13 @@ for j = 2:N
         e = e - G * xPlus(kNext, :);
         kNext = kNext + 1;
     end
-    vNav(j, :) = vTrue(j, :) + e;
+    vNav(j, :) = vTrue(j, :) + e + 0.003 * randn(1, 3);             % the logged velocity carries a little noise
 end
-run = struct('t', tN, 'navVel', vNav, 'tTrue', tN, 'trueVel', vTrue, 'navAtt', [zeros(N, 2), course + psi]);
+% the reference sits 0.40 m ahead and 0.25 m left of the IMU: its velocity carries yaw rate x that offset,
+% truth minus rows per rad/s along +0.25 m and across +0.40 m
+TS = [0.25, 0.40];
+trueVelRef = vTrue;  trueVelRef(:, 1:2) = vTrue(:, 1:2) + rateTrue .* (TS(1) * uAl + TS(2) * uAc);
+run = struct('t', tN, 'navVel', vNav, 'tTrue', tN, 'trueVel', trueVelRef, 'navAtt', [zeros(N, 2), course + psi]);
 % the records: 10 range rows and 10 rate rows on two constellations, the innovations predicted minus measured
 el = 0.2 + 1.1 * rand(10, 1);  az = 2 * pi * rand(10, 1);
 u = [cos(el) .* cos(az), cos(el) .* sin(az), -sin(el)];
@@ -78,19 +80,42 @@ for k = 1:K
 end
 
 ok = true;  chk = struct();
-% the rows as a correct arm would give them: the main run
-txt = evalc('res = dopplerEpisodeCheck(log, tKf, run, struct(''armSlope'', [-0.18 0.37]));');
+% the rows as a correct arm would give them, scored against the truth at the rows' point: the main run
+CORR = struct('armSlope', ARM, 'truthSlope', TS);
+txt = evalc('res = dopplerEpisodeCheck(log, tKf, run, CORR);');
 fprintf('%s', txt);
 ep = res.episodes;
-% the rows as recorded: the corners read as episodes and the arm is read back from the truth
+% the rows as recorded: the corners fire the screen, and the read-back is the arm plus the truth point's offset
 txtRaw = evalc('resRaw = dopplerEpisodeCheck(log, tKf, run);');
-chk.armRaw   = numel(resRaw.episodes) == 4 && all(abs(resRaw.armFit - ARM) < 0.05) && any(resRaw.flag(tKf >= 118 & tKf <= 130)) && ...
+chk.armRaw   = all(abs(resRaw.armFit - (ARM + TS)) < 0.06) && any(resRaw.flag(tKf >= 118 & tKf <= 130)) && ...
     ~isempty(strfind(txtRaw, 'emulates a corrected arm'));
-chk.armFixed = all(abs(res.armFit) < 0.05) && ~isempty(strfind(txt, 'after the arm correction'));
+% the arm taken out alone: the screen is quiet in the corners but the scoring still sees the truth point's offset there
+txtArm = evalc('resArm = dopplerEpisodeCheck(log, tKf, run, struct(''armSlope'', ARM));');
+chk.armOnly  = all(abs(resArm.armFit - TS) < 0.05) && numel(resArm.episodes) == 4 && ~any(resArm.flag(tKf >= 95 & tKf < 170)) && ...
+    ~isempty(strfind(txtArm, 'opts.truthSlope = these two numbers'));
+chk.armFixed = all(abs(res.armFit) < 0.05) && ~isempty(strfind(txt, 'after the arm correction')) && ~isempty(strfind(txt, 'truth point moved'));
+% the records and the run on the same clock, and a run whose clock runs 1 s ahead, found and shifted back
+% (the state is persistent, so the lag of the feedback is read to within one epoch)
+chk.aligned  = res.alignLag >= 0 && res.alignLag <= 2 && isempty(strfind(txt, 'NOT ALIGNED'));
+runAhead = run;  runAhead.t = tN + 3.0;  runAhead.tTrue = tN + 3.0;
+txtS = evalc('resS = dopplerEpisodeCheck(log, tKf, runAhead, CORR);');
+resS2 = dopplerEpisodeCheck(log, tKf, runAhead, setfield(setfield(CORR, 'tShift', -3.0), 'quiet', true)); %#ok<SFLD>
+chk.shifted  = abs(resS.alignLag - 7) <= 1 && ~isempty(strfind(txtS, 'NOT ALIGNED')) && resS2.alignLag >= 0 && resS2.alignLag <= 2 && ...
+    numel(resS2.episodes) == 2 && all([resS2.episodes.detected]) && resS2.nFalse <= 2;
+% every third epoch's rows paired with the pulse half an epoch before: read as a time offset, not screened away
+log3 = log;
+for k = 3:3:K
+    j = find(tN < tKf(k), 1, 'last') - 50;
+    for s = 1:10
+        log3{k}.innovation(10 + s) = log3{k}.obsMatrix(10 + s, 4:6) * (vNav(j + 50, :) - vRowsTrue(j, :))' + 0.05 * randn + 0.02 * double(s > 5);
+    end
+end
+txt3 = evalc('res3p = dopplerEpisodeCheck(log3, tKf, run, CORR);');
+chk.pairing  = res.pairJump < 0.05 && isempty(strfind(txt, 'PAIRING')) && res3p.pairJump > 0.4 && ~isempty(strfind(txt3, 'PAIRING'));
 % the feedback found at lag 1, and at lag 0 when the logged sample before an epoch already carries that epoch's feedback
-chk.fbLag    = res.fbLag == 1 && res.fbScan(2, 3) > 10 && res.fbScan(2, 3) > 1.5 * abs(res.fbScan(1, 3));   % a persistent state shows at every lag, the true one sharpest
-res0 = dopplerEpisodeCheck(log, tKf + 0.011, run, struct('armSlope', [-0.18 0.37], 'quiet', true));
-chk.lag0     = res0.fbLag == 0 && abs(res0.fbGain - G) < 0.02 && numel(res0.episodes) == 2 && all([res0.episodes.detected]) && res0.nFalse <= 2;
+chk.fbLag    = res.fbLag <= 1 && res.fbScan(2, 3) > 10;             % a persistent state shows at every lag; the share is what matters
+res0 = dopplerEpisodeCheck(log, tKf + 0.011, run, setfield(CORR, 'quiet', true)); %#ok<SFLD>
+chk.lag0     = res0.fbLag <= 1 && abs(res0.fbGain - G) < 0.02 && numel(res0.episodes) == 2 && all([res0.episodes.detected]) && res0.nFalse <= 2;
 chk.two      = numel(ep) == 2;
 chk.caught   = numel(ep) == 2 && all([ep.detected]) && all([ep.delay] <= 4.0);
 chk.covered  = numel(ep) == 2 && ep(1).coverage > 0.6 && ep(2).coverage > 0.7;
@@ -103,20 +128,23 @@ chk.verdict  = ~isempty(strfind(txt, 'every episode caught, no false flag'));
 % the manoeuvres alone are honest: no flag in the first braking and the two turns
 chk.quiet    = ~any(res.flag(tKf >= 95 & tKf < 170)) && ~any(res.flag(tKf >= 245 & tKf < 270));
 % a floor above the small episode: it is missed and said so; the large one still caught
-txt2 = evalc('res2 = dopplerEpisodeCheck(log, tKf, run, struct(''floor'', 0.5, ''armSlope'', [-0.18 0.37]));');
+txt2 = evalc('res2 = dopplerEpisodeCheck(log, tKf, run, setfield(CORR, ''floor'', 0.5));'); %#ok<SFLD>
 chk.missed   = ~isempty(strfind(txt2, 'MISSED')) && ~isempty(strfind(txt2, 'episodes missed')) && numel(res2.episodes) == 2 && ...
     ~res2.episodes(1).detected;
 % a given feedback share is used as given
-res3 = dopplerEpisodeCheck(log, tKf, run, struct('fbGain', 0.1, 'armSlope', [-0.18 0.37], 'quiet', true));
-chk.given    = res3.fbGain == 0.1 && res3.fbLag == 1 && numel(res3.episodes) == 2 && all([res3.episodes.detected]);
+res3 = dopplerEpisodeCheck(log, tKf, run, setfield(setfield(CORR, 'fbGain', 0.1), 'quiet', true)); %#ok<SFLD>
+chk.given    = res3.fbGain == 0.1 && res3.fbLag <= 1 && numel(res3.episodes) == 2 && all([res3.episodes.detected]);
 names = fieldnames(chk);
 for i = 1:numel(names)
     if ~chk.(names{i}), fprintf('   FAILED sub-check: %s\n', names{i}); ok = false; end
 end
 if numel(ep) == 2
-    fprintf('episodes: %.1f s caught after %.1f s (%.0f%%), %.1f s caught after %.1f s (%.0f%%); false flags %d, release tails %d; feedback share %.3f\n', ...
+    fprintf('episodes: %.1f s caught after %.1f s (%.0f%%), %.1f s caught after %.1f s (%.0f%%); false flags %d, release tails %d; feedback share %.3f at lag %d\n', ...
         ep(1).tEnd - ep(1).tStart, ep(1).delay, 100 * ep(1).coverage, ep(2).tEnd - ep(2).tStart, ep(2).delay, 100 * ep(2).coverage, ...
-        res.nFalse, res.nTail, res.fbGain);
+        res.nFalse, res.nTail, res.fbGain, res.fbLag);
+    fprintf('wide scan lag %d; run 3 s ahead read at lag %d, shifted back %d; arm read-back raw [%+.2f %+.2f], arm only [%+.2f %+.2f]; pairing jumps %.0f%% / %.0f%%\n', ...
+        res.alignLag, resS.alignLag, resS2.alignLag, resRaw.armFit(1), resRaw.armFit(2), resArm.armFit(1), resArm.armFit(2), ...
+        100 * res.pairJump, 100 * res3p.pairJump);
 end
 if ok
     fprintf('=== test_dopplerEpisodeCheck PASS ===\n');

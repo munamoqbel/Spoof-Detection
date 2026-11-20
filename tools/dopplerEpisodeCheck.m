@@ -29,6 +29,14 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 %                     'release' consecutive epochs below it, or at 'hold' epochs at the latest; after a release
 %                     the onset test rests for span + avg epochs, since its reference epochs still sit in the
 %                     episode and the rows' return would otherwise fire it again
+%   Three reads on the inputs come first, since the screen is only as good as what it is fed:
+%     feedback share  fitted at lags 0 to 2 with a t-statistic each, NONE FOUND when no lag reaches 3
+%     alignment       the same fit over lags -12 to 12: the share showing up sharpest well outside 0 to 2 is
+%                     the feedback where the run's clock put it, the records and the run not on the same
+%                     clock (opts.tShift moves the run)
+%     time pairing    on the epochs faster than 1 m/s2 the rows' error against the truth projected on the
+%                     acceleration is a time offset; an offset that jumps between consecutive epochs is rows
+%                     paired with the wrong pulse on some of them, which no screen can fix
 %   Scoring needs the truth (run.tTrue, run.trueVel): the rows' error v_rows - v_truth labels the epochs the
 %   receiver was actually wrong (above 'episodeLevel' for at least 'episodeMin' epochs); the printout gives
 %   each true episode with its detection delay and coverage, the release tails (flags within 'release' epochs
@@ -36,35 +44,43 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 %   an error), the false flags (flagged while the rows were within 'cleanLevel' of the truth, not a tail)
 %   grouped into runs, and a per-epoch table around the largest episode. With run.navAtt it also regresses
 %   the rows' error against the truth on the yaw rate over the turning epochs: the lever-arm error the rows
-%   carry against the truth point, in leverArmCheck's convention, before or after the arm correction.
+%   carry against the truth point, in leverArmCheck's convention, before or after the arm correction; what is
+%   left after it is the truth point's own offset from the rows' point, taken out of the scoring with
+%   opts.truthSlope (the printed read-back).
 %
 %   run: t, navVel (100 Hz), tTrue, trueVel (NED, m/s), navAtt ([roll pitch yaw], rad, for the arm); opts
 %   (defaults): span 10 epochs, avg 2, confirm 2, floor 0.20 m/s, headingSigma 5e-3 rad, hold 40 epochs,
 %   release 4 epochs, sign -1, fbGain [] (fitted; a number is used as given, with its sign), fbLag [] (0, 1 or 2
-%   epochs; default the lag the fit finds, 1 without truth), armSlope [] (no arm correction),
-%   episodeLevel 0.25 m/s, episodeMin 4 epochs, cleanLevel 0.15 m/s, tWin [] (the
+%   epochs; default the lag the fit finds, 1 without truth), armSlope [] (no arm correction), truthSlope []
+%   (no truth-point correction), tShift 0 s (added to the run's time stamps to put them on the records'
+%   clock), episodeLevel 0.25 m/s, episodeMin 4 epochs, cleanLevel 0.15 m/s, tWin [] (the
 %   epochs to run on; default all), tTable [] (the window of the per-epoch table; default the largest episode
 %   with 10 s either side), quiet false.
 %   res: t, vRows [K x 3], dvIns [K x 3], onset [K x 1], thresh [K x 1], flag [K x 1] logical, sep [K x 1],
 %   rowsErr [K x 3] (NaN without truth), episodes (struct array: tStart, tEnd, detected, delay, coverage),
 %   falseRuns (struct array: tStart, tEnd, epochs), nFlag, nFalse, nTail, fbGain, fbLag, fbScan ([3 x 3]: lag,
 %   share, t-statistic), yawRate [K x 1], armFit [1 x 2] (along, across, m per rad/s, NaN without navAtt or
-%   truth), armFitSig, opts.
+%   truth), armFitSig, fbScanWide ([25 x 3], lags -12 to 12), alignLag (its sharpest lag), tauPair [K x 1] (the
+%   time offset per dynamic epoch, NaN elsewhere), pairShare (the share of them beyond 0.35 s), pairJump (the
+%   share of consecutive dynamic epochs whose offset jumps by more than 0.35 s), opts.
 %   MATLAB desktop tool, not codegen. Runs under Octave.
 
 if iscell(spfMeasLog), spfMeasLog = [spfMeasLog{:}]; end
 if nargin < 4 || isempty(opts), opts = struct(); end
 o = struct('span', 10, 'avg', 2, 'confirm', 2, 'floor', 0.20, 'headingSigma', 5e-3, 'hold', 40, 'release', 4, 'sign', -1, 'fbGain', [], ...
-    'fbLag', [], 'armSlope', [], 'episodeLevel', 0.25, 'episodeMin', 4, 'cleanLevel', 0.15, 'tWin', [], 'tTable', [], 'quiet', false);
+    'fbLag', [], 'armSlope', [], 'truthSlope', [], 'tShift', 0, 'episodeLevel', 0.25, 'episodeMin', 4, 'cleanLevel', 0.15, ...
+    'tWin', [], 'tTable', [], 'quiet', false);
 f = fieldnames(opts);
 for i = 1:numel(f), o.(f{i}) = opts.(f{i}); end
 K = numel(spfMeasLog);
 t = tKf(:);  t = t(1:K);
-tNav = run.t(:);  navVel = run.navVel;
+tNav = run.t(:) + o.tShift;  navVel = run.navVel;                       % the run on the records' clock
+tTrueV = [];
+if isfield(run, 'tTrue'), tTrueV = run.tTrue(:) + o.tShift; end
 hasTruth = isfield(run, 'tTrue') && isfield(run, 'trueVel') && ~isempty(run.trueVel);
 hasAtt = isfield(run, 'navAtt') && ~isempty(run.navAtt);
 
-% the nav velocity just before each update, the rows' velocity, the state's velocity after the update
+% the nav velocity just before each update, the rows' innovation velocity, the state's velocity after the update
 vNavM = NaN(K, 3);  dv = NaN(K, 3);  xPlus = NaN(K, 3);  nRate = zeros(K, 1);  tSample = t;
 for k = 1:K
     j = find(tNav < t(k), 1, 'last');
@@ -83,31 +99,43 @@ end
 inWin = true(K, 1);
 if ~isempty(o.tWin), inWin = t >= o.tWin(1) & t <= o.tWin(2); end
 
-% the INS increment between updates: the nav's change minus the feedback it took
-dNav = [NaN(1, 3); diff(vNavM)];
+% the yaw rate and the along / across unit vectors at the samples, for the lever arm and the truth point
+yawRate = NaN(K, 1);  uAlong = NaN(K, 2);  uAcross = NaN(K, 2);
+if hasAtt
+    yaw = unwrap(run.navAtt(:, 3));
+    dtN = median(diff(tNav));  w = max(1, round(0.5 / dtN));
+    rate = conv([diff(yaw); 0] / dtN, ones(w, 1) / w, 'same');              % centred over 0.5 s
+    yawRate = interp1(tNav, rate, tSample, 'linear', NaN);
+    yawK = interp1(tNav, yaw, tSample, 'linear', NaN);
+    uAlong = [cos(yawK), sin(yawK)];  uAcross = [-sin(yawK), cos(yawK)];
+end
+if ~isempty(o.armSlope) && ~hasAtt, error('dopplerEpisodeCheck:armSlope', 'opts.armSlope needs run.navAtt for the yaw rate'); end
+if ~isempty(o.truthSlope) && ~hasAtt, error('dopplerEpisodeCheck:truthSlope', 'opts.truthSlope needs run.navAtt for the yaw rate'); end
+
+% the truth at the samples, moved to the nav's point when the truth point's offset is given: the arm correction
+% below puts the rows at the nav's point too, so nav, rows and truth are then compared at one point
 if hasTruth
-    vTrue = interp1(run.tTrue(:), run.trueVel, tSample);              % at the nav sample the rows are compared with
+    vTrue = interp1(tTrueV, run.trueVel, tSample);
+    if ~isempty(o.truthSlope)
+        vTrue(:, 1:2) = vTrue(:, 1:2) - yawRate .* (o.truthSlope(1) * uAlong + o.truthSlope(2) * uAcross);
+    end
     dTrue = [NaN(1, 3); diff(vTrue)];
 else
     vTrue = NaN(K, 3);  dTrue = NaN(K, 3);
 end
+
+% the INS increment between updates: the nav's change minus the feedback it took
+dNav = [NaN(1, 3); diff(vNavM)];
 % the share of the state the nav took, and the lag at which the logged velocity shows it:
 % (nav change - truth change)(k) = -fb * x+(k - lag) + INS drift over the quiet epochs, both axes stacked
-LAGS = 0:2;  T_MIN = 3;
-fbScan = [LAGS(:), NaN(numel(LAGS), 2)];
+LAGS = 0:2;  T_MIN = 3;  WIDE = -12:12;
+fbScan = [LAGS(:), NaN(numel(LAGS), 2)];  fbScanWide = [WIDE(:), NaN(numel(WIDE), 2)];
 if hasTruth
+    for iL = 1:numel(WIDE)
+        fbScanWide(iL, 2:3) = shareAtLag(xPlus, dNav, dTrue, inWin, WIDE(iL), K);
+    end
     for iL = 1:numel(LAGS)
-        L = LAGS(iL);
-        kk = (L + 2:K)';
-        a = xPlus(kk - L, 1:2);  b = dNav(kk, 1:2) - dTrue(kk, 1:2);
-        ok = all(isfinite([a b]), 2) & inWin(kk) & sqrt(sum(dTrue(kk, 1:2) .^ 2, 2)) < 0.5;
-        av = a(ok, :);  bv = b(ok, :);  av = av(:);  bv = bv(:);
-        if numel(av) >= 10 && av' * av > 0
-            c = -(av' * bv) / (av' * av);
-            resid = bv + c * av;
-            se = sqrt((resid' * resid) / max(numel(av) - 1, 1) / (av' * av));
-            fbScan(iL, 2:3) = [c, c / max(se, eps)];
-        end
+        fbScan(iL, 2:3) = fbScanWide(WIDE == LAGS(iL), 2:3);
     end
 end
 scanOk = any(isfinite(fbScan(:, 3)));
@@ -130,25 +158,26 @@ else
 end
 xLag = NaN(K, 3);  xLag(fbLag + 1:K, :) = xPlus(1:K - fbLag, :);
 dvIns = dNav + fbGain * xLag;
+
 % the rows' velocity: the nav velocity the host predicted with, before that epoch's feedback, minus the fitted
-% innovation velocity (predicted minus measured: the rows sit at nav - dv)
+% innovation velocity (predicted minus measured: the rows sit at nav - dv), then the lever-arm error taken out,
+% which puts the rows at the nav's point
 vNavPre = vNavM;
 if fbLag == 0, vNavPre = vNavM + fbGain * xPlus; end
 vRows = vNavPre + o.sign * dv;
-% the yaw rate and the along / across unit vectors, for the lever arm
-yawRate = NaN(K, 1);  uAlong = NaN(K, 2);  uAcross = NaN(K, 2);
-if hasAtt
-    yaw = unwrap(run.navAtt(:, 3));
-    dtN = median(diff(tNav));  w = max(1, round(0.5 / dtN));
-    rate = conv([diff(yaw); 0] / dtN, ones(w, 1) / w, 'same');              % centred over 0.5 s
-    yawRate = interp1(tNav, rate, tSample, 'linear', NaN);
-    yawK = interp1(tNav, yaw, tSample, 'linear', NaN);
-    uAlong = [cos(yawK), sin(yawK)];  uAcross = [-sin(yawK), cos(yawK)];
-end
 if ~isempty(o.armSlope)
-    if ~hasAtt, error('dopplerEpisodeCheck:armSlope', 'opts.armSlope needs run.navAtt for the yaw rate'); end
     armVel = yawRate .* (o.armSlope(1) * uAlong + o.armSlope(2) * uAcross);
     vRows(:, 1:2) = vRows(:, 1:2) + armVel;                                 % the rows as a correct arm would give them
+end
+
+% alignment of the records with the run: the share found at a lag well outside 0 to 2 epochs, sharper than
+% there, is the feedback showing up where the run's clock put it
+alignLag = NaN;  alignOff = false;
+if any(isfinite(fbScanWide(:, 3)))
+    [tWide, iW] = max(abs(fbScanWide(:, 3)));
+    alignLag = fbScanWide(iW, 1);
+    tNear = max(abs(fbScan(:, 3)));
+    alignOff = tWide >= T_MIN && (alignLag < 0 || alignLag > 2) && (~isfinite(tNear) || tWide > 1.5 * tNear);
 end
 
 % the emulated screen
@@ -201,9 +230,31 @@ end
 
 % scoring against the truth
 rowsErr = vRows - vTrue;
+% rows paired with the wrong time: on the epochs faster than 1 m/s2 the rows' error projected on the truth's
+% acceleration is the time offset that would explain it; a receiver episode reads as a steady offset too, so the
+% mark of a pairing fault is the offset jumping between consecutive epochs
+tauPair = NaN(K, 1);  nDyn = 0;  pairShare = NaN;  pairHalf = NaN;  pairBig = NaN;  pairOk = NaN;  pairJump = NaN;  tauMed = NaN;
+if hasTruth
+    DT_A = 0.25;
+    vA = interp1(tTrueV, run.trueVel(:, 1:2), tSample + DT_A);  vB = interp1(tTrueV, run.trueVel(:, 1:2), tSample - DT_A);
+    accH = (vA - vB) / (2 * DT_A);
+    aMag = sqrt(sum(accH .^ 2, 2));
+    dyn = aMag > 1.0 & all(isfinite(rowsErr(:, 1:2)), 2) & inWin;
+    nDyn = nnz(dyn);
+    tauPair(dyn) = -sum(rowsErr(dyn, 1:2) .* accH(dyn, :), 2) ./ aMag(dyn) .^ 2;
+    if nDyn >= 10
+        ta = abs(tauPair(dyn));
+        pairOk = mean(ta < 0.10);  pairHalf = mean(ta >= 0.35 & ta < 0.65);  pairBig = mean(ta >= 0.65);
+        pairShare = pairHalf + pairBig;  tauMed = median(tauPair(dyn));
+        kd = find(dyn);  both = kd(1:end-1) + 1 == kd(2:end);
+        if any(both)
+            pairJump = mean(abs(tauPair(kd([both; false])) - tauPair(kd([false; both]))) > 0.35);
+        end
+    end
+end
 % the lever-arm error the rows carry against the truth point: the rows' error along and across the heading
-% regressed on the yaw rate over the turning epochs, with an intercept; reported as innovation per rad/s
-% (nav minus rows), leverArmCheck's convention
+% regressed on the yaw rate over the turning epochs, with an intercept; reported as truth minus rows per rad/s,
+% which is leverArmCheck's convention (nav minus rows) when the truth is at the nav's point
 armFit = NaN(1, 2);  armFitSig = NaN(1, 2);  nTurn = 0;
 if hasTruth && hasAtt
     turn = abs(yawRate) > 2 * pi / 180 & all(isfinite(rowsErr(:, 1:2)), 2) & inWin;
@@ -253,7 +304,8 @@ end
 
 res = struct('t', t, 'vRows', vRows, 'dvIns', dvIns, 'onset', onset, 'thresh', thresh, 'flag', flag, 'sep', sep, ...
     'rowsErr', rowsErr, 'episodes', episodes, 'falseRuns', falseRuns, 'nFlag', nnz(flag), 'nFalse', nFalse, 'nTail', nTail, ...
-    'fbGain', fbGain, 'fbLag', fbLag, 'fbScan', fbScan, 'yawRate', yawRate, 'armFit', armFit, 'armFitSig', armFitSig, 'opts', o);
+    'fbGain', fbGain, 'fbLag', fbLag, 'fbScan', fbScan, 'yawRate', yawRate, 'armFit', armFit, 'armFitSig', armFitSig, ...
+    'fbScanWide', fbScanWide, 'alignLag', alignLag, 'tauPair', tauPair, 'pairShare', pairShare, 'pairJump', pairJump, 'opts', o);
 if o.quiet, return; end
 
 % print
@@ -270,17 +322,41 @@ else
     fprintf('   feedback share of the state per epoch in the nav velocity: %+.3f at lag %d (%s; %s)\n', fbGain, fbLag, ...
         pick(isempty(o.fbGain), 'fitted against the truth', 'given'), pick(scanOk, scanTxt, 'no scan without truth'));
 end
+if hasTruth && isfinite(alignLag)
+    iW = find(fbScanWide(:, 1) == alignLag, 1);
+    fprintf('   the same share over lags %d to %d epochs: sharpest %+.3f at lag %d (t %.1f)%s\n', WIDE(1), WIDE(end), fbScanWide(iW, 2), alignLag, ...
+        fbScanWide(iW, 3), pick(o.tShift ~= 0, sprintf('; run shifted by %+.2f s', o.tShift), ''));
+    if alignOff
+        fprintf('      NOT ALIGNED: the feedback shows up %d epochs from where it belongs; the records and the run are not on the same clock,\n', alignLag - 1);
+        fprintf('      give opts.tShift = %+.2f s (added to the run''s time)\n', o.tShift - (alignLag - 1) * median(diff(t)));
+    end
+end
 if hasAtt && hasTruth
     if nTurn >= 10
         armTxt = '';
         if ~isempty(o.armSlope), armTxt = sprintf(', after the arm correction [%+.2f %+.2f]', o.armSlope(1), o.armSlope(2)); end
         fprintf('   rows minus truth per rad/s of yaw rate over %d turning epochs%s: along %+.2f m, across %+.2f m (sigma %.2f / %.2f)\n', ...
             nTurn, armTxt, armFit(1), armFit(2), armFitSig(1), armFitSig(2));
-        if isempty(o.armSlope) && any(abs(armFit) > 2 * armFitSig & abs(armFit) > 0.1)
-            fprintf('      (the rows carry a lever-arm error against the truth point; opts.armSlope = these two numbers emulates a corrected arm)\n');
+        if ~isempty(o.truthSlope)
+            fprintf('      (truth point moved by [%+.2f %+.2f] m per rad/s to the rows'' point)\n', o.truthSlope(1), o.truthSlope(2));
+        end
+        if any(abs(armFit) > 2 * armFitSig & abs(armFit) > 0.1)
+            if isempty(o.armSlope)
+                fprintf('      (the rows carry a lever-arm error against the truth point; opts.armSlope = leverArmCheck''s slopes emulates a corrected arm)\n');
+            else
+                fprintf('      (what is left is the truth point''s offset from the rows'' point; opts.truthSlope = these two numbers takes it out of the scoring)\n');
+            end
         end
     else
         fprintf('   rows minus truth per rad/s of yaw rate: fewer than 10 turning epochs, no arm read\n');
+    end
+end
+if hasTruth && nDyn >= 10
+    fprintf('   time pairing on %d epochs faster than 1 m/s2, the rows'' error as a time offset: under 0.10 s %.0f%%, 0.35 to 0.65 s %.0f%%, over 0.65 s %.0f%%; median %+.2f s; jumps over 0.35 s between consecutive epochs %.0f%%\n', ...
+        nDyn, 100 * pairOk, 100 * pairHalf, 100 * pairBig, tauMed, 100 * pairJump);
+    if pairJump > 0.2
+        fprintf('      PAIRING: the offset jumps between consecutive epochs on %.0f%% of them: rows paired with the wrong pulse on some epochs, in the\n', 100 * pairJump);
+        fprintf('      receiver''s time tag or in the host; a screen cannot fix a time tag, and these epochs read as episodes and flags below\n');
     end
 end
 fprintf('   flagged: %d epochs (%.1f s), %.2f%% of the epochs with rows\n', nnz(flag), nnz(flag) * median(diff(t)), 100 * nnz(flag) / max(nnz(nRate > 0 & inWin), 1));
@@ -306,11 +382,14 @@ if hasTruth
         tt = [episodes(iBig).tStart - 10, episodes(iBig).tEnd + 10];
     end
     if ~isempty(tt)
-        fprintf('   per epoch, %.0f to %.0f s: rows - truth, the onset statistic against its threshold, the flag and the separation from the coast\n', tt(1), tt(2));
-        fprintf('        t      rows-truth N  E   |.|     onset  thresh   flag    sep\n');
+        fprintf('   per epoch, %.0f to %.0f s: rows - truth, the onset statistic against its threshold, the flag, the separation from the coast,\n', tt(1), tt(2));
+        fprintf('   and on the epochs faster than 1 m/s2 the rows'' error as a time offset\n');
+        fprintf('        t      rows-truth N  E   |.|     onset  thresh   flag    sep    offset\n');
         for k = find(t >= tt(1) & t <= tt(2))'
-            fprintf('   %8.2f    %+6.3f %+6.3f  %5.3f    %5.3f   %5.3f    %s   %5.3f\n', t(k), rowsErr(k, 1), rowsErr(k, 2), errH(k), ...
-                onset(k), thresh(k), pick(flag(k), 'FLAG', '    '), sep(k));
+            tauTxt = '      ';
+            if isfinite(tauPair(k)), tauTxt = sprintf('%+6.2f', tauPair(k)); end
+            fprintf('   %8.2f    %+6.3f %+6.3f  %5.3f    %5.3f   %5.3f    %s   %5.3f   %s\n', t(k), rowsErr(k, 1), rowsErr(k, 2), errH(k), ...
+                onset(k), thresh(k), pick(flag(k), 'FLAG', '    '), sep(k), tauTxt);
         end
     end
     if isempty(episodes)
@@ -330,6 +409,31 @@ end
 end
 
 %------------------------------------------------------------------------
+function [out] = shareAtLag(xPlus, dNav, dTrue, inWin, L, K)
+% the share of the state x+(k - L) in (nav change - truth change)(k) over the quiet epochs, both axes stacked,
+% through the origin, with one trim of the outliers: [share, t-statistic]; NaN with too few epochs
+out = NaN(1, 2);
+kk = (max(1, 1 + L):min(K, K + L))';  kk = kk(kk >= 2);
+a = xPlus(kk - L, 1:2);  b = dNav(kk, 1:2) - dTrue(kk, 1:2);
+ok = all(isfinite([a b]), 2) & inWin(kk) & sqrt(sum(dTrue(kk, 1:2) .^ 2, 2)) < 0.5;
+av = a(ok, :);  bv = b(ok, :);  av = av(:);  bv = bv(:);
+if numel(av) < 10 || av' * av <= 0, return; end
+c = -(av' * bv) / (av' * av);
+resid = bv + c * av;
+% the scale floored on the rms so that a residual that is mostly zero does not trim everything but the zeros
+madS = max(1.4826 * median(abs(resid - median(resid))), 0.2 * sqrt(mean(resid .^ 2)));
+if madS > 0
+    keep = abs(resid) < 4 * madS;
+    if nnz(keep) >= 10 && av(keep)' * av(keep) > 0
+        av = av(keep);  bv = bv(keep);
+        c = -(av' * bv) / (av' * av);
+        resid = bv + c * av;
+    end
+end
+se = sqrt((resid' * resid) / max(numel(av) - 1, 1) / (av' * av));
+out = [c, c / max(se, eps)];
+end
+
 function [r] = runsOf(mask)
 % start and end indices of the runs of true in a logical vector, [n x 2]
 mask = mask(:)';

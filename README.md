@@ -185,6 +185,25 @@ override is left alone. One call after the rows are assembled, the loops as
 they are. `tests/test_rowScreen.m` covers an outlier, two outliers with one
 hidden by leverage, a consistent shift at five sigma against the filter, a
 constellation clock jump, no redundancy and the override.
+`tools/dopplerEpisodeCheck.m` answers the other finding of those reads: a
+receiver whose Doppler goes wrong on every row at once under strong transient
+dynamics (on the vehicle data 0.4 m/s for 20 s at a tunnel portal), which no
+consensus screen can see and which the filter, following its rows, carries
+into the tilt and the coast. It emulates a screen of the Doppler rows against
+the INS on the spfMeas records and the run: the rows' own velocity (the nav
+velocity before the update minus the least-squares velocity of the rate-row
+innovations) is compared with the INS increment over a short span, less the
+feedback the nav took in between (the share fitted against the truth or
+given); once they part beyond the row noise and a heading error on that much
+speed change, the rows are held out until they agree with an INS coast again
+or a hold runs out, and the onset test rests while its reference epochs still
+sit in the episode. With the truth it scores itself: each true episode with
+its detection delay and coverage, the release tails, the false flags grouped
+into runs, and a per-epoch table around the largest episode. The emulation
+runs on the records of the clean hour before any screen goes into the host.
+`tests/test_dopplerEpisodeCheck.m` runs a synthetic hour with two receiver
+episodes, a braking and two turns under a heading error, a gap without rows,
+and a floor set above the smaller episode.
 `tools/feedbackCheck.m` asks whether the KF update reaches the mechanisation,
 when, and in full. Per nav sample the change of the logged position minus the
 integral of the logged velocity is the part of the motion the velocity does

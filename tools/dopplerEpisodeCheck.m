@@ -69,12 +69,12 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 %   res: t, vRows [K x 3], dvIns [K x 3], sep [K x 1] (the rows' separation from the coast, onset the same),
 %   thresh [K x 1], flag [K x 1] logical,
 %   rowsErr [K x 3] (NaN without truth), episodes (struct array: tStart, tEnd, detected, delay, coverage),
-%   falseRuns (struct array: tStart, tEnd, epochs), nFlag, nFalse, nTail, fbGain, fbLag, fbModel, fbScan ([3 x 3]: lag,
-%   share, t-statistic), yawRate [K x 1], armFit [1 x 2] (along, across, m per rad/s, NaN without navAtt or
+%   falseRuns (struct array: tStart, tEnd, epochs), nFlag, nFalse, nTail, fbGain, fbLag, fbModel, fbScan ([3 x 4]: lag,
+%   share, t-statistic, rms of the regressor), yawRate [K x 1], armFit [1 x 2] (along, across, m per rad/s, NaN without navAtt or
 %   truth), armFitSig, armHost [1 x 2] (nav minus rows per rad/s, the host's arm error), armHostSig, fbScanWide
-%   ([25 x 3], lags -12 to 12), alignLag (its sharpest lag), fbScanSwap ([3 x 3],
-%   north and east swapped), frameOff (true when the share appears only swapped), fbScanInc ([3 x 3], the share
-%   of the update's increment), jumpClusters ([n x 3]: start,
+%   ([25 x 4], lags -12 to 12), alignLag (its sharpest lag), fbScanSwap ([3 x 4],
+%   north and east swapped), frameOff (true when the share appears only swapped), fbScanInc ([3 x 4], the share
+%   of the update's increment; the model used is the one implying the larger feedback), jumpClusters ([n x 3]: start,
 %   end, count of the offset jumps 5 s apart or less), tauPair [K x 1] (the
 %   time offset per dynamic epoch, NaN elsewhere), pairShare (the share of them beyond 0.35 s), pairJump (the
 %   share of consecutive dynamic epochs whose offset jumps by more than 0.35 s), opts.
@@ -146,27 +146,27 @@ dNav = [NaN(1, 3); diff(vNavM)];
 % the share of the state the nav took, and the lag at which the logged velocity shows it:
 % (nav change - truth change)(k) = -fb * x+(k - lag) + INS drift over the quiet epochs, both axes stacked
 LAGS = 0:2;  T_MIN = 3;  WIDE = -12:12;
-fbScan = [LAGS(:), NaN(numel(LAGS), 2)];  fbScanWide = [WIDE(:), NaN(numel(WIDE), 2)];
+fbScan = [LAGS(:), NaN(numel(LAGS), 3)];  fbScanWide = [WIDE(:), NaN(numel(WIDE), 3)];
 if hasTruth
     for iL = 1:numel(WIDE)
-        fbScanWide(iL, 2:3) = shareAtLag(xPlus, dNav, dTrue, inWin, WIDE(iL), K);
+        fbScanWide(iL, 2:4) = shareAtLag(xPlus, dNav, dTrue, inWin, WIDE(iL), K);
     end
     for iL = 1:numel(LAGS)
-        fbScan(iL, 2:3) = fbScanWide(WIDE == LAGS(iL), 2:3);
+        fbScan(iL, 2:4) = fbScanWide(WIDE == LAGS(iL), 2:4);
     end
 end
 % the same share with north and east swapped: a share that appears only then is a state vector in the other
 % frame (ENU against NED), the first two components exchanged
-fbScanSwap = [LAGS(:), NaN(numel(LAGS), 2)];
+fbScanSwap = [LAGS(:), NaN(numel(LAGS), 3)];
 if hasTruth
     xSwap = xPlus(:, [2 1 3]);
     for iL = 1:numel(LAGS)
-        fbScanSwap(iL, 2:3) = shareAtLag(xSwap, dNav, dTrue, inWin, LAGS(iL), K);
+        fbScanSwap(iL, 2:4) = shareAtLag(xSwap, dNav, dTrue, inWin, LAGS(iL), K);
     end
 end
 % and the share of the update's own increment, x+ minus x-, when the records carry the prior: a mechanisation
 % that takes the whole Kalman step rather than a share of the state reads 1 here and nothing above
-fbScanInc = [LAGS(:), NaN(numel(LAGS), 2)];
+fbScanInc = [LAGS(:), NaN(numel(LAGS), 3)];
 xInc = NaN(K, 3);  hasInc = isfield(spfMeasLog, 'priorState');
 if hasInc
     for k = 1:K
@@ -177,7 +177,7 @@ if hasInc
 end
 if hasTruth && hasInc
     for iL = 1:numel(LAGS)
-        fbScanInc(iL, 2:3) = shareAtLag(xInc, dNav, dTrue, inWin, LAGS(iL), K);
+        fbScanInc(iL, 2:4) = shareAtLag(xInc, dNav, dTrue, inWin, LAGS(iL), K);
     end
 end
 frameOff = false;
@@ -192,9 +192,12 @@ tInc = NaN;  iInc = 2;
 if any(isfinite(fbScanInc(:, 3))), [tInc, iInc] = max(abs(fbScanInc(:, 3))); end
 fbFound = isfinite(tBest) && tBest >= T_MIN;
 incFound = isfinite(tInc) && tInc >= T_MIN;
+impliedState = 0;  impliedInc = 0;                                        % the feedback each model implies, m/s per epoch rms
+if fbFound, impliedState = abs(fbScan(iBest, 2)) * fbScan(iBest, 4); end
+if incFound, impliedInc = abs(fbScanInc(iInc, 2)) * fbScanInc(iInc, 4); end
 if ~isempty(o.fbModel)
     fbModel = o.fbModel;
-elseif incFound && (~fbFound || tInc > tBest)
+elseif incFound && (~fbFound || impliedInc > impliedState)
     fbModel = 'increment';
 else
     fbModel = 'state';
@@ -394,7 +397,7 @@ fprintf('dopplerEpisodeCheck: %d epochs, %d with rate rows; floor %.2f m/s, drif
     nnz(inWin), nnz(nRate > 0 & inWin), o.floor, o.driftRate, o.headingSigma * 1e3, o.alpha, o.confirm, o.release, o.hold);
 scanTxt = '';
 if scanOk
-    scanTxt = sprintf('lag %d %+.3f t %.1f, lag %d %+.3f t %.1f, lag %d %+.3f t %.1f', fbScan');
+    scanTxt = sprintf('lag %d %+.3f t %.1f, lag %d %+.3f t %.1f, lag %d %+.3f t %.1f', fbScan(:, 1:3)');
 end
 if scanOk
     fprintf('   feedback share of the state per epoch in the nav velocity: %+.3f at lag %d (t %.1f; %s)\n', fbScan(iBest, 2), fbScan(iBest, 1), tBest, scanTxt);
@@ -419,7 +422,8 @@ if hasTruth && any(isfinite(fbScanSwap(:, 3)))
     end
 end
 if hasTruth && isfinite(tInc)
-    fprintf('   the nav''s change as a share of the update''s own increment, x+ minus x-: %+.3f at lag %d (t %.1f)\n', fbScanInc(iInc, 2), fbScanInc(iInc, 1), tInc);
+    fprintf('   the nav''s change as a share of the update''s own increment, x+ minus x-: %+.3f at lag %d (t %.1f); implied feedback %.4f m/s per epoch against %.4f from the state\n', ...
+        fbScanInc(iInc, 2), fbScanInc(iInc, 1), tInc, impliedInc, impliedState);
 end
 if isempty(o.fbGain) && ~found
     fprintf('   USED: no feedback found under either model; the INS increment is taken as logged\n');
@@ -545,8 +549,9 @@ end
 
 function [out] = shareAtLag(xPlus, dNav, dTrue, inWin, L, K)
 % the share of the state x+(k - L) in (nav change - truth change)(k) over the quiet epochs, both axes stacked,
-% through the origin, with one trim of the outliers: [share, t-statistic]; NaN with too few epochs
-out = NaN(1, 2);
+% through the origin, with one trim of the outliers: [share, t-statistic, rms of the regressor]; NaN with too
+% few epochs
+out = NaN(1, 3);
 kk = (max(1, 1 + L):min(K, K + L))';  kk = kk(kk >= 2);
 a = xPlus(kk - L, 1:2);  b = dNav(kk, 1:2) - dTrue(kk, 1:2);
 ok = all(isfinite([a b]), 2) & inWin(kk) & sqrt(sum(dTrue(kk, 1:2) .^ 2, 2)) < 0.5;
@@ -565,7 +570,7 @@ if madS > 0
     end
 end
 se = sqrt((resid' * resid) / max(numel(av) - 1, 1) / (av' * av));
-out = [c, c / max(se, eps)];
+out = [c, c / max(se, eps), sqrt(mean(av .^ 2))];
 end
 
 function [r] = runsOf(mask)

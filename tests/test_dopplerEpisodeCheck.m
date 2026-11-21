@@ -196,6 +196,12 @@ fprintf('%s', txtT);
 epT = resT.episodes;
 chk.totalUsed    = strcmp(resT.fbModel, 'total') && isnan(resT.fbGain) && ...
     ~isempty(strfind(txtT, 'USED: the nav velocity less the prior state'));
+% the coast's own error against the truth: within the heading error's work on the braking (5 mrad on 14 m/s) and the
+% bias over the long episode's flagged stretch, and the drift read over the flagged stretches of 10 epochs or more well
+% under the tolerance's growth on this IMU
+longEp = tKfT >= 303 & tKfT <= 320;
+chk.coastErr     = all(resT.coastErr(longEp & resT.flag) < 0.15) && size(resT.coastDrift, 1) >= 1 && ...
+    all(abs(resT.coastDrift(:, 3)) < 0.005) && ~isempty(strfind(txtT, 'the coast''s drift against the truth')) && isempty(strfind(txtT, 'DRIFT:'));
 chk.totalCaught  = numel(epT) == 2 && all([epT.detected]) && all([epT.delay] <= 4.0) && epT(1).coverage > 0.6 && epT(2).coverage > 0.7;
 chk.totalClean   = resT.nFalse <= 2 && resT.nTail <= 4 + 7 && ~any(resT.flag(tKfT >= 95 & tKfT < 170)) && ~any(resT.flag(tKfT >= 245 & tKfT < 270));
 % the hand-over cancels in nav less prior: the increment's error against the truth is the logged noise, and no share

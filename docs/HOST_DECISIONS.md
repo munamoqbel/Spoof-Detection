@@ -603,12 +603,20 @@ what was lost and not taken. The tool now classes every epoch by the
 state's loss between an update and the next prior, as a share of the
 posterior, and reads per class how much of the loss the nav took; a class
 that lost more than the nav took is named LOSS NOT TAKEN, and the per-epoch
-table carries the loss and the increment's error. The per-epoch table at
-495 to 522 s already shows the shape of the cost: the rows sat in the grey
-band from 468 s, the coast ran on the IMU alone for 30 s and drifted
-0.27 m/s, and from 498 s, the rows clean again, it went on drifting at
-about 0.01 m/s per second, twice the tolerance's growth, so the flags
-lasted to 545 s. The other coast form is in the tool for the comparison on
+table carries the loss and the increment's error. The read on run 10:
+no class lost more than the nav took, the limited branch included, so the
+host function's increment from the update's step is exact at every epoch,
+and the increment's error against the reference is 0.001 to 0.006 m/s per
+epoch through the false-flag runs. The cost is plain IMU coast drift: the
+rows sat in the grey band from 468 s, the coast lost its anchor and ran on
+the IMU alone for 27 s, arrived 0.27 m/s off, and from 498 s, the rows
+clean again, drifted on at about the tolerance's own growth rate, so the
+flags lasted to 545 s. The tool now carries the coast's own error against
+the reference as a table column and reads its drift rate over every
+flagged stretch of 10 epochs or more against DRIFT_RATE; that number sets
+the tolerance's growth and weighs on the floor, since a floor that flags
+the grey band is what sends the coast off alone. The other coast form is
+in the tool for the comparison on
 the first run that logs the hand-over: the rows' velocity total-state in
 both, the increment either from the prior and the step or from the
 mechanisation's change plus the correction it applied, the two differing

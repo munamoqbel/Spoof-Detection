@@ -56,6 +56,8 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 %                     all of it; slope s: a share 1 - s); a class where the state lost more than the nav took is a
 %                     step in nav minus prior the total-state increment cannot see, flagged LOSS NOT TAKEN, with the
 %                     large increment errors counted and the share of them at such epochs
+%     coast drift     with the truth: the coast's own error against the truth, and its growth rate over every flagged
+%                     stretch of 10 epochs or more, the IMU drift the tolerance has to cover, against DRIFT_RATE
 %     feedback share  fitted at lags 0 to 2 with a t-statistic each, NONE FOUND when no lag reaches 3; the same
 %                     fit with north and east swapped: a share that appears only then is a state vector in the
 %                     other frame (opts.frame = 'ENU' reads the records' states and H columns as east, north, up);
@@ -103,7 +105,9 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 %   increment's rms against the truth per epoch; NaN without the prior or the truth), incErr [K x 1] (the total-state
 %   increment's horizontal error against the truth), lossRatio [K x 1] (the state's loss as a share of the posterior,
 %   NaN where the posterior is under 0.03 m/s), lossClass (struct array: name, range, n, nUsed, slope, rms), lossNotTaken
-%   (true when a class with 10 usable epochs or more reads a slope above 0.2), hoRms (the hand-over increment's rms
+%   (true when a class with 10 usable epochs or more reads a slope above 0.2), vCoast [K x 3] (the coast the rows were
+%   judged against, NaN without one), coastErr [K x 1] (its horizontal error against the truth), coastDrift ([n x 3]:
+%   start, end, m/s per s over each flagged stretch of 10 epochs or more), hoRms (the hand-over increment's rms
 %   against the truth per epoch, NaN without the prior, the logged correction and the truth), fbScan ([3 x 4]: lag,
 %   share, t-statistic, rms of the regressor), yawRate [K x 1], armFit [1 x 2] (along, across, m per rad/s, NaN without navAtt or
 %   truth), armFitSig, armHost [1 x 2] (nav minus rows per rad/s, the host's arm error), armHostSig, fbScanWide
@@ -242,7 +246,7 @@ for k = 2:K
         if norm(xp) > 0.03, lossRatio(k) = (lossH(k, :) * xp') / (xp * xp'); end
     end
 end
-LOSS_CLASSES = {'none', -Inf, 0.03; 'a tenth', 0.03, 0.17; 'a quarter', 0.17, 0.4; 'a half', 0.4, 0.6; ...
+LOSS_CLASSES = {'negative', -Inf, -0.03; 'none', -0.03, 0.03; 'a tenth', 0.03, 0.17; 'a quarter', 0.17, 0.4; 'a half', 0.4, 0.6; ...
     'three quarters', 0.6, 0.9; 'all', 0.9, 1.1; 'other', 1.1, Inf};
 lossClass = struct('name', {}, 'range', {}, 'n', {}, 'nUsed', {}, 'slope', {}, 'rms', {});
 lossNotTaken = false;
@@ -417,7 +421,7 @@ end
 % the emulated screen: an INS coast anchored on the accepted rows and propagated with the INS increment; the
 % rows flagged while they sit further from it than a tolerance that grows with the time the coast has run on
 % the INS alone, released when they agree with it again
-onset = NaN(K, 1);  thresh = NaN(K, 1);  flag = false(K, 1);  sep = NaN(K, 1);
+onset = NaN(K, 1);  thresh = NaN(K, 1);  flag = false(K, 1);  sep = NaN(K, 1);  vCoastK = NaN(K, 3);
 inEp = false;  anchored = false;  vCoast = zeros(1, 3);  hold = 0;  rel = 0;  above = 0;
 tAnchor = 0;  speedSince = 0;  dtEp = median(diff(t));
 for k = 1:K
@@ -436,6 +440,7 @@ for k = 1:K
         continue;
     end
     sep(k) = norm(vRows(k, 1:2) - vCoast(1:2));
+    vCoastK(k, :) = vCoast;                                                   % the coast the rows are judged against
     thresh(k) = sqrt(o.floor ^ 2 + (o.driftRate * tAnchor) ^ 2 + (o.headingSigma * speedSince) ^ 2);
     onset(k) = sep(k);
     if ~inEp
@@ -458,6 +463,20 @@ for k = 1:K
             tAnchor = 0;  speedSince = 0;
         elseif hold >= o.hold
             inEp = false;  rel = 0;  hold = 0;                                % the hold is up: the coast and its tolerance go on growing
+        end
+    end
+end
+
+% the coast's own error against the truth, and its growth over every flagged stretch of 10 epochs or more: the IMU
+% drift the tolerance has to cover, to set against DRIFT_RATE
+coastErr = sqrt(sum((vCoastK(:, 1:2) - vTrue(:, 1:2)) .^ 2, 2));
+coastDrift = zeros(0, 3);
+if hasTruth
+    runsFl = runsOf(flag & isfinite(coastErr));
+    for i = 1:size(runsFl, 1)
+        a = runsFl(i, 1);  b = runsFl(i, 2);
+        if b - a + 1 >= 10 && t(b) > t(a)
+            coastDrift(end + 1, :) = [t(a), t(b), (coastErr(b) - coastErr(a)) / (t(b) - t(a))]; %#ok<AGROW>
         end
     end
 end
@@ -553,6 +572,7 @@ res = struct('t', t, 'vRows', vRows, 'dvIns', dvIns, 'onset', onset, 'thresh', t
     'rowsErr', rowsErr, 'episodes', episodes, 'falseRuns', falseRuns, 'nFlag', nnz(flag), 'nFalse', nFalse, 'nTail', nTail, ...
     'fbGain', fbGain, 'fbLag', fbLag, 'fbModel', fbModel, 'totShare', totShare, 'totShareT', totShareT, 'totRms', totRms, ...
     'incErr', incErr, 'lossRatio', lossRatio, 'lossClass', lossClass, 'lossNotTaken', lossNotTaken, 'hoRms', hoRms, ...
+    'vCoast', vCoastK, 'coastErr', coastErr, 'coastDrift', coastDrift, ...
     'fbScan', fbScan, 'yawRate', yawRate, 'armFit', armFit, 'armFitSig', armFitSig, ...
     'armHost', armHost, 'armHostSig', armHostSig, ...
     'fbScanWide', fbScanWide, 'alignLag', alignLag, 'fbScanSwap', fbScanSwap, 'frameOff', frameOff, 'firC', firC, 'firSe', firSe, ...
@@ -705,6 +725,15 @@ if hasTruth && nDyn >= 10
         fprintf('\n');
     end
 end
+if hasTruth && ~isempty(coastDrift)
+    dr = coastDrift(:, 3);  drS = sort(dr);
+    fprintf('   the coast''s drift against the truth over the %d flagged stretches of 10 epochs or more: median %+.4f m/s per s, 90th percentile %+.4f, largest %+.4f;\n', ...
+        numel(dr), median(dr), drS(max(1, ceil(0.9 * numel(dr)))), max(dr));
+    fprintf('      the tolerance grows at %.4f per s; a coast that drifts faster is flagged on clean rows until the tolerance catches it\n', o.driftRate);
+    if median(dr) > o.driftRate
+        fprintf('      DRIFT: the coast drifts faster than the tolerance grows on most long stretches: the IMU''s coast is worse than DRIFT_RATE says\n');
+    end
+end
 fprintf('   flagged: %d epochs (%.1f s), %.2f%% of the epochs with rows\n', nnz(flag), nnz(flag) * median(diff(t)), 100 * nnz(flag) / max(nnz(nRate > 0 & inWin), 1));
 if hasTruth
     fprintf('   true episodes (rows more than %.2f m/s from the truth for %d epochs or more): %d\n', o.episodeLevel, o.episodeMin, numel(episodes));
@@ -729,9 +758,9 @@ if hasTruth
     end
     if ~isempty(tt)
         fprintf('   per epoch, %.0f to %.0f s: rows - truth, the rows'' separation from the INS coast against the tolerance, the flag,\n', tt(1), tt(2));
-        fprintf('   on the epochs faster than 1 m/s2 the rows'' error as a time offset, the increment''s error against the truth, and the\n');
-        fprintf('   state''s loss since the previous update as a share of its posterior\n');
-        fprintf('        t      rows-truth N  E   |.|      sep  tolerance   flag   offset  incErr   loss\n');
+        fprintf('   on the epochs faster than 1 m/s2 the rows'' error as a time offset, the increment''s error against the truth, the\n');
+        fprintf('   state''s loss since the previous update as a share of its posterior, and the coast''s own error against the truth\n');
+        fprintf('        t      rows-truth N  E   |.|      sep  tolerance   flag   offset  incErr   loss   coastErr\n');
         for k = find(t >= tt(1) & t <= tt(2))'
             tauTxt = '      ';
             if isfinite(tauPair(k)), tauTxt = sprintf('%+6.2f', tauPair(k)); end
@@ -739,8 +768,10 @@ if hasTruth
             if isfinite(incErr(k)), incTxt = sprintf('%5.3f', incErr(k)); end
             lossTxt = '     ';
             if isfinite(lossRatio(k)), lossTxt = sprintf('%+5.2f', lossRatio(k)); end
-            fprintf('   %8.2f    %+6.3f %+6.3f  %5.3f    %5.3f   %5.3f     %s   %s  %s  %s\n', t(k), rowsErr(k, 1), rowsErr(k, 2), errH(k), ...
-                sep(k), thresh(k), pick(flag(k), 'FLAG', '    '), tauTxt, incTxt, lossTxt);
+            coastTxt = '     ';
+            if isfinite(coastErr(k)), coastTxt = sprintf('%5.3f', coastErr(k)); end
+            fprintf('   %8.2f    %+6.3f %+6.3f  %5.3f    %5.3f   %5.3f     %s   %s  %s  %s   %s\n', t(k), rowsErr(k, 1), rowsErr(k, 2), errH(k), ...
+                sep(k), thresh(k), pick(flag(k), 'FLAG', '    '), tauTxt, incTxt, lossTxt, coastTxt);
         end
     end
     if isempty(episodes)

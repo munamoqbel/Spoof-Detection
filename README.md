@@ -217,7 +217,9 @@ what it is fed: with the prior and the truth, the share of the state left in
 the increment, zero when the hand-over cancels as it should, and the state's
 loss between an update and the next prior classed per epoch with how much of
 it the nav took, which finds a feedback branch in which the state loses more
-than the mechanisation receives; the feedback
+than the mechanisation receives; the coast's own error against the truth and
+its drift rate over every long flagged stretch, the IMU drift the tolerance
+has to cover, against the tolerance's growth; the feedback
 share fitted at lags 0 to 2 and over a wide lag
 range, where a share showing up far from its place is the run's clock off
 the records' (`opts.tShift`), and once more with north and east swapped,

@@ -200,8 +200,12 @@ feedback cancels and nothing is fitted; without it, the nav's change less
 the feedback the nav took (the host's logged velocity correction when the
 run carries it, else a share of the state or the delivery profile of the
 update's own increment, whichever the logged velocity follows, fitted
-against the truth); the coast is re-anchored slowly on every accepted
-epoch's rows; the rows
+against the truth); with the prior and the logged correction both there,
+`fbModel 'handover'` keeps the total-state rows' velocity and takes the
+nav's change plus the logged correction as the increment, and one line
+gives each coast's error against the truth, the two differing by the error
+growth the filter's model expects between updates; the coast is re-anchored
+slowly on every accepted epoch's rows; the rows
 are flagged while they sit further from the coast than a tolerance that grows
 with the time the coast has run on the INS alone, and released when they
 agree with it again or a hold runs out. With the truth it scores itself: each true episode with

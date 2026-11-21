@@ -23,7 +23,10 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 %                     epoch precedes that epoch's feedback, lag 0 when it already carries it), the update's
 %                     increment delivered over the following epochs with a fitted profile (a mechanisation that
 %                     slews the Kalman step in), or the host's logged correction (fbModel 'state', 'profile',
-%                     'logged'); the fits are against the truth
+%                     'logged'); the fits are against the truth. With the prior and the logged correction both there,
+%                     fbModel 'handover' keeps the total-state rows' velocity and takes the increment as the nav's
+%                     change plus the logged correction: it differs from 'total' by the error growth the filter's
+%                     model expects between two updates, and a line gives each increment's error against the truth
 %     lever arm       with opts.armSlope = [along across] (m per rad/s of yaw rate, leverArmCheck's slopes) and
 %                     run.navAtt, the lever-arm error the rows carry is taken out of their velocity, as a
 %                     corrected arm input would: in the corners that error is yaw rate times arm and reads as
@@ -84,7 +87,7 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 %   epochs, releaseGrow 10 epochs, hold 40 epochs, sign -1, fbGain [] (fitted; a number is used as given, with its sign), fbLag [] (0, 1 or 2
 %   epochs; default the lag the fit finds, 1 without truth), fbModel '' ('total', 'state', 'profile' or 'logged';
 %   default total when the records carry priorState, else logged when run.fbVel is there, else the one implying the
-%   larger feedback), fbLagWeights [] (for a per-epoch
+%   larger feedback; 'handover' needs both), fbLagWeights [] (for a per-epoch
 %   run.fbVel: the delivery given instead of fitted, weights by lag from 0, e.g. [0 1] for the whole correction in
 %   the next interval), armSlope [] (no arm correction), truthSlope []
 %   (no truth-point correction), tShift 0 s (added to the run's time stamps to put them on the records'
@@ -100,7 +103,8 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 %   increment's rms against the truth per epoch; NaN without the prior or the truth), incErr [K x 1] (the total-state
 %   increment's horizontal error against the truth), lossRatio [K x 1] (the state's loss as a share of the posterior,
 %   NaN where the posterior is under 0.03 m/s), lossClass (struct array: name, range, n, nUsed, slope, rms), lossNotTaken
-%   (true when a class with 10 usable epochs or more reads a slope above 0.2), fbScan ([3 x 4]: lag,
+%   (true when a class with 10 usable epochs or more reads a slope above 0.2), hoRms (the hand-over increment's rms
+%   against the truth per epoch, NaN without the prior, the logged correction and the truth), fbScan ([3 x 4]: lag,
 %   share, t-statistic, rms of the regressor), yawRate [K x 1], armFit [1 x 2] (along, across, m per rad/s, NaN without navAtt or
 %   truth), armFitSig, armHost [1 x 2] (nav minus rows per rad/s, the host's arm error), armHostSig, fbScanWide
 %   ([25 x 4], lags -12 to 12), alignLag (its sharpest lag), fbScanSwap ([3 x 4],
@@ -324,20 +328,22 @@ elseif firOk && (~fbFound || impliedFir > impliedState)
 else
     fbModel = 'state';
 end
-if ~any(strcmp(fbModel, {'total', 'state', 'profile', 'logged'})), error('dopplerEpisodeCheck:fbModel', 'opts.fbModel is ''total'', ''state'', ''profile'' or ''logged'''); end
-if strcmp(fbModel, 'logged') && ~hasFb, error('dopplerEpisodeCheck:fbModel', 'opts.fbModel ''logged'' needs run.fbVel'); end
-if strcmp(fbModel, 'total') && ~hasInc, error('dopplerEpisodeCheck:fbModel', 'opts.fbModel ''total'' needs priorState in the records'); end
-useTotal = strcmp(fbModel, 'total');  useFir = strcmp(fbModel, 'profile');  useLog = strcmp(fbModel, 'logged');
+if ~any(strcmp(fbModel, {'total', 'handover', 'state', 'profile', 'logged'})), error('dopplerEpisodeCheck:fbModel', 'opts.fbModel is ''total'', ''handover'', ''state'', ''profile'' or ''logged'''); end
+if any(strcmp(fbModel, {'logged', 'handover'})) && ~hasFb, error('dopplerEpisodeCheck:fbModel', 'opts.fbModel ''%s'' needs run.fbVel', fbModel); end
+if any(strcmp(fbModel, {'total', 'handover'})) && ~hasInc, error('dopplerEpisodeCheck:fbModel', 'opts.fbModel ''%s'' needs priorState in the records', fbModel); end
+useTotal = strcmp(fbModel, 'total');  useHand = strcmp(fbModel, 'handover');  useFir = strcmp(fbModel, 'profile');  useLog = strcmp(fbModel, 'logged');
 found = fbFound;
 if useFir, found = firOk; end
-if useLog, found = lgOk; end
+if useLog || useHand, found = lgOk; end
 if useTotal, found = true; end
 if isempty(o.fbGain)
-    if ~hasTruth && ~useLog && ~useTotal
+    if ~hasTruth && ~useLog && ~useTotal && ~useHand
         error('dopplerEpisodeCheck:fbGain', 'give opts.fbGain (the share of the state the nav takes per epoch, signed) when the run has no truth');
     end
     if useTotal
         fbGain = NaN;  fbLag = NaN;                                    % nothing fitted: the prior carries the feedback
+    elseif useHand
+        fbGain = lgTotal;  fbLag = 1;                                  % the logged correction, as delivered
     elseif useLog
         fbGain = lgTotal;  fbLag = 1;                                  % the logged correction, as delivered
     elseif useFir
@@ -348,14 +354,14 @@ if isempty(o.fbGain)
         fbGain = 0;  fbLag = 1;                                       % no feedback in the logged velocity under either model
     end
 else
-    fbGain = o.fbGain;  useTotal = false;  useFir = false;  useLog = false;  fbModel = 'state';
+    fbGain = o.fbGain;  useTotal = false;  useHand = false;  useFir = false;  useLog = false;  fbModel = 'state';
     if ~isempty(o.fbLag), fbLag = o.fbLag;
     elseif fbFound, fbLag = fbScan(iBest, 1);
     else, fbLag = 1; end
 end
 if useTotal
     dvIns = dvTotal;
-elseif useLog
+elseif useLog || useHand
     dvIns = dNav + lgApplied;
 elseif useFir
     dvIns = dNav + firApplied;
@@ -365,11 +371,21 @@ else
     dvIns = dNav + fbGain * xLag;
 end
 
+% the hand-over increment, the nav's change plus the logged correction as delivered, against the truth over the quiet
+% epochs: beside the total-state one it says which coast drifts less, the two differing by the error growth the
+% filter's model expects between updates
+hoRms = NaN;
+if hasInc && hasFb && lgOk && hasTruth
+    rH = (dNav(:, 1:2) + lgApplied(:, 1:2)) - dTrue(:, 1:2);
+    qH = all(isfinite(rH), 2) & inWin & sqrt(sum(dTrue(:, 1:2) .^ 2, 2)) < 0.5;
+    if nnz(qH) >= 10, rr = rH(qH, :);  hoRms = sqrt(mean(rr(:) .^ 2)); end
+end
+
 % the rows' velocity: the nav velocity the host predicted with, before that epoch's feedback, minus the fitted
 % innovation velocity (predicted minus measured: the rows sit at nav - dv), then the lever-arm error taken out,
 % which puts the rows at the nav's point
 vNavPre = vNavM;
-if useTotal
+if useTotal || useHand
     vNavPre = vHat;                                                      % the velocity the host measured the rows against
 elseif useLog && ~fbPerSample && ~isempty(o.fbLagWeights)
     vNavPre = vNavM + o.fbLagWeights(1) * fbLogged;                      % the part of this epoch's correction already in the sample
@@ -487,7 +503,7 @@ end
 armFit = NaN(1, 2);  armFitSig = NaN(1, 2);  armHost = NaN(1, 2);  armHostSig = NaN(1, 2);  nTurn = 0;
 if hasAtt
     navMinusRows = vNavPre(:, 1:2) - vRowsRaw(:, 1:2);
-    if useTotal, navMinusRows = vNavM(:, 1:2) - vRowsRaw(:, 1:2); end   % the nav itself, not nav less the prior: the state absorbs part of the arm in a corner
+    if useTotal || useHand, navMinusRows = vNavM(:, 1:2) - vRowsRaw(:, 1:2); end   % the nav itself, not nav less the prior: the state absorbs part of the arm in a corner
     turnH = abs(yawRate) > 2 * pi / 180 & all(isfinite(navMinusRows), 2) & inWin;
     if nnz(turnH) >= 10
         [armHost, armHostSig] = slopeOnYaw(navMinusRows, yawRate, uAlong, uAcross, turnH);
@@ -536,7 +552,7 @@ end
 res = struct('t', t, 'vRows', vRows, 'dvIns', dvIns, 'onset', onset, 'thresh', thresh, 'flag', flag, 'sep', sep, ...
     'rowsErr', rowsErr, 'episodes', episodes, 'falseRuns', falseRuns, 'nFlag', nnz(flag), 'nFalse', nFalse, 'nTail', nTail, ...
     'fbGain', fbGain, 'fbLag', fbLag, 'fbModel', fbModel, 'totShare', totShare, 'totShareT', totShareT, 'totRms', totRms, ...
-    'incErr', incErr, 'lossRatio', lossRatio, 'lossClass', lossClass, 'lossNotTaken', lossNotTaken, ...
+    'incErr', incErr, 'lossRatio', lossRatio, 'lossClass', lossClass, 'lossNotTaken', lossNotTaken, 'hoRms', hoRms, ...
     'fbScan', fbScan, 'yawRate', yawRate, 'armFit', armFit, 'armFitSig', armFitSig, ...
     'armHost', armHost, 'armHostSig', armHostSig, ...
     'fbScanWide', fbScanWide, 'alignLag', alignLag, 'fbScanSwap', fbScanSwap, 'frameOff', frameOff, 'firC', firC, 'firSe', firSe, ...
@@ -622,10 +638,18 @@ if hasFb && hasTruth
         fprintf('      (a total away from 1: the logged correction is not what reaches the velocity, or its sign or frame differ)\n');
     end
 end
+if isfinite(hoRms) && isfinite(totRms)
+    fprintf('   the two coasts against the truth, rms per epoch over the quiet epochs: total-state %.4f m/s, hand-over %.4f m/s (the nav''s change plus the\n', totRms, hoRms);
+    fprintf('      logged correction); they differ by the error growth the filter''s model expects between updates, and the smaller is the better coast\n');
+end
 if isempty(o.fbGain) && ~found
     fprintf('   USED: no feedback found under either model; the INS increment is taken as logged\n');
 elseif useTotal
     fprintf('   USED: the nav velocity less the prior state, the previous update''s step added back; nothing fitted, no feedback model\n');
+elseif useHand
+    fprintf('   USED: the nav velocity less the prior state for the rows; the nav''s change plus the logged correction for the increment%s\n', ...
+        pick(~fbPerSample && ~isempty(o.fbLagWeights), sprintf(', delivered as given: weights by lag %s', sprintf('%.2f ', o.fbLagWeights)), ...
+        pick(fbPerSample, ', per sample', sprintf(', per epoch, delivered with total %+.2f over %d epochs', lgTotal, FIR_LAGS))));
 elseif useLog && ~fbPerSample && ~isempty(o.fbLagWeights)
     fprintf('   USED: the logged velocity correction, per epoch, delivered as given: weights by lag %s\n', sprintf('%.2f ', o.fbLagWeights));
 elseif useLog

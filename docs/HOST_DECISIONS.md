@@ -603,11 +603,19 @@ what was lost and not taken. The tool now classes every epoch by the
 state's loss between an update and the next prior, as a share of the
 posterior, and reads per class how much of the loss the nav took; a class
 that lost more than the nav took is named LOSS NOT TAKEN, and the per-epoch
-table carries the loss and the increment's error. If run 10 confirms it,
-the increment goes back to the mechanisation's change plus the correction
-it applied, which is exact at every epoch now that the delivery is known
-to be full, while the rows' velocity stays total-state; the host then
-passes the applied velocity correction in place of the update's step. Open:
-that read on run 10; the floor, left at 0.2 for the first run with the
-screen; the reversing stretch at 304 to 344 s, a receiver behaviour to look
-at in its raw output.
+table carries the loss and the increment's error. The per-epoch table at
+495 to 522 s already shows the shape of the cost: the rows sat in the grey
+band from 468 s, the coast ran on the IMU alone for 30 s and drifted
+0.27 m/s, and from 498 s, the rows clean again, it went on drifting at
+about 0.01 m/s per second, twice the tolerance's growth, so the flags
+lasted to 545 s. The other coast form is in the tool for the comparison on
+the first run that logs the hand-over: the rows' velocity total-state in
+both, the increment either from the prior and the step or from the
+mechanisation's change plus the correction it applied, the two differing
+by the error growth the filter's model expects between updates, with one
+line giving each coast's error against the reference; the smaller decides
+which the host function takes, and if it is the hand-over the host passes
+the applied velocity correction in place of the update's step. Open: the
+loss read on run 10; that comparison; the floor, left at 0.2 for the first
+run with the screen; the reversing stretch at 304 to 344 s, a receiver
+behaviour to look at in its raw output.

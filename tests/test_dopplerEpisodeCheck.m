@@ -16,8 +16,9 @@ function test_dopplerEpisodeCheck()
 % total-state model is the default, nothing is fitted, both episodes are caught with no false flag, the share of the
 % state left in the increment reads zero, the flags are the same without the truth, a mechanisation that delivers
 % only three quarters of the hand-over is read as such, a feedback branch in which the state keeps a quarter while the
-% nav takes a quarter is read from the state's loss between an update and the next prior, and the fallback models
-% still run when forced.
+% nav takes a quarter is read from the state's loss between an update and the next prior, the hand-over form of the
+% coast gives the same flags where the loss is the hand-over and the exact coast where it is not, and the fallback
+% models still run when forced.
 % Run from the repo root (MATLAB, or Octave with tools/octave_shim).
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'tools'));
@@ -225,6 +226,15 @@ txtQ = evalc('resQ = dopplerEpisodeCheck(logQ, tKfQ, runQ, CORR);');
 threeQ = resQ.lossClass(strcmp({resQ.lossClass.name}, 'three quarters'));
 chk.limiter      = nnz(auxQ.limited) >= 10 && threeQ.n >= 10 && threeQ.nUsed >= 10 && abs(threeQ.slope - 2 / 3) < 0.15 && ...
     resQ.lossNotTaken && ~isempty(strfind(txtQ, 'LOSS NOT TAKEN')) && ~isempty(strfind(txtQ, 'three quarters on'));
+% the hand-over form of the coast: the same rows' velocity, the increment from the nav's change plus the logged
+% correction; without a model term between updates the two forms are one and the same, so the flags are identical,
+% and on the limited run the hand-over form has the exact coast where the total-state one has the loss
+HAND = setfield(setfield(CORR, 'fbModel', 'handover'), 'fbLagWeights', [0 1]); %#ok<SFLD>
+txtH = evalc('resH = dopplerEpisodeCheck(logT, tKfT, runT, HAND);');
+resHQ = dopplerEpisodeCheck(logQ, tKfQ, runQ, setfield(HAND, 'quiet', true)); %#ok<SFLD>
+chk.handover     = strcmp(resH.fbModel, 'handover') && isequal(resH.flag, resT.flag) && abs(resH.hoRms - resT.totRms) < 1e-3 && ...
+    ~isempty(strfind(txtH, 'USED: the nav velocity less the prior state for the rows')) && ~isempty(strfind(txtH, 'the two coasts against the truth')) && ...
+    resHQ.hoRms < resQ.totRms && resHQ.nFalse < resQ.nFalse && numel(resHQ.episodes) == 2 && all([resHQ.episodes.detected]);
 % the fallback models still run on these records when forced; their rows' velocity is off by the prior state, which
 % absorbs half of the small episode within two epochs, so only the large one is read and caught
 resTL = dopplerEpisodeCheck(logT, tKfT, runT, setfield(setfield(CORR, 'fbModel', 'logged'), 'quiet', true)); %#ok<SFLD>
@@ -237,6 +247,8 @@ fprintf('error-state form: flags %d, false %d, tails %d, share of the state left
     resT.nFlag, resT.nFalse, resT.nTail, resT.totShare, resT.totShareT, resT.totRms, resP.totShare, resP.totShareT);
 fprintf('limited feedback: %d limited epochs, loss of three quarters on %d, slope %+.2f on %d (the nav took %.2f); flags %d, false %d\n', ...
     nnz(auxQ.limited), threeQ.n, threeQ.slope, threeQ.nUsed, 1 - threeQ.slope, resQ.nFlag, resQ.nFalse);
+fprintf('hand-over form: flags differing from total-state %d; on the limited run the coasts'' rms %.4f against %.4f m/s, false %d against %d\n', ...
+    nnz(resH.flag ~= resT.flag), resHQ.hoRms, resQ.totRms, resHQ.nFalse, resQ.nFalse);
 if numel(ep) == 2
     fprintf('episodes: %.1f s caught after %.1f s (%.0f%%), %.1f s caught after %.1f s (%.0f%%); false flags %d, release tails %d; feedback share %.3f at lag %d\n', ...
         ep(1).tEnd - ep(1).tStart, ep(1).delay, 100 * ep(1).coverage, ep(2).tEnd - ep(2).tStart, ep(2).delay, 100 * ep(2).coverage, ...

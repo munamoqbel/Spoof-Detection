@@ -73,8 +73,11 @@
 %   - screenOut       the state for the next call
 %   - dropRateRows    true: hold the range-rate rows out of this update
 %   - info            valid (enough rate rows and a coast to judge
-%                     against), numRate, sep, tolerance, vRows [1 x 3],
-%                     dvIns [1 x 3], inEpisode, hold
+%                     against), numRate, rateRows ([MAX_MEAS x 1] logical,
+%                     the rows read as range-rate rows, for the host to
+%                     put at its maximum R when dropRateRows is true), sep,
+%                     tolerance, vRows [1 x 3], dvIns [1 x 3], inEpisode,
+%                     hold
 %
 % ASSUMPTIONS AND LIMITATIONS:
 % Row types are read from H with the host's layout: velocity 4:6 in NED
@@ -107,7 +110,7 @@ rows         = min(double(numRows), double(numMeasMax));
 screenOut    = screenIn;
 dropRateRows = false;
 info         = struct('valid', false, 'numRate', 0, 'sep', 0.0, 'tolerance', 0.0, 'vRows', zeros(1, 3), ...
-    'dvIns', zeros(1, 3), 'inEpisode', false, 'hold', 0);
+    'dvIns', zeros(1, 3), 'inEpisode', false, 'hold', 0, 'rateRows', false(numMeasMax, 1));
 velNow       = [velNavPre(1), velNavPre(2), velNavPre(3)];
 corrNow      = [velCorrApplied(1), velCorrApplied(2), velCorrApplied(3)];
 
@@ -254,6 +257,7 @@ else
     dropRateRows = screenOut.inEpisode;                     % no rate rows to judge: an episode in progress stands
 end
 info.numRate   = numRate;
+info.rateRows  = inRate;
 info.vRows     = vRows;
 info.dvIns     = dvIns;
 info.inEpisode = screenOut.inEpisode;

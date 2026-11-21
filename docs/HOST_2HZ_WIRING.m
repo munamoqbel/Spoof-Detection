@@ -144,7 +144,9 @@
 %   the mechanisation's own increment and the correction the host applied:
 %     [dopScreen, dropRateRows, dopInfo] = SPF_dopplerScreen(dopScreen, velNavPre, velCorrApplied, ...
 %         measH, measY, numGnssRows, DRIFT_STATES, STRUCT_SPF.dopplerScreenParam);
-%     % dropRateRows true: the range-rate rows' entries of measVector at the host's maximum R this epoch
+%     if dropRateRows
+%         measVector(dopInfo.rateRows) = R_DOPPLER_MAX;   % the range-rate rows out of this update, layout unchanged
+%     end
 %   dopScreen persists in the 2 Hz function (STRUCT_SPF.dopplerScreenState at
 %   init, like trialKF); velNavPre is the NED mechanisation velocity the rows
 %   were predicted with, before this epoch's feedback; velCorrApplied the

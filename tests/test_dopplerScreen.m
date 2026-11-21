@@ -75,6 +75,7 @@ for k = 1:K
     [screen, drop, info] = SPF_dopplerScreen(screen, velNavPre, velCorr, log{k}.obsMatrix, log{k}.innovation, ...
         log{k}.numMeas, [17 19 22], prm);
     flagHost(k) = drop;  validHost(k) = info.valid;  holdHost(k) = info.hold;
+    if k == 100, rateRows100 = info.rateRows; end
 end
 
 %% the offline tool on the same records, the correction logged and delivered in the next interval
@@ -97,6 +98,7 @@ chk.holdLimit = ~isempty(kHold) && tKf(kHold) > 378 && tKf(kHold) < 382 && mean(
 chk.return   = nnz(flagHost(tKf >= 396 & tKf < 430)) <= 8;
 chk.structs  = islogical(screen.anchored) && isfield(screen, 'speedSince') && prm.FLOOR == 0.20 && prm.ROWS_SIGN == -1 && ...
     prm.RELEASE_GROW == 10;
+chk.rateRows = nnz(rateRows100) == 10 && all(find(rateRows100) == (11:20)');
 names = fieldnames(chk);
 for i = 1:numel(names)
     if ~chk.(names{i}), fprintf('   FAILED sub-check: %s\n', names{i}); ok = false; end

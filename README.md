@@ -204,11 +204,15 @@ against the truth); with the prior and the logged correction both there,
 `fbModel 'handover'` keeps the total-state rows' velocity and takes the
 nav's change plus the logged correction as the increment, and one line
 gives each coast's error against the truth, the two differing by the error
-growth the filter's model expects between updates; the coast is re-anchored
-slowly on every accepted epoch's rows; the rows
+growth the filter's model expects between updates; `opts.hostLog` scores a
+host screen's own per-epoch log in place of the emulation; the coast is
+re-anchored slowly on every accepted epoch's rows; the rows
 are flagged while they sit further from the coast than a tolerance that grows
 with the time the coast has run on the INS alone, and released when they
-agree with it again or a hold runs out. With the truth it scores itself: each true episode with
+agree with it again; at the hold limit the coast is re-anchored on the
+filter's own velocity, nav less prior, Doppler-free through the hold, and
+after as many epochs without rows the coast is lost and the next rows anchor
+it afresh. With the truth it scores itself: each true episode with
 its detection delay and coverage, the release tails, the false flags grouped
 into runs, and a per-epoch table around the largest episode. The emulation
 runs on the records of the clean hour before any screen goes into the host.
@@ -219,8 +223,9 @@ loss between an update and the next prior classed per epoch with how much of
 it the nav took, which finds a feedback branch in which the state loses more
 than the mechanisation receives; the coast's own error against the truth and
 its drift rate over every long flagged stretch, the IMU drift the tolerance
-has to cover, against the tolerance's growth; the feedback
-share fitted at lags 0 to 2 and over a wide lag
+has to cover, against the tolerance's growth, and each false run tagged with
+the epochs without rows before it and the coast's error at its start; the
+feedback share fitted at lags 0 to 2 and over a wide lag
 range, where a share showing up far from its place is the run's clock off
 the records' (`opts.tShift`), and once more with north and east swapped,
 where a share appearing only then is a state vector recorded in ENU
@@ -249,9 +254,12 @@ hand-over, one call per epoch with a state struct carried by the host
 (`STRUCT_SPF.dopplerScreenState`, `dopplerScreenParam`; the host writes the
 update's velocity step into it after each update), returning the flag that
 puts the range-rate rows' R at the host's maximum for the epoch.
-`tests/test_dopplerScreen.m` runs it epoch by epoch on the error-state
-synthetic and holds it against the offline tool on the same records, which
-needs no correction log for it: the two flag the same epochs.
+`tests/test_dopplerScreen.m` runs it in the loop of the error-state
+synthetic, where a flagged epoch leaves the rows out of the filter as the
+host's R at its maximum does and the ranges' aiding keeps working, and
+holds it against the offline tool on the records it produced, which needs no
+correction log for it: the two flag the same epochs, a 35 s episode is held
+through its hold limit, and a 25 s gap loses the coast.
 `tools/feedbackCheck.m` asks whether the KF update reaches the mechanisation,
 when, and in full. Per nav sample the change of the logged position minus the
 integral of the logged velocity is the part of the motion the velocity does

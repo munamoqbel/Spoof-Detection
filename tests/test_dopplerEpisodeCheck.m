@@ -227,9 +227,9 @@ chk.partial      = resP.totShare > 0.015 && resP.totShare < 0.045 && resP.totSha
 % a feedback branch that fires on a large disagreement: the nav takes a quarter of the posterior and the state keeps a
 % quarter, so half of it leaves nav minus prior at once; read as a loss of three quarters of which the nav took a third,
 % the increment errors above 0.10 m/s sit on those epochs, and the verdict names it
-% (the first episode is made 12 s long here: the state keeps a quarter, so the disagreement stays and the branch fires on
+% (the first episode is made 16 s long here: the state keeps a quarter, so the disagreement stays and the branch fires on
 % most of its epochs; the corners fire it too, but a sharp corner is outside the read's 3 m/s2 gate)
-[runQ, logQ, tKfQ, auxQ] = dopplerSynthRun(struct('seed', 21, 'limiter', 0.15, 'episodes', [200 212 0.35 0 0; 300 323 0 -0.4 3]));
+[runQ, logQ, tKfQ, auxQ] = dopplerSynthRun(struct('seed', 21, 'limiter', 0.15, 'episodes', [200 216 0.35 0 0; 300 323 0 -0.4 3]));
 txtQ = evalc('resQ = dopplerEpisodeCheck(logQ, tKfQ, runQ, CORR);');
 threeQ = resQ.lossClass(strcmp({resQ.lossClass.name}, 'three quarters'));
 chk.limiter      = nnz(auxQ.limited) >= 10 && threeQ.n >= 10 && threeQ.nUsed >= 10 && abs(threeQ.slope - 2 / 3) < 0.15 && ...

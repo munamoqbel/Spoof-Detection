@@ -46,10 +46,19 @@
 %                 rows that were wrong for long must agree for longer; the
 %                 coast is kept at a release, so rows that only came half
 %                 way back are flagged again at once; at HOLD epochs the
-%                 episode is closed with the coast kept and its tolerance
-%                 still growing, so rows still beyond it start a new
-%                 episode and rows within it re-anchor; a long fault is held
-%                 out until the grown tolerance accepts it
+%                 episode is closed and the coast is re-anchored on vHat,
+%                 the filter's own velocity, which has run without the
+%                 range-rate rows for the whole hold and carries the ranges'
+%                 aiding, a Doppler-free second opinion the pure-IMU coast
+%                 is not; its tolerance is kept as grown, so rows within it
+%                 are accepted again and rows still beyond it start a new
+%                 episode; a long fault is held out for as long as the
+%                 filter's velocity disagrees with it
+%   blind         the IMU alone carries the coast for HOLD epochs, flagged
+%                 or without rows alike: after HOLD consecutive calls
+%                 without rows to judge, the coast is lost and the next rows
+%                 anchor it afresh, so a tunnel does not leave a coast
+%                 metres per second off to flag the honest rows at its exit
 %
 % The flag is consumed by the measurement noise alone: the range-rate rows'
 % R goes to the host's maximum while it is true, the row layout stays, the
@@ -97,7 +106,8 @@
 % position partial. Fewer than MIN_RATE_ROWS such rows, or an invalid
 % inverse of the normal equations, leave the epoch undecided: the coast
 % keeps propagating, no row is dropped, an episode in progress stays as it
-% is. A call without a previous velocity loses the coast, which the next
+% is, for up to HOLD such calls in a row; then the coast is lost and the
+% episode with it. A call without a previous velocity loses the coast, which the next
 % rows anchor again. A step the state took outside the update (a gate
 % commit) is not in incPrev and reads as an IMU increment for that epoch.
 % The horizontal plane only is judged. A slow drift of the rows under
@@ -217,6 +227,7 @@ end
 
 % the decision
 if (haveRows)
+    screenOut.blind = 0;
     if (~screenOut.anchored)
         screenOut.vCoast     = vRows;                           % the first rows anchor the coast
         screenOut.anchored   = true;
@@ -257,9 +268,10 @@ if (haveRows)
                 screenOut.tAnchor    = 0.0;
                 screenOut.speedSince = 0.0;
             elseif (screenOut.hold >= prm.HOLD)
-                screenOut.inEpisode  = false;                        % the hold is up: the coast and its tolerance go on growing,
-                screenOut.rel        = 0;                            % rows still beyond it start a new episode, rows within it re-anchor
-                screenOut.hold       = 0;
+                screenOut.inEpisode  = false;                        % the hold is up: the coast re-anchored on the filter's own velocity,
+                screenOut.rel        = 0;                            % Doppler-free through the hold, its tolerance kept as grown; rows
+                screenOut.hold       = 0;                            % within it are accepted again, rows still beyond it start a new episode
+                screenOut.vCoast     = vHat;
             end
         end
         info.valid     = true;
@@ -267,7 +279,17 @@ if (haveRows)
         info.tolerance = tolerance;
     end
 else
-    dropRateRows = screenOut.inEpisode;                     % no rate rows to judge: an episode in progress stands
+    dropRateRows = screenOut.inEpisode && (numRate > 0);    % too few rate rows to judge: an episode in progress stands; none: nothing to drop
+    if (screenOut.anchored)
+        screenOut.blind = screenOut.blind + 1;
+        if (screenOut.blind > prm.HOLD)
+            screenOut.anchored  = false;                    % blind for longer than the IMU alone can carry it: the coast is lost,
+            screenOut.inEpisode = false;                    % the next rows anchor it afresh
+            screenOut.above     = 0;
+            screenOut.blind     = 0;
+            dropRateRows        = false;
+        end
+    end
 end
 info.numRate   = numRate;
 info.rateRows  = inRate;

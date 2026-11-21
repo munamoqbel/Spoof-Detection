@@ -41,9 +41,14 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 %                     for every 'releaseGrow' epochs the rows have been out, so rows that were wrong for long
 %                     must agree for longer before they are trusted; the coast is kept at a release, so rows
 %                     that only came half way back are flagged again at once; at 'hold' epochs the episode is
-%                     closed with the coast kept and its tolerance still growing, so rows still beyond it start a
-%                     new episode and rows within it re-anchor; the end of an episode is a return to the coast,
-%                     so nothing fires there
+%                     closed and the coast re-anchored on v_hat, the filter's own velocity (nav less prior), which
+%                     in the host has run without the range-rate rows for the whole hold and carries the ranges'
+%                     aiding, with its tolerance kept as grown, so rows within it are accepted again and rows
+%                     still beyond it start a new episode (on records from a host that used the rows, v_hat
+%                     follows them, so the emulation shows the rule's best case); without the prior the coast is
+%                     kept; the end of an episode is a return to the coast, so nothing fires there
+%     blind           the IMU alone carries the coast for 'hold' epochs, flagged or without rows alike: after
+%                     'hold' consecutive epochs without rows the coast is lost and the next rows anchor it afresh
 %   The reads on the inputs come first, since the screen is only as good as what it is fed:
 %     increment       with the prior and the truth: the total-state increment against the truth over the quiet
 %                     epochs, its rms and the share of the state left in it, which is 0 when the mechanisation takes
@@ -96,7 +101,10 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 %   clock), frame 'NED' (the records' position and velocity components; 'ENU' maps them to NED), episodeLevel
 %   0.25 m/s, episodeMin 4 epochs, cleanLevel 0.15 m/s, tWin [] (the
 %   epochs to run on; default all), tTable [] (the window of the per-epoch table; default the largest episode
-%   with 10 s either side), quiet false.
+%   with 10 s either side), quiet false, hostLog [] ([K x 5], the host screen's own log per epoch: flag, separation,
+%   tolerance, hold, rate rows; given, the host's flags are scored in place of the emulation's and its separation and
+%   tolerance fill the table, so a run with the screen in the host is read with the same episode, tail and false-flag
+%   definitions).
 %   res: t, vRows [K x 3], dvIns [K x 3], sep [K x 1] (the rows' separation from the coast, onset the same),
 %   thresh [K x 1], flag [K x 1] logical,
 %   rowsErr [K x 3] (NaN without truth), episodes (struct array: tStart, tEnd, detected, delay, coverage),
@@ -107,7 +115,8 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 %   NaN where the posterior is under 0.03 m/s), lossClass (struct array: name, range, n, nUsed, slope, rms), lossNotTaken
 %   (true when a class with 10 usable epochs or more reads a slope above 0.2), vCoast [K x 3] (the coast the rows were
 %   judged against, NaN without one), coastErr [K x 1] (its horizontal error against the truth), coastDrift ([n x 3]:
-%   start, end, m/s per s over each flagged stretch of 10 epochs or more), hoRms (the hand-over increment's rms
+%   start, end, m/s per s over each flagged stretch of 10 epochs or more), coastLost ([n x 1], the times the coast was
+%   lost after 'hold' epochs without rows), hoRms (the hand-over increment's rms
 %   against the truth per epoch, NaN without the prior, the logged correction and the truth), fbScan ([3 x 4]: lag,
 %   share, t-statistic, rms of the regressor), yawRate [K x 1], armFit [1 x 2] (along, across, m per rad/s, NaN without navAtt or
 %   truth), armFitSig, armHost [1 x 2] (nav minus rows per rad/s, the host's arm error), armHostSig, fbScanWide
@@ -124,7 +133,7 @@ if iscell(spfMeasLog), spfMeasLog = [spfMeasLog{:}]; end
 if nargin < 4 || isempty(opts), opts = struct(); end
 o = struct('floor', 0.20, 'driftRate', 0.005, 'headingSigma', 5e-3, 'alpha', 0.05, 'confirm', 2, 'release', 4, 'releaseGrow', 10, 'hold', 40, 'sign', -1, 'fbGain', [], ...
     'fbLag', [], 'fbModel', '', 'fbLagWeights', [], 'armSlope', [], 'truthSlope', [], 'tShift', 0, 'episodeLevel', 0.25, 'episodeMin', 4, 'cleanLevel', 0.15, ...
-    'tWin', [], 'tTable', [], 'quiet', false, 'frame', 'NED');
+    'tWin', [], 'tTable', [], 'quiet', false, 'frame', 'NED', 'hostLog', []);
 f = fieldnames(opts);
 for i = 1:numel(f), o.(f{i}) = opts.(f{i}); end
 if ~any(strcmp(o.frame, {'NED', 'ENU'})), error('dopplerEpisodeCheck:frame', 'opts.frame is ''NED'' or ''ENU'''); end
@@ -421,8 +430,8 @@ end
 % the emulated screen: an INS coast anchored on the accepted rows and propagated with the INS increment; the
 % rows flagged while they sit further from it than a tolerance that grows with the time the coast has run on
 % the INS alone, released when they agree with it again
-onset = NaN(K, 1);  thresh = NaN(K, 1);  flag = false(K, 1);  sep = NaN(K, 1);  vCoastK = NaN(K, 3);
-inEp = false;  anchored = false;  vCoast = zeros(1, 3);  hold = 0;  rel = 0;  above = 0;
+onset = NaN(K, 1);  thresh = NaN(K, 1);  flag = false(K, 1);  sep = NaN(K, 1);  vCoastK = NaN(K, 3);  coastLost = zeros(0, 1);
+inEp = false;  anchored = false;  vCoast = zeros(1, 3);  hold = 0;  rel = 0;  above = 0;  blind = 0;
 tAnchor = 0;  speedSince = 0;  dtEp = median(diff(t));
 for k = 1:K
     if ~inWin(k), continue; end
@@ -435,7 +444,18 @@ for k = 1:K
         anchored = false;  inEp = false;  above = 0;                          % no INS increment: the coast is lost
     end
     if anchored, vCoastK(k, :) = vCoast; end                                  % the coast as propagated, rows or not
-    if ~haveRows, continue; end
+    if ~haveRows
+        if inEp && nRate(k) > 0, flag(k) = true; end                          % too few rate rows to judge: an episode in progress stands
+        if anchored
+            blind = blind + 1;
+            if blind > o.hold                                                 % blind for longer than the IMU alone can carry it
+                anchored = false;  inEp = false;  above = 0;  blind = 0;
+                coastLost(end + 1, 1) = t(k); %#ok<AGROW>
+            end
+        end
+        continue;
+    end
+    blind = 0;
     if ~anchored
         vCoast = vRows(k, :);  anchored = true;  tAnchor = 0;  speedSince = 0;   % the first rows anchor the coast
         vCoastK(k, :) = vCoast;
@@ -463,9 +483,22 @@ for k = 1:K
             vCoast = vCoast + o.alpha * (vRows(k, :) - vCoast);
             tAnchor = 0;  speedSince = 0;
         elseif hold >= o.hold
-            inEp = false;  rel = 0;  hold = 0;                                % the hold is up: the coast and its tolerance go on growing
+            inEp = false;  rel = 0;  hold = 0;                                % the hold is up: the coast re-anchored on the filter's own
+            if (useTotal || useHand) && all(isfinite(vHat(k, :)))            % velocity, its tolerance kept as grown (the total-state
+                vCoast = vHat(k, :);                                          % forms; the others keep the coast)
+            end
         end
     end
+end
+% the host's own log scored in place of the emulation: its flags, separation and tolerance per epoch
+hostScored = ~isempty(o.hostLog);
+if hostScored
+    if size(o.hostLog, 1) ~= K || size(o.hostLog, 2) < 3
+        error('dopplerEpisodeCheck:hostLog', 'opts.hostLog must have one row per epoch (%d) and at least 3 columns, has %d x %d', K, size(o.hostLog, 1), size(o.hostLog, 2));
+    end
+    flag = logical(o.hostLog(:, 1)) & inWin;
+    sep = o.hostLog(:, 2);  thresh = o.hostLog(:, 3);
+    sep(~inWin | nRate == 0) = NaN;  thresh(~inWin | nRate == 0) = NaN;
 end
 
 % the coast's own error against the truth, and its growth over every flagged stretch of 10 epochs or more: the IMU
@@ -577,7 +610,7 @@ res = struct('t', t, 'vRows', vRows, 'dvIns', dvIns, 'onset', onset, 'thresh', t
     'rowsErr', rowsErr, 'episodes', episodes, 'falseRuns', falseRuns, 'nFlag', nnz(flag), 'nFalse', nFalse, 'nTail', nTail, ...
     'fbGain', fbGain, 'fbLag', fbLag, 'fbModel', fbModel, 'totShare', totShare, 'totShareT', totShareT, 'totRms', totRms, ...
     'incErr', incErr, 'lossRatio', lossRatio, 'lossClass', lossClass, 'lossNotTaken', lossNotTaken, 'hoRms', hoRms, ...
-    'vCoast', vCoastK, 'coastErr', coastErr, 'coastDrift', coastDrift, ...
+    'vCoast', vCoastK, 'coastErr', coastErr, 'coastDrift', coastDrift, 'coastLost', coastLost, ...
     'fbScan', fbScan, 'yawRate', yawRate, 'armFit', armFit, 'armFitSig', armFitSig, ...
     'armHost', armHost, 'armHostSig', armHostSig, ...
     'fbScanWide', fbScanWide, 'alignLag', alignLag, 'fbScanSwap', fbScanSwap, 'frameOff', frameOff, 'firC', firC, 'firSe', firSe, ...
@@ -738,6 +771,13 @@ if hasTruth && ~isempty(coastDrift)
     if median(dr) > o.driftRate
         fprintf('      DRIFT: the coast drifts faster than the tolerance grows on most long stretches: the IMU''s coast is worse than DRIFT_RATE says\n');
     end
+end
+if ~isempty(coastLost)
+    fprintf('   the coast lost after %d epochs without rows: %d times, at%s s; the next rows anchored it afresh\n', o.hold, numel(coastLost), ...
+        sprintf(' %.0f', coastLost(1:min(end, 8))));
+end
+if hostScored
+    fprintf('   SCORING THE HOST''S OWN FLAGS (opts.hostLog): the separation and tolerance below are the host screen''s, the coast columns the emulation''s\n');
 end
 fprintf('   flagged: %d epochs (%.1f s), %.2f%% of the epochs with rows\n', nnz(flag), nnz(flag) * median(diff(t)), 100 * nnz(flag) / max(nnz(nRate > 0 & inWin), 1));
 if hasTruth

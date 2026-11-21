@@ -160,9 +160,13 @@
 %   the update, the velocity step the update added to the state (VEL_STATES
 %   the host's 4:6), so the screen's increment is the IMU's alone with no
 %   hand-over in it and no assumption about how the mechanisation applies
-%   one. The row layout stays, the ranges and the pressure row update as
-%   before, and the gate reads every row at the nominal R; the flag may go
-%   to it as telemetry, never as a blank row.
+%   one. At the hold limit the screen re-anchors its coast on velNav less
+%   priorVel, the filter's own velocity, which has run without the range-rate
+%   rows for the whole hold, so the ranges' aiding must keep working while the
+%   flag is on: only the range-rate rows go to the maximum R. The row layout
+%   stays, the ranges and the pressure row update as before, and the gate
+%   reads every row at the nominal R; the flag may go to it as telemetry,
+%   never as a blank row.
 %
 % ----------------------------------------------------------------------
 %  2 Hz function (complete skeleton; ONE setKF per epoch, never two)

@@ -559,10 +559,18 @@ the rows are held out and the coast runs on the IMU; four consecutive
 epochs back within the tolerance end it, plus one more for every ten
 epochs the rows have been out, so rows that were wrong for long must agree
 for longer; the coast is kept at a release, so rows that came only half
-way back are flagged again at once; at forty epochs the episode is closed
-with the coast and its tolerance still growing, so a long fault is held
-out until the grown tolerance accepts it and its return costs little. The
-end of an episode is a return to the coast, and nothing fires there. The
+way back are flagged again at once. The IMU alone carries the coast for
+forty epochs, flagged or without rows alike. At forty epochs of a hold the
+episode is closed and the coast is re-anchored on the filter's own
+velocity, nav less prior, which has run without the range-rate rows for
+the whole hold and carries the ranges' aiding, a Doppler-free second
+opinion the pure-IMU coast is not; the tolerance is kept as grown, so rows
+within it are accepted again and rows still beyond it start a new episode,
+and a long fault is held out for as long as the filter's velocity
+disagrees with it. After forty epochs without rows the coast is lost and
+the next rows anchor it afresh, so a tunnel does not leave a coast metres
+per second off to flag the honest rows at its exit. The end of an episode
+is a return to the coast, and nothing fires there. The
 flag is one input to the measurement setup: the range-rate rows' R goes to
 the host's maximum while it is on, the layout stays, the ranges and the
 pressure row update as before, and the gate reads every row at the nominal
@@ -624,8 +632,22 @@ return sit 0.36 from the coast while the tolerance has grown to 0.21. Two
 constants are undersized for this IMU in these stretches, not the design:
 ALPHA, which at 0.15 brings the standing lag to about 0.03, and DRIFT_RATE,
 which at 0.010 covers the 90th percentile with margin; the floor can stay.
-The settings are to be confirmed on the records, every episode still caught,
-before the host constants move. The same read, on the epochs without rows,
+The variants on the records said otherwise: ALPHA 0.15 took the false
+flags from 531 to 422 and lost one small episode, DRIFT_RATE 0.010 changed
+nothing, since a tolerance growing at the coast's own drift rate never
+catches a coast that starts 0.24 off, and a floor of 0.25 dropped the
+portal's coverage to 40 percent, which settles the floor at 0.2. The
+attribution of the false runs then gave the real shape: the coast error at
+the runs' start had a median of 2.98 m/s, the twelve early runs all under
+0.4, so the other 23 were the hour after the tunnel, where a coast carried
+blind for 475 s was metres per second off and flagged the honest rows at
+the exit for the rest of the run; the first form had hidden this, its rows'
+velocity carrying the state and so looking like the nav itself after the
+tunnel. Hence the two rules above, the blind limit and the re-anchor on
+the filter's own velocity at the hold limit, both from quantities the
+screen already has; on run 10's records, where the filter did use the
+rows, the emulation of the second shows its best case, and run 11 shows
+the real one. The same read, on the epochs without rows,
 gives the real error growth as 1.47 times what the filter's model expects,
 so the total-state coast, which removes the modelled part, is the better
 of the two forms by a factor of three. The other coast form is

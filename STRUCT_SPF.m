@@ -619,6 +619,7 @@ classdef STRUCT_SPF
                 'vHatPrev',   zeros(1, 3), ...    % [1 x 3] NED m/s, nav velocity less prior state at the previous call
                 'incPrev',    zeros(1, 3), ...    % [1 x 3] NED m/s, the update's velocity step at the previous call, host-written
                 'hold',       0, ...              % epochs in the episode
+                'blind',      0, ...              % consecutive calls without rows to judge, the coast carried blind
                 'rel',        0, ...              % consecutive epochs back within the tolerance
                 'above',      0, ...              % consecutive epochs beyond it, before an episode
                 'tAnchor',    0.0, ...            % s since the coast was anchored on the rows

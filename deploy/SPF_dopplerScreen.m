@@ -58,7 +58,11 @@
 %                 or without rows alike: after HOLD consecutive calls
 %                 without rows to judge, the coast is lost and the next rows
 %                 anchor it afresh, so a tunnel does not leave a coast
-%                 metres per second off to flag the honest rows at its exit
+%                 metres per second off to flag the honest rows at its exit.
+%                 The hold is time: it advances on every call while an
+%                 episode is on, judged or not, and the hold limit applies on
+%                 an unjudged call too, since the re-anchor needs no rows; an
+%                 unjudged call neither confirms nor releases
 %
 % The flag is consumed by the measurement noise alone: the range-rate rows'
 % R goes to the host's maximum while it is true, the row layout stays, the
@@ -280,6 +284,16 @@ if (haveRows)
     end
 else
     dropRateRows = screenOut.inEpisode && (numRate > 0);    % too few rate rows to judge: an episode in progress stands; none: nothing to drop
+    if (screenOut.inEpisode)
+        screenOut.hold = screenOut.hold + 1;                % the hold is time, judged or not
+        if (screenOut.hold >= prm.HOLD)
+            screenOut.inEpisode  = false;                   % the hold is up on an unjudged call: the same re-anchor on the filter's velocity
+            screenOut.rel        = 0;
+            screenOut.hold       = 0;
+            screenOut.vCoast     = vHat;
+            dropRateRows         = false;
+        end
+    end
     if (screenOut.anchored)
         screenOut.blind = screenOut.blind + 1;
         if (screenOut.blind > prm.HOLD)

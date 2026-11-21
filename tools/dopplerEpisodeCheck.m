@@ -161,8 +161,10 @@ for k = 1:K
     rate = sqrt(sum(H(:, 4:6) .^ 2, 2)) > 0.5;
     if nnz(rate) < 4, continue; end
     cols = [4 5 6, 6 + find(any(H(rate, 7:end) ~= 0, 1))];
+    nRate(k) = nnz(rate);                                                 % rate rows present, judged or not
+    if nnz(rate) <= numel(cols), continue; end                            % the host's rule: more rows than unknowns, else unjudged
     sol = H(rate, cols) \ y(rate);
-    dv(k, :) = toNED(sol(1:3)', isENU);  nRate(k) = nnz(rate);
+    dv(k, :) = toNED(sol(1:3)', isENU);
 end
 inWin = true(K, 1);
 if ~isempty(o.tWin), inWin = t >= o.tWin(1) & t <= o.tWin(2); end
@@ -272,7 +274,7 @@ if hasInc
             eL = dvTotal(use, 1:2) - dTrue(use, 1:2);  jL = lossH(use, :);
             if jL(:)' * jL(:) > 0, c.slope = (eL(:)' * jL(:)) / (jL(:)' * jL(:)); end
             c.rms = sqrt(mean(eL(:) .^ 2));
-            if c.nUsed >= 10 && c.slope > 0.2 && ~strcmp(c.name, 'none'), lossNotTaken = true; end
+            if c.nUsed >= 10 && c.slope > 0.2 && LOSS_CLASSES{i, 2} >= 0.03, lossNotTaken = true; end   % a positive share lost and not taken
         end
         lossClass(end + 1) = c; %#ok<AGROW>
     end
@@ -446,6 +448,13 @@ for k = 1:K
     if anchored, vCoastK(k, :) = vCoast; end                                  % the coast as propagated, rows or not
     if ~haveRows
         if inEp && nRate(k) > 0, flag(k) = true; end                          % too few rate rows to judge: an episode in progress stands
+        if inEp
+            hold = hold + 1;                                                  % the hold is time, judged or not
+            if hold >= o.hold
+                inEp = false;  rel = 0;  hold = 0;  flag(k) = false;          % the hold up on an unjudged epoch: the same re-anchor
+                if (useTotal || useHand) && all(isfinite(vHat(k, :))), vCoast = vHat(k, :); end
+            end
+        end
         if anchored
             blind = blind + 1;
             if blind > o.hold                                                 % blind for longer than the IMU alone can carry it
@@ -634,17 +643,21 @@ if hasTruth && isfinite(alignLag)
     iW = find(fbScanWide(:, 1) == alignLag, 1);
     fprintf('   the same share over lags %d to %d epochs: sharpest %+.3f at lag %d (t %.1f)%s\n', WIDE(1), WIDE(end), fbScanWide(iW, 2), alignLag, ...
         fbScanWide(iW, 3), pick(o.tShift ~= 0, sprintf('; run shifted by %+.2f s', o.tShift), ''));
-    if alignOff
+    if alignOff && ~useTotal && ~useHand
         fprintf('      NOT ALIGNED: the feedback shows up %d epochs from where it belongs; the records and the run are not on the same clock,\n', alignLag - 1);
         fprintf('      give opts.tShift = %+.2f s (added to the run''s time)\n', o.tShift - (alignLag - 1) * median(diff(t)));
+    elseif alignOff
+        fprintf('      (the share sits %d epochs from its place; this read assumes the nav follows the state, which a host holding rows out breaks, so it is a note here)\n', alignLag - 1);
     end
 end
 if hasTruth && any(isfinite(fbScanSwap(:, 3)))
     [tSw, iSw] = max(abs(fbScanSwap(:, 3)));
     fprintf('   the share with north and east swapped: %+.3f at lag %d (t %.1f); records read as %s\n', fbScanSwap(iSw, 2), fbScanSwap(iSw, 1), tSw, o.frame);
-    if frameOff
+    if frameOff && ~useTotal && ~useHand
         fprintf('      FRAME: the feedback appears only with the axes swapped: the records'' state vector is in the other frame, pass opts.frame = ''%s''\n', ...
             pick(isENU, 'NED', 'ENU'));
+    elseif frameOff
+        fprintf('      (the share appears only swapped; the same note: with rows held out this read no longer tells a frame)\n');
     end
 end
 if hasTruth && isfinite(firTotal)

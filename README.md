@@ -193,7 +193,8 @@ into the tilt and the coast. It emulates a screen of the Doppler rows against
 the INS on the spfMeas records and the run: the rows' own velocity (the
 velocity the host measured them against, the nav velocity before the update
 less the prior error state when the records carry the prior, minus the
-least-squares velocity of the rate-row innovations) is held against an INS
+least-squares velocity of the rate-row innovations, fitted only when the rows
+outnumber the unknowns as the host does) is held against an INS
 velocity coast that follows the INS increment: with the prior, the change of
 nav less prior with the previous update's own step added back, in which the
 feedback cancels and nothing is fitted; without it, the nav's change less

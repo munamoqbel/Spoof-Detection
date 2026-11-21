@@ -10,7 +10,9 @@ function test_dopplerScreen()
 % and a 25 s one, longer than the IMU alone may carry the coast. Checks: the flags identical to the tool's; the first
 % two episodes caught within two epochs and covered; no flag in the honest manoeuvres; the short gap undecided with
 % the coast kept; the long episode held through its hold limit, where the coast is re-anchored on the filter's own
-% velocity, which has run without the rows and so still disagrees with them, and the rows' return afterwards accepted;
+% velocity, which has run without the rows and so still disagrees with them, and the rows' return afterwards accepted,
+% with the rows too few to judge from 372 to 384 s, across that limit, so the hold advances as time and the limit
+% falls on an unjudged epoch;
 % the long gap losing the coast, the rows after it anchoring it afresh with no flag; the increment the screen forms
 % equal to the IMU's; the state and parameter constructors as documented.
 % Run from the repo root (MATLAB, or Octave with tools/octave_shim).
@@ -18,7 +20,8 @@ here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'tools'));
 
 [run, log, tKf, aux] = dopplerSynthRun(struct('T', 470, 'seed', 5, 'corners', false, 'gap', [350 356; 410 435], ...
-    'arm', [0 0], 'truthPoint', [0 0], 'episodes', [200 205 0.35 0 0; 300 323 0 -0.4 3; 360 395 0.5 0 0], 'screen', true));
+    'arm', [0 0], 'truthPoint', [0 0], 'episodes', [200 205 0.35 0 0; 300 323 0 -0.4 3; 360 395 0.5 0 0], 'screen', true, ...
+    'fewRows', [372 384]));
 K = numel(tKf);
 flagHost = aux.hostFlag;  validHost = aux.hostValid;  holdHost = aux.hostHold;
 prm = STRUCT_SPF.dopplerScreenParam;
@@ -50,7 +53,12 @@ chk.gap      = ~any(validHost(tKf >= 350 & tKf < 356)) && ~any(flagHost(tKf >= 3
 % filter's velocity, which ran without the rows and still disagrees with them, so the episode reopens at once; the
 % rows' return accepted within the grown tolerance, so the return costs little
 kHold = find(holdHost >= prm.HOLD - 1 & tKf > 360, 1);
-chk.holdLimit = ~isempty(kHold) && tKf(kHold) > 378 && tKf(kHold) < 382 && mean(flagHost(tKf >= 361 & tKf < 395)) >= 0.9;
+chk.holdLimit = ~isempty(kHold) && tKf(kHold) > 378 && tKf(kHold) < 382 && mean(flagHost(tKf >= 361 & tKf < 395)) >= 0.85;
+% the rows too few to judge from 372 to 384 s: not judged, flagged while the episode stands, the hold advancing as time
+% to its limit at 380.5 s on an unjudged epoch; then nothing to judge until the rows return at 384 s, so no flag, and
+% the episode confirmed again at once after
+chk.fewRows  = ~any(validHost(tKf >= 372 & tKf < 384)) && all(flagHost(tKf >= 372 & tKf < 380.5)) && ...
+    ~any(flagHost(tKf > 380.5 & tKf < 384)) && mean(flagHost(tKf >= 385 & tKf < 395)) >= 0.9;
 chk.return   = nnz(flagHost(tKf >= 396 & tKf < 410)) <= 8;
 % the long gap: 50 epochs without rows, more than the hold, so the coast is lost and the rows after it anchor it
 % afresh; nothing is flagged at the exit and the tool reports the loss

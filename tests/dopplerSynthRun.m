@@ -17,7 +17,9 @@ function [run, log, tKf, aux] = dopplerSynthRun(opt)
 %   quarter of the posterior and the state keeps a quarter, LM 0.25), screen false (true: the host screen
 %   SPF_dopplerScreen runs in the loop on each epoch's records before the update, and an epoch it flags leaves the
 %   rows out of the update, as the host's R at its maximum does; its flags come back in aux). gap may have several
-%   rows, one per stretch without rows. The filter also carries a position error state aided by the ranges every
+%   rows, one per stretch without rows; fewRows [] ([t0 t1] rows: stretches with 4 range and 4 rate rows on two
+%   constellations, too few for the screen's fit against its five unknowns, so the epoch is not judged). The filter
+%   also carries a position error state aided by the ranges every
 %   epoch with rows (posNoise 0.5 m, Kp 0.3 on position, Kv 0.03 on velocity), which keeps working while the Doppler
 %   rows are held out and pulls the velocity state back as the host's ranges do.
 %   run: t, navVel, tTrue, trueVel, navAtt, fbVel ([K x 3], the hand-over per epoch). log: cell of records with
@@ -27,7 +29,7 @@ function [run, log, tKf, aux] = dopplerSynthRun(opt)
 if nargin < 1, opt = struct(); end
 o = struct('T', 400, 'seed', 21, 'corners', true, 'episodes', [200 205 0.35 0 0; 300 323 0 -0.4 3], 'gap', [350 360], ...
     'arm', [-0.18, 0.37], 'truthPoint', [0.25, 0.40], 'psi', 5e-3, 'accBias', 0.002, 'G', 0.1, 'KF', 0.5, 'delivery', 1, ...
-    'noise', 0.003, 'limiter', Inf, 'LM', 0.25, 'screen', false, 'posNoise', 0.5, 'Kp', 0.3, 'Kv', 0.03);
+    'noise', 0.003, 'limiter', Inf, 'LM', 0.25, 'screen', false, 'posNoise', 0.5, 'Kp', 0.3, 'Kv', 0.03, 'fewRows', []);
 f = fieldnames(opt);
 for i = 1:numel(f), o.(f{i}) = opt.(f{i}); end
 randn('seed', o.seed);  rand('seed', o.seed);
@@ -74,6 +76,10 @@ inGap = false(K, 1);
 for g = 1:size(o.gap, 1)
     inGap = inGap | (tKf >= o.gap(g, 1) & tKf < o.gap(g, 2));
 end
+inFew = false(K, 1);
+for g = 1:size(o.fewRows, 1)
+    inFew = inFew | (tKf >= o.fewRows(g, 1) & tKf < o.fewRows(g, 2));
+end
 el = 0.2 + 1.1 * rand(10, 1);  az = 2 * pi * rand(10, 1);
 u = [cos(el) .* cos(az), cos(el) .* sin(az), -sin(el)];
 rowNoise = 0.05 * randn(K, 10);  rangeNoise = 3 * randn(K, 10);  posMeasNoise = o.posNoise * randn(K, 3);
@@ -97,13 +103,16 @@ for j = 2:N
         % the records of this epoch: 10 range rows and 10 rate rows on two constellations, the innovations
         % predicted minus measured minus H times the prior, none in a gap
         H = zeros(mMax, n);  y = zeros(mMax, 1);
-        for sIdx = 1:10
+        nSat = 10;  sats = 1:10;
+        if inFew(k), nSat = 4;  sats = [1 2 6 7]; end                        % two per constellation: five unknowns, four rows
+        for i = 1:nSat
+            sIdx = sats(i);
             clk = 16 + 2 * double(sIdx > 5);
-            H(sIdx, 1:3) = -u(sIdx, :);          H(sIdx, clk) = 1;      y(sIdx) = rangeNoise(k, sIdx);
-            H(10 + sIdx, 4:6) = -u(sIdx, :);     H(10 + sIdx, clk + 1) = 1;
-            y(10 + sIdx) = H(10 + sIdx, 4:6) * (vNav(jm, :) - xPri(k, :) - vRowsTrue(jm, :))' + rowNoise(k, sIdx) + 0.02 * double(sIdx > 5);
+            H(i, 1:3) = -u(sIdx, :);          H(i, clk) = 1;      y(i) = rangeNoise(k, sIdx);
+            H(nSat + i, 4:6) = -u(sIdx, :);   H(nSat + i, clk + 1) = 1;
+            y(nSat + i) = H(nSat + i, 4:6) * (vNav(jm, :) - xPri(k, :) - vRowsTrue(jm, :))' + rowNoise(k, sIdx) + 0.02 * double(sIdx > 5);
         end
-        numMeas = uint8(20);
+        numMeas = uint8(2 * nSat);
         if inGap(k), numMeas = uint8(0); end
         useRows = ~inGap(k);
         if o.screen

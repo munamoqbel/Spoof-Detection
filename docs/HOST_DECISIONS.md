@@ -576,7 +576,33 @@ in 12 runs and 318 release tails against 31.6 percent, 531 and 501 before,
 every episode caught; the anchor's share was then set from the same
 records, a twentieth, a tenth and three twentieths giving 1041, 903 and
 896 flagged epochs with 40, 40 and 39 episodes caught, so a tenth, the
-largest share that loses none. The
+largest share that loses none.
+
+Run 11, the first with the screen in the host. The host caught the portal,
+its three episodes flagged at 83, 100 and 100 percent in its own log, and
+the coast came out at 950 m north and 500 m east against 1033 and 487 in
+runs 9 and 10. So the portal Doppler was not what set the tilt at the
+tunnel entry; what is left is the filter's own tilt accuracy, 0.03 to 0.05
+degrees by its pitch and roll sigma, and 0.04 degrees over 475 s is 800 to
+1000 m on its own. That coast moves only with a better tilt before the
+entry or with motion information inside the tunnel, for a land vehicle the
+non-holonomic constraints or an odometer, a host design question outside
+the screen. The screen itself held 60 percent of the Doppler in the host
+against 17 for the emulation on the same records, and the heading wandered
+to 0.7 degrees mid-run with the filter starved of rows. Where host and
+emulation judged the same epoch they agreed to 0.01 m/s, so the inputs
+were right; the difference was the epoch they refused to judge. The host
+fits only when the rate rows outnumber the unknowns, three velocity axes
+plus one drift per constellation present, seven rows with three
+constellations, while the emulation fitted with four; in the urban
+stretches the host left many epochs unjudged, and an episode in progress
+then stood with its hold frozen, since the hold advanced only on judged
+epochs, so holds that should end in 20 s ran for as long as the rows stayed
+few. Hence: the hold is time, advancing on every call while an episode is
+on, judged or not, with the hold limit and its re-anchor applying on an
+unjudged call too, since the re-anchor needs no rows; an unjudged call
+neither confirms nor releases; and the emulation fits under the host's
+redundancy rule, so it reproduces the host instead of flattering it. The
 flag is one input to the measurement setup: the range-rate rows' R goes to
 the host's maximum while it is on, the layout stays, the ranges and the
 pressure row update as before, and the gate reads every row at the nominal

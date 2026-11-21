@@ -100,7 +100,7 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 %   res: t, vRows [K x 3], dvIns [K x 3], sep [K x 1] (the rows' separation from the coast, onset the same),
 %   thresh [K x 1], flag [K x 1] logical,
 %   rowsErr [K x 3] (NaN without truth), episodes (struct array: tStart, tEnd, detected, delay, coverage),
-%   falseRuns (struct array: tStart, tEnd, epochs), nFlag, nFalse, nTail, fbGain, fbLag (NaN under 'total'), fbModel,
+%   falseRuns (struct array: tStart, tEnd, epochs, blindBefore (epochs without rows in the 30 s before), coastErrStart), nFlag, nFalse, nTail, fbGain, fbLag (NaN under 'total'), fbModel,
 %   totShare, totShareT, totRms (the share of the state left in the total-state increment, its t-statistic, and that
 %   increment's rms against the truth per epoch; NaN without the prior or the truth), incErr [K x 1] (the total-state
 %   increment's horizontal error against the truth), lossRatio [K x 1] (the state's loss as a share of the posterior,
@@ -434,13 +434,14 @@ for k = 1:K
     elseif anchored
         anchored = false;  inEp = false;  above = 0;                          % no INS increment: the coast is lost
     end
+    if anchored, vCoastK(k, :) = vCoast; end                                  % the coast as propagated, rows or not
     if ~haveRows, continue; end
     if ~anchored
         vCoast = vRows(k, :);  anchored = true;  tAnchor = 0;  speedSince = 0;   % the first rows anchor the coast
+        vCoastK(k, :) = vCoast;
         continue;
     end
     sep(k) = norm(vRows(k, 1:2) - vCoast(1:2));
-    vCoastK(k, :) = vCoast;                                                   % the coast the rows are judged against
     thresh(k) = sqrt(o.floor ^ 2 + (o.driftRate * tAnchor) ^ 2 + (o.headingSigma * speedSince) ^ 2);
     onset(k) = sep(k);
     if ~inEp
@@ -536,7 +537,8 @@ if hasTruth && hasAtt
     end
 end
 episodes = struct('tStart', {}, 'tEnd', {}, 'detected', {}, 'delay', {}, 'coverage', {});
-falseRuns = struct('tStart', {}, 'tEnd', {}, 'epochs', {});
+falseRuns = struct('tStart', {}, 'tEnd', {}, 'epochs', {}, 'blindBefore', {}, 'coastErrStart', {});
+BLIND_WIN = 30;                                                           % s before a false run searched for epochs without rows
 nFalse = 0;  nTail = 0;
 if hasTruth
     errH = sqrt(sum(rowsErr(:, 1:2) .^ 2, 2));
@@ -564,7 +566,10 @@ if hasTruth
     nTail = nnz(tailFlag);
     runsF = runsOf(falseFlag);
     for i = 1:size(runsF, 1)
-        falseRuns(end + 1) = struct('tStart', t(runsF(i, 1)), 'tEnd', t(runsF(i, 2)), 'epochs', runsF(i, 2) - runsF(i, 1) + 1); %#ok<AGROW>
+        a = runsF(i, 1);
+        before = t >= t(a) - BLIND_WIN & t < t(a) & inWin;
+        falseRuns(end + 1) = struct('tStart', t(a), 'tEnd', t(runsF(i, 2)), 'epochs', runsF(i, 2) - a + 1, ...
+            'blindBefore', nnz(before & nRate == 0), 'coastErrStart', coastErr(a)); %#ok<AGROW>
     end
 end
 
@@ -746,8 +751,15 @@ if hasTruth
         o.release + floor(o.hold / o.releaseGrow), o.cleanLevel, nTail);
     fprintf('   false flags (flagged while the rows were within %.2f m/s of the truth, not the tail of an episode): %d epochs in %d runs\n', ...
         o.cleanLevel, nFalse, numel(falseRuns));
+    if ~isempty(falseRuns)
+        postBlind = [falseRuns.blindBefore] >= 10;
+        fprintf('      after a blind stretch of 10 epochs or more within %d s: %d runs, %d epochs; coast error at the runs'' start: median %.3f m/s\n', ...
+            BLIND_WIN, nnz(postBlind), sum([falseRuns(postBlind).epochs]), median([falseRuns.coastErrStart]));
+        fprintf('      run                       epochs   blind epochs before   coast error at start\n');
+    end
     for i = 1:min(numel(falseRuns), 12)
-        fprintf('      %8.2f to %8.2f s  %3d epochs\n', falseRuns(i).tStart, falseRuns(i).tEnd, falseRuns(i).epochs);
+        fprintf('      %8.2f to %8.2f s  %3d        %3d                 %.3f\n', falseRuns(i).tStart, falseRuns(i).tEnd, falseRuns(i).epochs, ...
+            falseRuns(i).blindBefore, falseRuns(i).coastErrStart);
     end
     if numel(falseRuns) > 12, fprintf('      ... %d more runs\n', numel(falseRuns) - 12); end
     % the per-epoch table around the largest episode

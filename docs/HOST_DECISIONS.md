@@ -613,9 +613,22 @@ the IMU alone for 27 s, arrived 0.27 m/s off, and from 498 s, the rows
 clean again, drifted on at about the tolerance's own growth rate, so the
 flags lasted to 545 s. The tool now carries the coast's own error against
 the reference as a table column and reads its drift rate over every
-flagged stretch of 10 epochs or more against DRIFT_RATE; that number sets
-the tolerance's growth and weighs on the floor, since a floor that flags
-the grey band is what sends the coast off alone. The other coast form is
+flagged stretch of 10 epochs or more against DRIFT_RATE. On run 10 that
+drift reads a median near zero over the 50 long holds, which mostly sit on
+true episodes where the coast is right, a 90th percentile of 0.006 and a
+worst of 0.013 m/s per second, and the table through 465 to 500 s shows
+the mechanism: the anchor filter at 0.05 follows a drifting IMU with a
+standing lag of the drift per epoch over ALPHA, about 0.1 m/s there, a
+21-epoch stretch without rows then adds 0.12, and the clean rows that
+return sit 0.36 from the coast while the tolerance has grown to 0.21. Two
+constants are undersized for this IMU in these stretches, not the design:
+ALPHA, which at 0.15 brings the standing lag to about 0.03, and DRIFT_RATE,
+which at 0.010 covers the 90th percentile with margin; the floor can stay.
+The settings are to be confirmed on the records, every episode still caught,
+before the host constants move. The same read, on the epochs without rows,
+gives the real error growth as 1.47 times what the filter's model expects,
+so the total-state coast, which removes the modelled part, is the better
+of the two forms by a factor of three. The other coast form is
 in the tool for the comparison on
 the first run that logs the hand-over: the rows' velocity total-state in
 both, the increment either from the prior and the step or from the

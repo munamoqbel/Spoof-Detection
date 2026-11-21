@@ -44,7 +44,15 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 %   The reads on the inputs come first, since the screen is only as good as what it is fed:
 %     increment       with the prior and the truth: the total-state increment against the truth over the quiet
 %                     epochs, its rms and the share of the state left in it, which is 0 when the mechanisation takes
-%                     the whole hand-over and the prior is the state the rows were predicted with
+%                     the whole hand-over and the prior is the state the rows were predicted with; that read is
+%                     trimmed, so sparse jumps escape it, and the next one is for them
+%     state loss      what the state lost between an update and the next prior, as a share of that update's
+%                     posterior (horizontal), classed per epoch: a tenth, a quarter, a half, three quarters, all,
+%                     none; a feedback that hands over a share and takes the same off the state reads that share,
+%                     and the increment error on the loss per class says how much of the loss the nav took (slope 0:
+%                     all of it; slope s: a share 1 - s); a class where the state lost more than the nav took is a
+%                     step in nav minus prior the total-state increment cannot see, flagged LOSS NOT TAKEN, with the
+%                     large increment errors counted and the share of them at such epochs
 %     feedback share  fitted at lags 0 to 2 with a t-statistic each, NONE FOUND when no lag reaches 3; the same
 %                     fit with north and east swapped: a share that appears only then is a state vector in the
 %                     other frame (opts.frame = 'ENU' reads the records' states and H columns as east, north, up);
@@ -89,7 +97,10 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 %   rowsErr [K x 3] (NaN without truth), episodes (struct array: tStart, tEnd, detected, delay, coverage),
 %   falseRuns (struct array: tStart, tEnd, epochs), nFlag, nFalse, nTail, fbGain, fbLag (NaN under 'total'), fbModel,
 %   totShare, totShareT, totRms (the share of the state left in the total-state increment, its t-statistic, and that
-%   increment's rms against the truth per epoch; NaN without the prior or the truth), fbScan ([3 x 4]: lag,
+%   increment's rms against the truth per epoch; NaN without the prior or the truth), incErr [K x 1] (the total-state
+%   increment's horizontal error against the truth), lossRatio [K x 1] (the state's loss as a share of the posterior,
+%   NaN where the posterior is under 0.03 m/s), lossClass (struct array: name, range, n, nUsed, slope, rms), lossNotTaken
+%   (true when a class with 10 usable epochs or more reads a slope above 0.2), fbScan ([3 x 4]: lag,
 %   share, t-statistic, rms of the regressor), yawRate [K x 1], armFit [1 x 2] (along, across, m per rad/s, NaN without navAtt or
 %   truth), armFitSig, armHost [1 x 2] (nav minus rows per rad/s, the host's arm error), armHostSig, fbScanWide
 %   ([25 x 4], lags -12 to 12), alignLag (its sharpest lag), fbScanSwap ([3 x 4],
@@ -212,6 +223,42 @@ if hasInc && hasTruth
     rT = dvTotal(:, 1:2) - dTrue(:, 1:2);
     qT = all(isfinite(rT), 2) & inWin & sqrt(sum(dTrue(:, 1:2) .^ 2, 2)) < 0.5;
     if nnz(qT) >= 10, rr = rT(qT, :);  totRms = sqrt(mean(rr(:) .^ 2)); end
+end
+% the state's loss between an update and the next prior, x+(k - 1) - x-(k), as a share of x+(k - 1) (horizontal, for a
+% posterior above 0.03 m/s), classed per epoch; a feedback that hands over a share of the state and takes the same off
+% it reads that share, and the nav took what the state lost; the increment error dvTotal - dTrue regressed on the loss
+% per class says how much of the loss the nav took: slope 0 all of it, slope s a share 1 - s, and the rest is a step
+% in nav minus prior that the total-state increment cannot see
+incErr = sqrt(sum((dvTotal(:, 1:2) - dTrue(:, 1:2)) .^ 2, 2));
+lossH = NaN(K, 2);  lossRatio = NaN(K, 1);
+for k = 2:K
+    xp = xPlus(k - 1, 1:2);
+    if all(isfinite(xp)) && all(isfinite(xPri(k, 1:2)))
+        lossH(k, :) = xp - xPri(k, 1:2);
+        if norm(xp) > 0.03, lossRatio(k) = (lossH(k, :) * xp') / (xp * xp'); end
+    end
+end
+LOSS_CLASSES = {'none', -Inf, 0.03; 'a tenth', 0.03, 0.17; 'a quarter', 0.17, 0.4; 'a half', 0.4, 0.6; ...
+    'three quarters', 0.6, 0.9; 'all', 0.9, 1.1; 'other', 1.1, Inf};
+lossClass = struct('name', {}, 'range', {}, 'n', {}, 'nUsed', {}, 'slope', {}, 'rms', {});
+lossNotTaken = false;
+if hasInc
+    % the loss at such an epoch is large against the truth's own error in dynamics, so the read takes every epoch
+    % under 3 m/s2, not only the quiet ones
+    usableL = isfinite(incErr) & inWin & sqrt(sum(dTrue(:, 1:2) .^ 2, 2)) < 1.5;
+    for i = 1:size(LOSS_CLASSES, 1)
+        inC = inWin & isfinite(lossRatio) & lossRatio >= LOSS_CLASSES{i, 2} & lossRatio < LOSS_CLASSES{i, 3};
+        c = struct('name', LOSS_CLASSES{i, 1}, 'range', [LOSS_CLASSES{i, 2}, LOSS_CLASSES{i, 3}], 'n', nnz(inC), 'nUsed', 0, 'slope', NaN, 'rms', NaN);
+        use = inC & usableL;
+        c.nUsed = nnz(use);
+        if hasTruth && c.nUsed >= 5
+            eL = dvTotal(use, 1:2) - dTrue(use, 1:2);  jL = lossH(use, :);
+            if jL(:)' * jL(:) > 0, c.slope = (eL(:)' * jL(:)) / (jL(:)' * jL(:)); end
+            c.rms = sqrt(mean(eL(:) .^ 2));
+            if c.nUsed >= 10 && c.slope > 0.2 && ~strcmp(c.name, 'none'), lossNotTaken = true; end
+        end
+        lossClass(end + 1) = c; %#ok<AGROW>
+    end
 end
 [firC, firSe, firTotal, firTotalSe, firOk, firApplied, firLag0Dropped] = firFit(incZ, dNav, dTrue, inWin, K, FIR_LAGS, T_MIN, hasTruth && hasInc);
 % the velocity correction the host logged per epoch (run.fbVel, [K x 3] NED m/s, the amount taken off the nav
@@ -489,6 +536,7 @@ end
 res = struct('t', t, 'vRows', vRows, 'dvIns', dvIns, 'onset', onset, 'thresh', thresh, 'flag', flag, 'sep', sep, ...
     'rowsErr', rowsErr, 'episodes', episodes, 'falseRuns', falseRuns, 'nFlag', nnz(flag), 'nFalse', nFalse, 'nTail', nTail, ...
     'fbGain', fbGain, 'fbLag', fbLag, 'fbModel', fbModel, 'totShare', totShare, 'totShareT', totShareT, 'totRms', totRms, ...
+    'incErr', incErr, 'lossRatio', lossRatio, 'lossClass', lossClass, 'lossNotTaken', lossNotTaken, ...
     'fbScan', fbScan, 'yawRate', yawRate, 'armFit', armFit, 'armFitSig', armFitSig, ...
     'armHost', armHost, 'armHostSig', armHostSig, ...
     'fbScanWide', fbScanWide, 'alignLag', alignLag, 'fbScanSwap', fbScanSwap, 'frameOff', frameOff, 'firC', firC, 'firSe', firSe, ...
@@ -537,6 +585,29 @@ if hasInc && hasTruth && isfinite(totRms)
         totShare, totShareT);
     if abs(totShareT) >= T_MIN && abs(totShare) > 0.01
         fprintf('      (a share left: part of the hand-over does not reach the velocity, or the prior is not the state the rows were predicted with)\n');
+    end
+end
+if hasInc && ~isempty(lossClass)
+    nL = [lossClass.n];
+    txtL = '';
+    for i = find(nL > 0)
+        txtL = [txtL, sprintf(' %s on %d,', lossClass(i).name, lossClass(i).n)]; %#ok<AGROW>
+    end
+    fprintf('   the state''s loss between an update and the next prior, as a share of that update''s posterior (horizontal, posterior above 0.03 m/s):%s\n', txtL(1:end - 1));
+    if hasTruth
+        txtS = '';
+        for i = find(isfinite([lossClass.slope]))
+            txtS = [txtS, sprintf(' %s: slope %+.2f on %d epochs (the nav took %.2f of it), rms %.3f;', lossClass(i).name, lossClass(i).slope, ...
+                lossClass(i).nUsed, 1 - lossClass(i).slope, lossClass(i).rms)]; %#ok<AGROW>
+        end
+        if ~isempty(txtS), fprintf('      increment error on the loss per class, epochs under 3 m/s2:%s\n', txtS(1:end - 1)); end
+        big = incErr > 0.10 & inWin & isfinite(lossRatio);
+        odd = big & ~(lossRatio >= 0.03 & lossRatio < 0.17);
+        fprintf('      increment errors above 0.10 m/s: %d epochs, %d of them at a loss other than a tenth\n', nnz(big), nnz(odd));
+        if lossNotTaken
+            fprintf('      LOSS NOT TAKEN: on some epochs the state lost more than the nav took; nav minus prior steps there by the difference, which\n');
+            fprintf('      the total-state increment reads as motion; the screen needs the hand-over itself on those epochs (the per-epoch table shows the loss)\n');
+        end
     end
 end
 if hasFb && hasTruth
@@ -634,13 +705,18 @@ if hasTruth
     end
     if ~isempty(tt)
         fprintf('   per epoch, %.0f to %.0f s: rows - truth, the rows'' separation from the INS coast against the tolerance, the flag,\n', tt(1), tt(2));
-        fprintf('   and on the epochs faster than 1 m/s2 the rows'' error as a time offset\n');
-        fprintf('        t      rows-truth N  E   |.|      sep  tolerance   flag   offset\n');
+        fprintf('   on the epochs faster than 1 m/s2 the rows'' error as a time offset, the increment''s error against the truth, and the\n');
+        fprintf('   state''s loss since the previous update as a share of its posterior\n');
+        fprintf('        t      rows-truth N  E   |.|      sep  tolerance   flag   offset  incErr   loss\n');
         for k = find(t >= tt(1) & t <= tt(2))'
             tauTxt = '      ';
             if isfinite(tauPair(k)), tauTxt = sprintf('%+6.2f', tauPair(k)); end
-            fprintf('   %8.2f    %+6.3f %+6.3f  %5.3f    %5.3f   %5.3f     %s   %s\n', t(k), rowsErr(k, 1), rowsErr(k, 2), errH(k), ...
-                sep(k), thresh(k), pick(flag(k), 'FLAG', '    '), tauTxt);
+            incTxt = '     ';
+            if isfinite(incErr(k)), incTxt = sprintf('%5.3f', incErr(k)); end
+            lossTxt = '     ';
+            if isfinite(lossRatio(k)), lossTxt = sprintf('%+5.2f', lossRatio(k)); end
+            fprintf('   %8.2f    %+6.3f %+6.3f  %5.3f    %5.3f   %5.3f     %s   %s  %s  %s\n', t(k), rowsErr(k, 1), rowsErr(k, 2), errH(k), ...
+                sep(k), thresh(k), pick(flag(k), 'FLAG', '    '), tauTxt, incTxt, lossTxt);
         end
     end
     if isempty(episodes)

@@ -15,7 +15,9 @@ function test_dopplerEpisodeCheck()
 % Then the same vehicle in the host's error-state form (tests/dopplerSynthRun, the records carrying the prior): the
 % total-state model is the default, nothing is fitted, both episodes are caught with no false flag, the share of the
 % state left in the increment reads zero, the flags are the same without the truth, a mechanisation that delivers
-% only three quarters of the hand-over is read as such, and the fallback models still run when forced.
+% only three quarters of the hand-over is read as such, a feedback branch in which the state keeps a quarter while the
+% nav takes a quarter is read from the state's loss between an update and the next prior, and the fallback models
+% still run when forced.
 % Run from the repo root (MATLAB, or Octave with tools/octave_shim).
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'tools'));
@@ -198,6 +200,11 @@ chk.totalClean   = resT.nFalse <= 2 && resT.nTail <= 4 + 7 && ~any(resT.flag(tKf
 % the hand-over cancels in nav less prior: the increment's error against the truth is the logged noise, and no share
 % of the state is left in it
 chk.totalShare   = abs(resT.totShare) < 0.015 && abs(resT.totShareT) < 3 && resT.totRms < 0.01 && isempty(strfind(txtT, 'a share left'));
+% the state's loss between an update and the next prior: a tenth of the posterior on every sizeable epoch, and the nav
+% took all of it
+tenth = resT.lossClass(strcmp({resT.lossClass.name}, 'a tenth'));
+chk.totalLoss    = ~resT.lossNotTaken && tenth.n > 100 && abs(tenth.slope) < 0.1 && ...
+    sum([resT.lossClass.n]) - tenth.n <= 2 && isempty(strfind(txtT, 'LOSS NOT TAKEN'));
 % the host's arm error read from the nav and the rows themselves, not diluted by what the state absorbed in the corner
 chk.totalArm     = all(abs(resT.armHost - ARM) < 0.08) && all(abs(resT.armFit) < 0.05);
 % without the truth and without a logged correction: nothing to fit, the same flags
@@ -208,6 +215,16 @@ chk.totalNoTruth = strcmp(resNT.fbModel, 'total') && isequal(resNT.flag, resT.fl
 [runP, logP, tKfP] = dopplerSynthRun(struct('seed', 21, 'delivery', 0.75));
 txtP = evalc('resP = dopplerEpisodeCheck(logP, tKfP, runP, CORR);');
 chk.partial      = resP.totShare > 0.015 && resP.totShare < 0.045 && resP.totShareT >= 3 && ~isempty(strfind(txtP, 'a share left'));
+% a feedback branch that fires on a large disagreement: the nav takes a quarter of the posterior and the state keeps a
+% quarter, so half of it leaves nav minus prior at once; read as a loss of three quarters of which the nav took a third,
+% the increment errors above 0.10 m/s sit on those epochs, and the verdict names it
+% (the first episode is made 12 s long here: the state keeps a quarter, so the disagreement stays and the branch fires on
+% most of its epochs; the corners fire it too, but a sharp corner is outside the read's 3 m/s2 gate)
+[runQ, logQ, tKfQ, auxQ] = dopplerSynthRun(struct('seed', 21, 'limiter', 0.15, 'episodes', [200 212 0.35 0 0; 300 323 0 -0.4 3]));
+txtQ = evalc('resQ = dopplerEpisodeCheck(logQ, tKfQ, runQ, CORR);');
+threeQ = resQ.lossClass(strcmp({resQ.lossClass.name}, 'three quarters'));
+chk.limiter      = nnz(auxQ.limited) >= 10 && threeQ.n >= 10 && threeQ.nUsed >= 10 && abs(threeQ.slope - 2 / 3) < 0.15 && ...
+    resQ.lossNotTaken && ~isempty(strfind(txtQ, 'LOSS NOT TAKEN')) && ~isempty(strfind(txtQ, 'three quarters on'));
 % the fallback models still run on these records when forced; their rows' velocity is off by the prior state, which
 % absorbs half of the small episode within two epochs, so only the large one is read and caught
 resTL = dopplerEpisodeCheck(logT, tKfT, runT, setfield(setfield(CORR, 'fbModel', 'logged'), 'quiet', true)); %#ok<SFLD>
@@ -218,6 +235,8 @@ for i = 1:numel(names)
 end
 fprintf('error-state form: flags %d, false %d, tails %d, share of the state left %+.3f (t %.1f), increment rms %.4f m/s; three-quarter delivery read %+.3f (t %.1f)\n', ...
     resT.nFlag, resT.nFalse, resT.nTail, resT.totShare, resT.totShareT, resT.totRms, resP.totShare, resP.totShareT);
+fprintf('limited feedback: %d limited epochs, loss of three quarters on %d, slope %+.2f on %d (the nav took %.2f); flags %d, false %d\n', ...
+    nnz(auxQ.limited), threeQ.n, threeQ.slope, threeQ.nUsed, 1 - threeQ.slope, resQ.nFlag, resQ.nFalse);
 if numel(ep) == 2
     fprintf('episodes: %.1f s caught after %.1f s (%.0f%%), %.1f s caught after %.1f s (%.0f%%); false flags %d, release tails %d; feedback share %.3f at lag %d\n', ...
         ep(1).tEnd - ep(1).tStart, ep(1).delay, 100 * ep(1).coverage, ep(2).tEnd - ep(2).tStart, ep(2).delay, 100 * ep(2).coverage, ...

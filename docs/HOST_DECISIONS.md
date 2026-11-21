@@ -587,7 +587,27 @@ the third read becomes a check, the share of the state left in the
 increment, which is zero when the mechanisation takes the whole hand-over
 and the prior is the state the rows were predicted with. In the host the
 screen reads the mechanisation velocity, the prior and the update's step
-directly and needs none of the reads. Open: the total-state form's result
-on run 10's records, to read before the first run with the screen; the
-floor, left at 0.2 for that run; the reversing stretch at 304 to 344 s, a
-receiver behaviour to look at in its raw output.
+directly and needs none of the reads.
+
+Run 10 under the total-state form, no correction log: every one of 40
+episodes caught, the portal half a second after the rows leave the
+reference; the hand-over cancels on the quiet epochs, the share of the
+state left in the increment reading 0.001, so the mechanisation takes the
+whole hand-over and the delivery question is closed. But 31.6 percent of
+the Doppler flagged, false flags 531 epochs in 35 runs of 10 to 20 s and
+release tails 501, against 1.2 and 4 percent under the first form. Runs of
+that length are sparse steps in nav minus prior that the trimmed share
+read does not see, and the suspect is a feedback branch in which the state
+loses more than the mechanisation receives, so the difference steps by
+what was lost and not taken. The tool now classes every epoch by the
+state's loss between an update and the next prior, as a share of the
+posterior, and reads per class how much of the loss the nav took; a class
+that lost more than the nav took is named LOSS NOT TAKEN, and the per-epoch
+table carries the loss and the increment's error. If run 10 confirms it,
+the increment goes back to the mechanisation's change plus the correction
+it applied, which is exact at every epoch now that the delivery is known
+to be full, while the rows' velocity stays total-state; the host then
+passes the applied velocity correction in place of the update's step. Open:
+that read on run 10; the floor, left at 0.2 for the first run with the
+screen; the reversing stretch at 304 to 344 s, a receiver behaviour to look
+at in its raw output.

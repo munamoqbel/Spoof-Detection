@@ -13,14 +13,15 @@ function [run, log, tKf, aux] = dopplerSynthRun(opt)
 %   -0.4 3]: the error dN, dE m/s between t0 and t1, ramped in and out over 'ramp' s), gap [350 360] s (no rows),
 %   arm [-0.18 0.37] m per rad/s (the host's lever-arm error, along and across, in the rows), truthPoint [0.25 0.40]
 %   m (the reference ahead and left of the IMU), psi 5e-3 rad, accBias 0.002 m/s2 north, G 0.1, KF 0.5, delivery 1,
-%   noise 0.003 m/s.
+%   noise 0.003 m/s, limiter Inf (m/s: above this horizontal disagreement the epoch is a limited one, the nav takes a
+%   quarter of the posterior and the state keeps a quarter, LM 0.25).
 %   run: t, navVel, tTrue, trueVel, navAtt, fbVel ([K x 3], the hand-over per epoch). log: cell of records with
 %   innovation, obsMatrix, numMeas, priorState, postState. aux: vTrue, vRowsTrue [N x 3], xPri, xPost, inc [K x 3],
-%   jBefore [K x 1] (the nav sample before each epoch), rateTrue, course [N x 1], ARM, TS.
+%   jBefore [K x 1] (the nav sample before each epoch), rateTrue, course [N x 1], ARM, TS, limited [K x 1].
 if nargin < 1, opt = struct(); end
 o = struct('T', 400, 'seed', 21, 'corners', true, 'episodes', [200 205 0.35 0 0; 300 323 0 -0.4 3], 'gap', [350 360], ...
     'arm', [-0.18, 0.37], 'truthPoint', [0.25, 0.40], 'psi', 5e-3, 'accBias', 0.002, 'G', 0.1, 'KF', 0.5, 'delivery', 1, ...
-    'noise', 0.003);
+    'noise', 0.003, 'limiter', Inf, 'LM', 0.25);
 f = fieldnames(opt);
 for i = 1:numel(f), o.(f{i}) = opt.(f{i}); end
 randn('seed', o.seed);  rand('seed', o.seed);
@@ -65,6 +66,7 @@ inGap = tKf >= o.gap(1) & tKf < o.gap(2);
 vNav = zeros(N, 3);  e = [0.02, -0.01, 0];  vNav(1, :) = vTrue(1, :) + e;
 x = zeros(1, 3);
 xPri = zeros(K, 3);  xPost = zeros(K, 3);  inc = zeros(K, 3);  fbVel = zeros(K, 3);  jBefore = zeros(K, 1);
+limited = false(K, 1);
 kNext = 1;
 for j = 2:N
     dvT = vTrue(j, :) - vTrue(j - 1, :);
@@ -77,7 +79,13 @@ for j = 2:N
             inc(kNext, :) = o.KF * dis;
         end
         xPost(kNext, :) = x + inc(kNext, :);
-        if ~inGap(kNext)
+        if ~inGap(kNext) && norm(dis(1:2)) > o.limiter
+            h = [o.LM * xPost(kNext, 1:2), 0];                              % a limited epoch: a quarter handed over,
+            fbVel(kNext, :) = h;                                              % the state keeps a quarter
+            limited(kNext) = true;
+            e = e - o.delivery * h;
+            x = [o.LM * xPost(kNext, 1:2), xPost(kNext, 3)];
+        elseif ~inGap(kNext)
             h = o.G * xPost(kNext, :);
             fbVel(kNext, :) = h;
             e = e - o.delivery * h;
@@ -114,5 +122,5 @@ for k = 1:K
         'priorState', [zeros(3, 1); xPri(k, :)'; zeros(n - 6, 1)], 'postState', [zeros(3, 1); xPost(k, :)'; zeros(n - 6, 1)]);
 end
 aux = struct('vTrue', vTrue, 'vRowsTrue', vRowsTrue, 'xPri', xPri, 'xPost', xPost, 'inc', inc, 'jBefore', jBefore, ...
-    'rateTrue', rateTrue, 'course', course, 'ARM', o.arm, 'TS', o.truthPoint);
+    'rateTrue', rateTrue, 'course', course, 'ARM', o.arm, 'TS', o.truthPoint, 'limited', limited);
 end

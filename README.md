@@ -210,7 +210,10 @@ into runs, and a per-epoch table around the largest episode. The emulation
 runs on the records of the clean hour before any screen goes into the host.
 The reads on the inputs come first, since the screen is only as good as
 what it is fed: with the prior and the truth, the share of the state left in
-the increment, zero when the hand-over cancels as it should; the feedback
+the increment, zero when the hand-over cancels as it should, and the state's
+loss between an update and the next prior classed per epoch with how much of
+it the nav took, which finds a feedback branch in which the state loses more
+than the mechanisation receives; the feedback
 share fitted at lags 0 to 2 and over a wide lag
 range, where a share showing up far from its place is the run's clock off
 the records' (`opts.tShift`), and once more with north and east swapped,
@@ -230,8 +233,9 @@ set above the smaller episode, a run whose clock is 3 s ahead, every third
 epoch's rows paired with the pulse before, and the same records in ENU; then
 the same vehicle in the host's error-state form (`tests/dopplerSynthRun.m`,
 the records carrying the prior), where the total-state model is the default,
-nothing is fitted, and a mechanisation that delivers three quarters of the
-hand-over is read as such.
+nothing is fitted, a mechanisation that delivers three quarters of the
+hand-over is read as such, and a feedback branch that keeps a quarter of the
+state while handing a quarter over is read from the state's loss.
 `SPF_dopplerScreen.m` (root and `deploy/`) is that screen as a host
 function for the state update: the same logic on the mechanisation
 velocity, the prior state and the update's own step, no fit and no

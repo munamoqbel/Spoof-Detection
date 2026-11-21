@@ -616,7 +616,8 @@ classdef STRUCT_SPF
                 'inEpisode',  false, ...          % the range-rate rows are held out
                 'havePrev',   false, ...          % a previous velocity to difference against
                 'vCoast',     zeros(1, 3), ...    % [1 x 3] NED m/s, the coast
-                'velPrev',    zeros(1, 3), ...    % [1 x 3] NED m/s, the velocity of the previous call
+                'vHatPrev',   zeros(1, 3), ...    % [1 x 3] NED m/s, nav velocity less prior state at the previous call
+                'incPrev',    zeros(1, 3), ...    % [1 x 3] NED m/s, the update's velocity step at the previous call, host-written
                 'hold',       0, ...              % epochs in the episode
                 'rel',        0, ...              % consecutive epochs back within the tolerance
                 'above',      0, ...              % consecutive epochs beyond it, before an episode

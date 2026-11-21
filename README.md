@@ -190,22 +190,28 @@ receiver whose Doppler goes wrong on every row at once under strong transient
 dynamics (on the vehicle data 0.4 m/s for 20 s at a tunnel portal), which no
 consensus screen can see and which the filter, following its rows, carries
 into the tilt and the coast. It emulates a screen of the Doppler rows against
-the INS on the spfMeas records and the run: the rows' own velocity (the nav
-velocity before the update minus the least-squares velocity of the rate-row
-innovations) is held against an INS velocity coast that follows the INS
-increment, less the feedback the nav took (the host's logged velocity
-correction when the run carries it, else a share of the state or the
-delivery profile of the update's own increment, whichever the logged velocity
-follows, fitted against the truth), and is re-anchored slowly on every
-accepted epoch's rows; the rows
+the INS on the spfMeas records and the run: the rows' own velocity (the
+velocity the host measured them against, the nav velocity before the update
+less the prior error state when the records carry the prior, minus the
+least-squares velocity of the rate-row innovations) is held against an INS
+velocity coast that follows the INS increment: with the prior, the change of
+nav less prior with the previous update's own step added back, in which the
+feedback cancels and nothing is fitted; without it, the nav's change less
+the feedback the nav took (the host's logged velocity correction when the
+run carries it, else a share of the state or the delivery profile of the
+update's own increment, whichever the logged velocity follows, fitted
+against the truth); the coast is re-anchored slowly on every accepted
+epoch's rows; the rows
 are flagged while they sit further from the coast than a tolerance that grows
 with the time the coast has run on the INS alone, and released when they
 agree with it again or a hold runs out. With the truth it scores itself: each true episode with
 its detection delay and coverage, the release tails, the false flags grouped
 into runs, and a per-epoch table around the largest episode. The emulation
 runs on the records of the clean hour before any screen goes into the host.
-Three reads on the inputs come first, since the screen is only as good as
-what it is fed: the feedback share fitted at lags 0 to 2 and over a wide lag
+The reads on the inputs come first, since the screen is only as good as
+what it is fed: with the prior and the truth, the share of the state left in
+the increment, zero when the hand-over cancels as it should; the feedback
+share fitted at lags 0 to 2 and over a wide lag
 range, where a share showing up far from its place is the run's clock off
 the records' (`opts.tShift`), and once more with north and east swapped,
 where a share appearing only then is a state vector recorded in ENU
@@ -221,15 +227,21 @@ with the wrong pulse, a fault no screen can fix.
 episodes, a braking, two turns and two sharp corners under a heading error,
 a wrong arm and a reference 0.5 m from the IMU, a gap without rows, a floor
 set above the smaller episode, a run whose clock is 3 s ahead, every third
-epoch's rows paired with the pulse before, and the same records in ENU.
+epoch's rows paired with the pulse before, and the same records in ENU; then
+the same vehicle in the host's error-state form (`tests/dopplerSynthRun.m`,
+the records carrying the prior), where the total-state model is the default,
+nothing is fitted, and a mechanisation that delivers three quarters of the
+hand-over is read as such.
 `SPF_dopplerScreen.m` (root and `deploy/`) is that screen as a host
-function for the measurement setup: the same logic on the mechanisation's
-own increment and the correction the host applied, no fit, one call per
-epoch with a state struct carried by the host (`STRUCT_SPF.dopplerScreenState`,
-`dopplerScreenParam`), returning the flag that puts the range-rate rows' R
-at the host's maximum for the epoch. `tests/test_dopplerScreen.m` runs it
-epoch by epoch on a synthetic run and holds it against the offline tool on
-the same records: the two flag the same epochs.
+function for the state update: the same logic on the mechanisation
+velocity, the prior state and the update's own step, no fit and no
+hand-over, one call per epoch with a state struct carried by the host
+(`STRUCT_SPF.dopplerScreenState`, `dopplerScreenParam`; the host writes the
+update's velocity step into it after each update), returning the flag that
+puts the range-rate rows' R at the host's maximum for the epoch.
+`tests/test_dopplerScreen.m` runs it epoch by epoch on the error-state
+synthetic and holds it against the offline tool on the same records, which
+needs no correction log for it: the two flag the same epochs.
 `tools/feedbackCheck.m` asks whether the KF update reaches the mechanisation,
 when, and in full. Per nav sample the change of the logged position minus the
 integral of the logged velocity is the part of the motion the velocity does

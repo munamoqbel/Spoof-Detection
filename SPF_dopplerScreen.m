@@ -1,24 +1,32 @@
 %******************************************************************************************
 % DESCRIPTION:
-% Doppler episode screen for the host's measurement setup: are the
-% range-rate rows of this epoch moving in a way the IMU did not measure?
-% A receiver whose Doppler goes wrong on every row at once under strong
-% transient dynamics is invisible to any consensus test, and a filter
-% that follows those rows carries the error into the tilt, where a coast
-% integrates it for as long as it lasts. The screen keeps a velocity coast
-% anchored on the rows it has accepted and propagated with the
-% mechanisation's own increment, and holds the range-rate rows out while
-% they sit further from that coast than a tolerance allows.
+% Doppler episode screen for the host's state update: are the range-rate
+% rows of this epoch moving in a way the IMU did not measure? A receiver
+% whose Doppler goes wrong on every row at once under strong transient
+% dynamics is invisible to any consensus test, and a filter that follows
+% those rows carries the error into the tilt, where a coast integrates it
+% for as long as it lasts. The screen keeps a velocity coast anchored on
+% the rows it has accepted and propagated with the IMU's own increment,
+% and holds the range-rate rows out while they sit further from that
+% coast than a tolerance allows.
 %
-% Per call, in this order:
-%   increment     dvIns = velNavPre - velPrev + velCorrApplied: the change
-%                 of the mechanisation velocity since the last call with
-%                 the velocity correction the mechanisation applied in
-%                 between added back, so the increment is the IMU's alone
+% The host's innovation is total-state: predicted minus measured minus H
+% times the prior error state. The velocity the rows are measured against
+% is therefore vHat = velNav - priorVel, the mechanisation velocity less
+% the prior state's velocity, and vHat does not move at a feedback, since
+% a hand-over moves the mechanisation and the state by the same amount;
+% it moves only by the IMU's increment and by the update's own step. Per
+% call, in this order:
+%   increment     dvIns = vHat - vHatPrev + incPrev: the change of vHat
+%                 since the last call with the previous update's velocity
+%                 step added back (the host writes screen.incPrev after
+%                 each update), which is the IMU's increment less the
+%                 error growth the filter's model expects; no hand-over
+%                 enters and nothing about the feedback is assumed
 %   rows          the range-rate rows (unit velocity partial) fitted alone
 %                 to a velocity and one clock drift per constellation
 %                 (normal equations on the host's matrixInv, as in
-%                 SPF_rowScreen); vRows = velNavPre + ROWS_SIGN * dv is the
+%                 SPF_rowScreen); vRows = vHat + ROWS_SIGN * dv is the
 %                 velocity the rows say, ROWS_SIGN -1 for an innovation of
 %                 predicted minus measured
 %   coast         vCoast follows dvIns every call; each accepted epoch
@@ -43,7 +51,7 @@
 %                 episode and rows within it re-anchor; a long fault is held
 %                 out until the grown tolerance accepts it
 %
-% The flag is consumed by the measurement setup alone: the range-rate rows'
+% The flag is consumed by the measurement noise alone: the range-rate rows'
 % R goes to the host's maximum while it is true, the row layout stays, the
 % ranges and the pressure row update as before, and the gate reads every
 % row at the nominal R as it does for the host's own reject. A wrong
@@ -52,15 +60,18 @@
 %
 % INPUTS:
 %   - screenIn        the screen's state from the previous call
-%                     (STRUCT_SPF.dopplerScreenState to start)
-%   - velNavPre       [3 x 1] NED m/s, the mechanisation velocity this
-%                     update predicts with, before this epoch's feedback
-%   - velCorrApplied  [3 x 1] NED m/s, the velocity correction the
-%                     mechanisation applied since the previous call (the
-%                     previous epoch's hand-over as applied; zeros when
-%                     none), positive when it was taken off the velocity
+%                     (STRUCT_SPF.dopplerScreenState to start); its incPrev
+%                     is the velocity step the previous update added to the
+%                     state, [1 x 3] NED m/s, written by the host after that
+%                     update (zeros when none was applied); it is consumed
+%                     here and zeroed
+%   - velNav          [3 x 1] NED m/s, the mechanisation velocity the rows
+%                     were predicted with, at the measurement time
+%   - priorVel        [3 x 1] NED m/s, the velocity components of the prior
+%                     error state this update starts from
 %   - obsMatrix       [MAX_MEAS x n] H as the host built it
-%   - innovation      [MAX_MEAS x 1] the rows' innovation
+%   - innovation      [MAX_MEAS x 1] the rows' innovation, predicted minus
+%                     measured minus H times the prior
 %   - numRows         the GNSS rows live this epoch
 %   - driftStates     [1 x k] receiver clock drift states, one per
 %                     constellation (a state outside the layout is ignored)
@@ -70,7 +81,8 @@
 %                     (epochs), EPOCH_DT (s), MIN_RATE_ROWS, ROWS_SIGN
 %
 % OUTPUTS:
-%   - screenOut       the state for the next call
+%   - screenOut       the state for the next call (the host then writes
+%                     screenOut.incPrev with this update's velocity step)
 %   - dropRateRows    true: hold the range-rate rows out of this update
 %   - info            valid (enough rate rows and a coast to judge
 %                     against), numRate, rateRows ([MAX_MEAS x 1] logical,
@@ -85,9 +97,10 @@
 % position partial. Fewer than MIN_RATE_ROWS such rows, or an invalid
 % inverse of the normal equations, leave the epoch undecided: the coast
 % keeps propagating, no row is dropped, an episode in progress stays as it
-% is. A call without a previous velocity, or a previous call that left no
-% increment, loses the coast, which the next rows anchor again. The
-% horizontal plane only is judged. A slow drift of the rows under
+% is. A call without a previous velocity loses the coast, which the next
+% rows anchor again. A step the state took outside the update (a gate
+% commit) is not in incPrev and reads as an IMU increment for that epoch.
+% The horizontal plane only is judged. A slow drift of the rows under
 % FLOOR / ALPHA per epoch is followed by the anchor and passes, by design.
 % Element loops on the fixed MAX_MEAS layout (Coder); no persistent state,
 % the host carries screenIn / screenOut.
@@ -97,7 +110,7 @@
 %
 %******************************************************************************************
 %#codegen
-function [screenOut, dropRateRows, info] = SPF_dopplerScreen(screenIn, velNavPre, velCorrApplied, obsMatrix, ...
+function [screenOut, dropRateRows, info] = SPF_dopplerScreen(screenIn, velNav, priorVel, obsMatrix, ...
     innovation, numRows, driftStates, prm)
 
 % Define variables
@@ -111,17 +124,17 @@ screenOut    = screenIn;
 dropRateRows = false;
 info         = struct('valid', false, 'numRate', 0, 'sep', 0.0, 'tolerance', 0.0, 'vRows', zeros(1, 3), ...
     'dvIns', zeros(1, 3), 'inEpisode', false, 'hold', 0, 'rateRows', false(numMeasMax, 1));
-velNow       = [velNavPre(1), velNavPre(2), velNavPre(3)];
-corrNow      = [velCorrApplied(1), velCorrApplied(2), velCorrApplied(3)];
+vHat         = [velNav(1) - priorVel(1), velNav(2) - priorVel(2), velNav(3) - priorVel(3)];
 
-% the IMU's increment since the last call: the mechanisation's change with the applied correction added back
+% the IMU's increment since the last call: the change of nav less prior, the previous update's step added back
 haveIns = false;
 dvIns   = zeros(1, 3);
 if (screenOut.havePrev)
-    dvIns   = velNow - screenOut.velPrev + corrNow;
+    dvIns   = vHat - screenOut.vHatPrev + screenOut.incPrev;
     haveIns = true;
 end % ELSE: first call, no increment yet
-screenOut.velPrev  = velNow;
+screenOut.vHatPrev = vHat;
+screenOut.incPrev  = zeros(1, 3);                    % consumed; the host writes this update's step after it
 screenOut.havePrev = true;
 
 % the rate rows and their velocity: normal equations on the velocity axes and the drift columns in use
@@ -186,7 +199,7 @@ if (numRate >= prm.MIN_RATE_ROWS) && (numRate > numUnk)
             end
             dv(i) = term;
         end
-        vRows = velNow + prm.ROWS_SIGN * dv;
+        vRows = vHat + prm.ROWS_SIGN * dv;
         haveRows = true;
     end % ELSE: no usable fit: the epoch is not judged
 end % ELSE: too few rate rows for a fit with redundancy: the epoch is not judged

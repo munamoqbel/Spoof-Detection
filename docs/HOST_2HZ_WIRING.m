@@ -139,21 +139,30 @@
 %   section 11), and a drop by consensus cannot hide a spoof, which moves
 %   every row together; the record call may stay the Both form with
 %   measVector for both R.
-%   The Doppler episode screen (HOST_DECISIONS section 17) is one more call
-%   in the same place, before the R of the range-rate rows is final, with
-%   the mechanisation's own increment and the correction the host applied:
-%     [dopScreen, dropRateRows, dopInfo] = SPF_dopplerScreen(dopScreen, velNavPre, velCorrApplied, ...
-%         measH, measY, numGnssRows, DRIFT_STATES, STRUCT_SPF.dopplerScreenParam);
+%   The Doppler episode screen (HOST_DECISIONS section 17) is one call in
+%   the state update, after the innovation is formed and before the R of
+%   the range-rate rows is final. The host's innovation is total-state,
+%   predicted minus measured minus H times the prior error state, so the
+%   velocity the rows are measured against is the mechanisation velocity
+%   less the prior state's velocity, and that difference does not move at
+%   a feedback: the screen takes the two and the previous update's step:
+%     [dopScreen, dropRateRows, dopInfo] = SPF_dopplerScreen(dopScreen, velNav, priorVel, ...
+%         measH, innov, numGnssRows, DRIFT_STATES, STRUCT_SPF.dopplerScreenParam);
 %     if dropRateRows
 %         measVector(dopInfo.rateRows) = R_DOPPLER_MAX;   % the range-rate rows out of this update, layout unchanged
 %     end
-%   dopScreen persists in the 2 Hz function (STRUCT_SPF.dopplerScreenState at
-%   init, like trialKF); velNavPre is the NED mechanisation velocity the rows
-%   were predicted with, before this epoch's feedback; velCorrApplied the
-%   velocity part of the previous epoch's correction as the mechanisation
-%   applied it, zeros when there was none. The row layout stays, the ranges
-%   and the pressure row update as before, and the gate reads every row at
-%   the nominal R; the flag may go to it as telemetry, never as a blank row.
+%     ... the update ...
+%     dopScreen.incPrev = stateStep(VEL_STATES)';         % the velocity step this update added to the state; zeros when none
+%   dopScreen persists in the state update (STRUCT_SPF.dopplerScreenState at
+%   init); velNav is the NED mechanisation velocity at the measurement time,
+%   the one the rows were predicted with; priorVel the velocity components
+%   of the prior error state the update starts from; incPrev, written after
+%   the update, the velocity step the update added to the state (VEL_STATES
+%   the host's 4:6), so the screen's increment is the IMU's alone with no
+%   hand-over in it and no assumption about how the mechanisation applies
+%   one. The row layout stays, the ranges and the pressure row update as
+%   before, and the gate reads every row at the nominal R; the flag may go
+%   to it as telemetry, never as a blank row.
 %
 % ----------------------------------------------------------------------
 %  2 Hz function (complete skeleton; ONE setKF per epoch, never two)

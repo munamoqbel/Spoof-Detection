@@ -537,12 +537,18 @@ most of what the 475 s coast integrated into the coast error of runs 9 and
 10. With the heading brought down by the process-noise changes, this one
 receiver fault is what is left of that error.
 
-The screen (`SPF_dopplerScreen`). The range-rate rows are fitted alone to
-a velocity and one clock drift per constellation, and the velocity they
-say, the mechanisation velocity less that fit, is held against a coast
-that follows the mechanisation's own increment every epoch with the
-velocity correction the host applied in between added back, so the coast
-is the IMU's alone. Every accepted epoch re-anchors the coast on the rows
+The screen (`SPF_dopplerScreen`). The host's innovation is total-state,
+predicted minus measured minus H times the prior error state, so the
+velocity the rows are measured against is the mechanisation velocity less
+the prior state's velocity, and that difference does not move at a
+feedback: a hand-over moves the mechanisation and the state by the same
+amount. The range-rate rows are fitted alone to a velocity and one clock
+drift per constellation, and the velocity they say, that difference less
+the fit, is held against a coast that follows the change of the same
+difference every epoch with the previous update's own step added back,
+which is the IMU's increment less the error growth the filter's model
+expects; no hand-over enters and nothing is assumed about how the
+mechanisation applies one. Every accepted epoch re-anchors the coast on the rows
 through a slow filter, a twentieth of the difference, so the anchor is the
 recent honest rows and not one epoch, and a slow drift of the rows passes
 by design. The tolerance is the floor, 0.2 m/s, grown with the time the
@@ -565,17 +571,23 @@ turn does not help the heading, it damages it; in an honest turn the rows
 and the IMU agree and nothing is flagged, so the heading keeps the turns.
 
 Emulated offline on run 10 (`dopplerEpisodeCheck`, the same logic on the
-records and the run, with the host's velocity correction taken from a
-log): all 36 episodes caught, the portal half a second after the rows
-leave the reference and held to the tunnel; false flags 1.2 percent of
-the hour's Doppler, release tails 4 percent, and 5 percent in the band
-where the rows are 0.15 to 0.25 m/s off, which the screen holds out and
-the scoring counts as neither clean nor wrong. The emulation needed four
-reads on its inputs before it could be trusted, each a tool option now: a
-lever-arm term in the rows' velocity, the reference point's own offset
-from the IMU, how much of the host's velocity correction the logged
-velocity carries and when, and the time pairing of the rows, which is
-sound. In the host the screen reads the increment and the correction
-directly and needs none of them. Open: the floor, left at 0.2 for the
-first run with the screen; the reversing stretch at 304 to 344 s, a
+records and the run; this first form took the nav velocity alone and the
+host's velocity correction from a log): all 36 episodes caught, the portal
+half a second after the rows leave the reference and held to the tunnel;
+false flags 1.2 percent of the hour's Doppler, release tails 4 percent,
+and 5 percent in the band where the rows are 0.15 to 0.25 m/s off, which
+the screen holds out and the scoring counts as neither clean nor wrong.
+That emulation needed four reads on its inputs before it could be
+trusted, each a tool option now: a lever-arm term in the rows' velocity,
+the reference point's own offset from the IMU, how much of the host's
+velocity correction the logged velocity carries and when, and the time
+pairing of the rows, which is sound. The total-state form above reads the
+prior and the update's step from the records and needs no correction log;
+the third read becomes a check, the share of the state left in the
+increment, which is zero when the mechanisation takes the whole hand-over
+and the prior is the state the rows were predicted with. In the host the
+screen reads the mechanisation velocity, the prior and the update's step
+directly and needs none of the reads. Open: the total-state form's result
+on run 10's records, to read before the first run with the screen; the
+floor, left at 0.2 for that run; the reversing stretch at 304 to 344 s, a
 receiver behaviour to look at in its raw output.

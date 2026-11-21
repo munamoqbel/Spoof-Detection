@@ -633,7 +633,7 @@ classdef STRUCT_SPF
                 'FLOOR',         0.20, ...        % m/s, the tolerance on a fresh anchor
                 'DRIFT_RATE',    0.005, ...       % m/s per s of coast, tilt and bias drift of the IMU
                 'HEADING_SIGMA', 5.0e-3, ...      % rad, a heading error on the speed change since the anchor
-                'ALPHA',         0.05, ...        % the anchor's share of each accepted epoch's rows
+                'ALPHA',         0.10, ...        % the anchor's share of each accepted epoch's rows
                 'CONFIRM',       2, ...           % epochs beyond the tolerance that start an episode
                 'RELEASE',       4, ...           % epochs within it that end one
                 'RELEASE_GROW',  10, ...          % one more release epoch per this many epochs held

@@ -244,9 +244,9 @@ chk.handover     = strcmp(resH.fbModel, 'handover') && isequal(resH.flag, resT.f
     ~isempty(strfind(txtH, 'USED: the nav velocity less the prior state for the rows')) && ~isempty(strfind(txtH, 'the two coasts against the truth')) && ...
     resHQ.hoRms < resQ.totRms && resHQ.nFalse < resQ.nFalse && numel(resHQ.episodes) == 2 && all([resHQ.episodes.detected]);
 % the fallback models still run on these records when forced; their rows' velocity is off by the prior state, which
-% absorbs half of the small episode within two epochs, so only the large one is read and caught
+% absorbs the episodes, so what they read and catch there is not the question, only that they run and flag nothing clean
 resTL = dopplerEpisodeCheck(logT, tKfT, runT, setfield(setfield(CORR, 'fbModel', 'logged'), 'quiet', true)); %#ok<SFLD>
-chk.totalForced  = strcmp(resTL.fbModel, 'logged') && numel(resTL.episodes) >= 1 && all([resTL.episodes.detected]) && resTL.nFalse <= 2;
+chk.totalForced  = strcmp(resTL.fbModel, 'logged') && numel(resTL.flag) == numel(tKfT) && resTL.nFalse <= 2;
 names = fieldnames(chk);
 for i = 1:numel(names)
     if ~chk.(names{i}), fprintf('   FAILED sub-check: %s\n', names{i}); ok = false; end

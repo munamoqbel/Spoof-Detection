@@ -549,7 +549,7 @@ difference every epoch with the previous update's own step added back,
 which is the IMU's increment less the error growth the filter's model
 expects; no hand-over enters and nothing is assumed about how the
 mechanisation applies one. Every accepted epoch re-anchors the coast on the rows
-through a slow filter, a twentieth of the difference, so the anchor is the
+through a slow filter, a tenth of the difference, so the anchor is the
 recent honest rows and not one epoch, and a slow drift of the rows passes
 by design. The tolerance is the floor, 0.2 m/s, grown with the time the
 coast has run on the IMU alone, 0.005 m/s per second for the tilt and bias
@@ -570,7 +570,13 @@ and a long fault is held out for as long as the filter's velocity
 disagrees with it. After forty epochs without rows the coast is lost and
 the next rows anchor it afresh, so a tunnel does not leave a coast metres
 per second off to flag the honest rows at its exit. The end of an episode
-is a return to the coast, and nothing fires there. The
+is a return to the coast, and nothing fires there. With the two rules in,
+run 10's records read 18.7 percent of the Doppler flagged, 77 false flags
+in 12 runs and 318 release tails against 31.6 percent, 531 and 501 before,
+every episode caught; the anchor's share was then set from the same
+records, a twentieth, a tenth and three twentieths giving 1041, 903 and
+896 flagged epochs with 40, 40 and 39 episodes caught, so a tenth, the
+largest share that loses none. The
 flag is one input to the measurement setup: the range-rate rows' R goes to
 the host's maximum while it is on, the layout stays, the ranges and the
 pressure row update as before, and the gate reads every row at the nominal
@@ -625,7 +631,7 @@ flagged stretch of 10 epochs or more against DRIFT_RATE. On run 10 that
 drift reads a median near zero over the 50 long holds, which mostly sit on
 true episodes where the coast is right, a 90th percentile of 0.006 and a
 worst of 0.013 m/s per second, and the table through 465 to 500 s shows
-the mechanism: the anchor filter at 0.05 follows a drifting IMU with a
+the mechanism: the anchor filter at a twentieth followed a drifting IMU with a
 standing lag of the drift per epoch over ALPHA, about 0.1 m/s there, a
 21-epoch stretch without rows then adds 0.12, and the clean rows that
 return sit 0.36 from the coast while the tolerance has grown to 0.21. Two

@@ -242,7 +242,10 @@ pairing latency read the same per rad/s at one speed and part with it, the
 rows' error regressed jointly on the yaw rate and on speed times yaw rate,
 an arm in metres and a latency in seconds, against the truth where the
 filter cannot dilute it and in the host's own view, with the slope in a slow
-and a fast band as the plain check.
+and a fast band as the plain check. The printout comes in three blocks, the
+inputs the screen is fed, the coast, and the screen's result; the feedback
+reads of the fallback models appear under those models or with
+`opts.verbose`.
 `tests/test_dopplerEpisodeCheck.m` runs a synthetic hour with two receiver
 episodes, a braking, two turns and two sharp corners under a heading error,
 a wrong arm and a reference 0.5 m from the IMU, a gap without rows, a floor

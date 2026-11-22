@@ -234,10 +234,15 @@ where a share appearing only then is a state vector recorded in ENU
 rate, the lever-arm error the rows carry, taken out of the rows with
 `opts.armSlope` (the host's arm error, as a corrected arm input would) and
 what is left of it, the truth point's own offset, taken out of the scoring
-with `opts.truthSlope`, both vectors named by a call without them; and on
+with `opts.truthSlope`, both vectors named by a call without them; on
 the epochs faster than 1 m/s2 the rows' error
 as a time offset, which jumping between consecutive epochs is rows paired
-with the wrong pulse, a fault no screen can fix.
+with the wrong pulse, a fault no screen can fix; and, since an arm and a
+pairing latency read the same per rad/s at one speed and part with it, the
+rows' error regressed jointly on the yaw rate and on speed times yaw rate,
+an arm in metres and a latency in seconds, against the truth where the
+filter cannot dilute it and in the host's own view, with the slope in a slow
+and a fast band as the plain check.
 `tests/test_dopplerEpisodeCheck.m` runs a synthetic hour with two receiver
 episodes, a braking, two turns and two sharp corners under a heading error,
 a wrong arm and a reference 0.5 m from the IMU, a gap without rows, a floor

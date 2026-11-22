@@ -74,6 +74,14 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 %     time pairing    on the epochs faster than 1 m/s2 the rows' error against the truth projected on the
 %                     acceleration is a time offset; an offset that jumps between consecutive epochs is rows
 %                     paired with the wrong pulse on some of them, which no screen can fix
+%     arm or latency  an arm and a pairing latency read the same per rad/s of yaw rate at one speed, since the
+%                     latency's error in a turn is the centripetal acceleration, speed times yaw rate, times the
+%                     latency; they part with speed. Over the turning epochs nav minus rows is regressed jointly
+%                     on the yaw rate (an arm, m) and on speed times yaw rate (a latency, s), along and across,
+%                     and the across slope per rad/s is given in a slow and a fast band: an arm reads the same in
+%                     both, a latency reads in proportion to the speed. The host's filter absorbs part of any
+%                     consistent row error into the nav within a turn, so nav minus rows is a lower bound; with the
+%                     truth the same fit is made on truth minus rows, undiluted, and the verdict rests on it
 %   Scoring needs the truth (run.tTrue, run.trueVel): the rows' error v_rows - v_truth labels the epochs the
 %   receiver was actually wrong (above 'episodeLevel' for at least 'episodeMin' epochs); the printout gives
 %   each true episode with its detection delay and coverage, the release tails (flags within the longest release
@@ -120,7 +128,11 @@ function [res] = dopplerEpisodeCheck(spfMeasLog, tKf, run, opts)
 %   against the truth per epoch, NaN without the prior, the logged correction and the truth), fbScan ([3 x 4]: lag,
 %   share, t-statistic, rms of the regressor), yawRate [K x 1], armFit [1 x 2] (along, across, m per rad/s, NaN without navAtt or
 %   truth), armFitSig, armHost [1 x 2] (nav minus rows per rad/s, the host's arm error), armHostSig, fbScanWide
-%   ([25 x 4], lags -12 to 12), alignLag (its sharpest lag), fbScanSwap ([3 x 4],
+%   ([25 x 4], lags -12 to 12), alignLag (its sharpest lag), armJoint and armJointSig ([1 x 2], the arm part of the joint
+%   fit, along and across, m per rad/s), latFit and latFitSig ([1 x 2], the latency part, s; the across one is the
+%   read), bandSlope ([2 x 2], the slopes per rad/s in the slow and the fast band, along and across), bandSpeed
+%   ([1 x 2], the bands' mean speeds), and the same against the truth: armTrueJoint, armTrueJointSig, latTrue,
+%   latTrueSig, bandSlopeTrue, bandSpeedTrue (NaN without truth), fbScanSwap ([3 x 4],
 %   north and east swapped), frameOff (true when the share appears only swapped), firC and firSe ([25 x 1], the
 %   increment's delivery profile over lags 0 to 24 and its sigma), firTotal, firTotalSe, lgTotal and lgC (the same for
 %   a logged correction), jumpClusters ([n x 3]: start,
@@ -571,11 +583,37 @@ if hasAtt
         [armHost, armHostSig] = slopeOnYaw(navMinusRows, yawRate, uAlong, uAcross, turnH);
     end
 end
+% an arm and a latency part with speed: nav minus rows on the yaw rate and on speed times yaw rate jointly, and the
+% slope per rad/s in a slow and a fast band
+armJoint = NaN(1, 2);  armJointSig = NaN(1, 2);  latFit = NaN(1, 2);  latFitSig = NaN(1, 2);  bandSlope = NaN(2, 2);  bandSpeed = NaN(1, 2);
+speedK = sqrt(sum(vNavM(:, 1:2) .^ 2, 2));
+if hasAtt && nnz(turnH) >= 20
+    [armJoint, armJointSig, latFit, latFitSig] = armLatencyFit(navMinusRows, yawRate, speedK, uAlong, uAcross, turnH);
+    medSpeed = median(speedK(turnH));
+    slow = turnH & speedK <= medSpeed;  fast = turnH & speedK > medSpeed;
+    if nnz(slow) >= 10 && nnz(fast) >= 10
+        bandSlope(1, :) = slopeOnYaw(navMinusRows, yawRate, uAlong, uAcross, slow);
+        bandSlope(2, :) = slopeOnYaw(navMinusRows, yawRate, uAlong, uAcross, fast);
+        bandSpeed = [mean(speedK(slow)), mean(speedK(fast))];
+    end
+end
 if hasTruth && hasAtt
     turn = abs(yawRate) > 2 * pi / 180 & all(isfinite(rowsErr(:, 1:2)), 2) & inWin;
     nTurn = nnz(turn);
     if nTurn >= 10
         [armFit, armFitSig] = slopeOnYaw(-rowsErr(:, 1:2), yawRate, uAlong, uAcross, turn);
+    end
+end
+% the same against the truth, truth minus rows, which the filter does not dilute
+armTrueJoint = NaN(1, 2);  armTrueJointSig = NaN(1, 2);  latTrue = NaN(1, 2);  latTrueSig = NaN(1, 2);  bandSlopeTrue = NaN(2, 2);  bandSpeedTrue = NaN(1, 2);
+if hasTruth && hasAtt && nTurn >= 20
+    [armTrueJoint, armTrueJointSig, latTrue, latTrueSig] = armLatencyFit(-rowsErr(:, 1:2), yawRate, speedK, uAlong, uAcross, turn);
+    medSpeed = median(speedK(turn));
+    slow = turn & speedK <= medSpeed;  fast = turn & speedK > medSpeed;
+    if nnz(slow) >= 10 && nnz(fast) >= 10
+        bandSlopeTrue(1, :) = slopeOnYaw(-rowsErr(:, 1:2), yawRate, uAlong, uAcross, slow);
+        bandSlopeTrue(2, :) = slopeOnYaw(-rowsErr(:, 1:2), yawRate, uAlong, uAcross, fast);
+        bandSpeedTrue = [mean(speedK(slow)), mean(speedK(fast))];
     end
 end
 episodes = struct('tStart', {}, 'tEnd', {}, 'detected', {}, 'delay', {}, 'coverage', {});
@@ -621,7 +659,10 @@ res = struct('t', t, 'vRows', vRows, 'dvIns', dvIns, 'onset', onset, 'thresh', t
     'incErr', incErr, 'lossRatio', lossRatio, 'lossClass', lossClass, 'lossNotTaken', lossNotTaken, 'hoRms', hoRms, ...
     'vCoast', vCoastK, 'coastErr', coastErr, 'coastDrift', coastDrift, 'coastLost', coastLost, ...
     'fbScan', fbScan, 'yawRate', yawRate, 'armFit', armFit, 'armFitSig', armFitSig, ...
-    'armHost', armHost, 'armHostSig', armHostSig, ...
+    'armHost', armHost, 'armHostSig', armHostSig, 'armJoint', armJoint, 'armJointSig', armJointSig, 'latFit', latFit, ...
+    'latFitSig', latFitSig, 'bandSlope', bandSlope, 'bandSpeed', bandSpeed, 'armTrueJoint', armTrueJoint, ...
+    'armTrueJointSig', armTrueJointSig, 'latTrue', latTrue, 'latTrueSig', latTrueSig, 'bandSlopeTrue', bandSlopeTrue, ...
+    'bandSpeedTrue', bandSpeedTrue, ...
     'fbScanWide', fbScanWide, 'alignLag', alignLag, 'fbScanSwap', fbScanSwap, 'frameOff', frameOff, 'firC', firC, 'firSe', firSe, ...
     'firTotal', firTotal, 'firTotalSe', firTotalSe, 'lgTotal', lgTotal, 'lgC', lgC, 'tauPair', tauPair, ...
     'pairShare', pairShare, 'pairJump', pairJump, 'jumpClusters', jumpClusters, 'opts', o);
@@ -733,6 +774,32 @@ end
 if hasAtt && all(isfinite(armHost))
     fprintf('   nav minus rows per rad/s of yaw rate, the host''s lever-arm error in this frame (leverArmCheck''s read): along %+.2f m, across %+.2f m (sigma %.2f / %.2f)\n', ...
         armHost(1), armHost(2), armHostSig(1), armHostSig(2));
+end
+if hasAtt && all(isfinite(latFit))
+    fprintf('   arm or latency, nav minus rows on the yaw rate and on speed times yaw rate jointly: across, an arm of %+.2f m (sigma %.2f) and a latency of %+.3f s (sigma %.3f);\n', ...
+        armJoint(2), armJointSig(2), latFit(2), latFitSig(2));
+    fprintf('      along, %+.2f m (sigma %.2f) and %+.3f s (sigma %.3f); the across latency is the read, the along one a check\n', ...
+        armJoint(1), armJointSig(1), latFit(1), latFitSig(1));
+    if all(isfinite(bandSpeed))
+        fprintf('      the across slope per rad/s at %.0f m/s %+.2f m and at %.0f m/s %+.2f m (an arm reads the same, a latency in proportion to the speed)\n', ...
+            bandSpeed(1), bandSlope(1, 2), bandSpeed(2), bandSlope(2, 2));
+    end
+    if all(isfinite(latTrue))
+        fprintf('      against the truth, undiluted by the filter: across, an arm of %+.2f m (sigma %.2f) and a latency of %+.3f s (sigma %.3f); along %+.2f m and %+.3f s\n', ...
+            armTrueJoint(2), armTrueJointSig(2), latTrue(2), latTrueSig(2), armTrueJoint(1), latTrue(1));
+        if all(isfinite(bandSpeedTrue))
+            fprintf('      its across slope per rad/s at %.0f m/s %+.2f m and at %.0f m/s %+.2f m\n', bandSpeedTrue(1), bandSlopeTrue(1, 2), bandSpeedTrue(2), bandSlopeTrue(2, 2));
+        end
+        vLat = latTrue(2);  vLatSig = latTrueSig(2);  vArm = armTrueJoint(2);  vArmSig = armTrueJointSig(2);
+    else
+        vLat = latFit(2);  vLatSig = latFitSig(2);  vArm = armJoint(2);  vArmSig = armJointSig(2);
+    end
+    if abs(vLat) > 2 * vLatSig && abs(vLat) > 0.01 && abs(vArm) < 2 * vArmSig
+        fprintf('      LATENCY: the across slope is a pairing latency of %.0f ms, not an arm; the rows are paired with a nav sample that much apart from their time\n', ...
+            1e3 * vLat);
+    elseif abs(vLat) > 2 * vLatSig && abs(vLat) > 0.01
+        fprintf('      (both an arm and a latency read above their sigma across track; a latency of %.0f ms and an arm of %.2f m)\n', 1e3 * vLat, vArm);
+    end
 end
 if hasAtt && hasTruth
     if nTurn >= 10
@@ -899,6 +966,23 @@ total = sum(cc);  totalSe = sqrt(max(sum(covC(:)), 0));
 ok = totalSe > 0 && abs(total) / totalSe >= tMin;
 for j = 0:nLags
     applied(j + 1:K, :) = applied(j + 1:K, :) + cc(j + 1) * series(1:K - j, :);
+end
+end
+
+function [arm, armSig, lat, latSig] = armLatencyFit(vec, yawRate, speed, uAlong, uAcross, use)
+% a [K x 2] horizontal vector projected along and across the heading and regressed on the yaw rate and on speed
+% times yaw rate over the epochs 'use', with an intercept: the arm part (m per rad/s) and the latency part (s), each
+% with its sigma, along and across
+arm = NaN(1, 2);  armSig = NaN(1, 2);  lat = NaN(1, 2);  latSig = NaN(1, 2);
+n = nnz(use);
+eA = sum(vec(use, :) .* uAlong(use, :), 2);  eX = sum(vec(use, :) .* uAcross(use, :), 2);
+A = [yawRate(use), speed(use) .* yawRate(use), ones(n, 1)];
+if rank(A) < 3, return; end
+for p = 1:2
+    if p == 1, yv = eA; else, yv = eX; end
+    c = A \ yv;  r = yv - A * c;
+    covC = (r' * r) / max(n - 3, 1) * inv(A' * A);
+    arm(p) = c(1);  armSig(p) = sqrt(covC(1, 1));  lat(p) = c(2);  latSig(p) = sqrt(covC(2, 2));
 end
 end
 

@@ -17,8 +17,8 @@ function test_dopplerEpisodeCheck()
 % state left in the increment reads zero, the flags are the same without the truth, a mechanisation that delivers
 % only three quarters of the hand-over is read as such, a feedback branch in which the state keeps a quarter while the
 % nav takes a quarter is read from the state's loss between an update and the next prior, the hand-over form of the
-% coast gives the same flags where the loss is the hand-over and the exact coast where it is not, and the fallback
-% models still run when forced.
+% coast gives the same flags where the loss is the hand-over and the exact coast where it is not, an arm and a pairing
+% latency are told apart by speed, and the fallback models still run when forced.
 % Run from the repo root (MATLAB, or Octave with tools/octave_shim).
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..', 'tools'));
@@ -243,6 +243,17 @@ resHQ = dopplerEpisodeCheck(logQ, tKfQ, runQ, setfield(HAND, 'quiet', true)); %#
 chk.handover     = strcmp(resH.fbModel, 'handover') && isequal(resH.flag, resT.flag) && abs(resH.hoRms - resT.totRms) < 1e-3 && ...
     ~isempty(strfind(txtH, 'USED: the nav velocity less the prior state for the rows')) && ~isempty(strfind(txtH, 'the two coasts against the truth')) && ...
     resHQ.hoRms < resQ.totRms && resHQ.nFalse < resQ.nFalse && numel(resHQ.episodes) == 2 && all([resHQ.episodes.detected]);
+% an arm and a latency part with speed: the corners at 8 m/s and the turns at 20 m/s. The run with the arm reads the
+% arm and no latency; a run with the rows paired 30 ms late and no arm reads the latency and no arm, with the across
+% slope per rad/s in proportion to the speed of the band
+chk.armNotLat    = abs(resT.latTrue(2)) < 2 * resT.latTrueSig(2) + 0.005 && abs(resT.armTrueJoint(2) - resT.armFit(2)) < 0.15 && ...
+    abs(resT.latFit(2)) < 0.015 && isempty(strfind(txtT, 'LATENCY:'));
+[runY, logY, tKfY, auxY] = dopplerSynthRun(struct('seed', 21, 'latency', 0.03, 'arm', [0 0], 'truthPoint', [0 0]));
+txtY = evalc('resY = dopplerEpisodeCheck(logY, tKfY, runY);');
+% (the host's own view, nav minus rows, is diluted by the filter and reads a lower bound; the truth-based one is the read)
+chk.latency      = abs(resY.latTrue(2) - 0.03) < 0.008 && abs(resY.armTrueJoint(2)) < 2 * resY.armTrueJointSig(2) + 0.05 && ...
+    ~isempty(strfind(txtY, 'LATENCY:')) && resY.bandSlopeTrue(2, 2) > 1.8 * resY.bandSlopeTrue(1, 2) && ...
+    abs(resY.bandSlopeTrue(2, 2) - 0.03 * resY.bandSpeedTrue(2)) < 0.12 && resY.latFit(2) > 0.005 && resY.latFit(2) < 0.03;
 % the fallback models still run on these records when forced; their rows' velocity is off by the prior state, which
 % absorbs the episodes, so what they read and catch there is not the question, only that they run and flag nothing clean
 resTL = dopplerEpisodeCheck(logT, tKfT, runT, setfield(setfield(CORR, 'fbModel', 'logged'), 'quiet', true)); %#ok<SFLD>
@@ -257,6 +268,9 @@ fprintf('limited feedback: %d limited epochs, loss of three quarters on %d, slop
     nnz(auxQ.limited), threeQ.n, threeQ.slope, threeQ.nUsed, 1 - threeQ.slope, resQ.nFlag, resQ.nFalse);
 fprintf('hand-over form: flags differing from total-state %d; on the limited run the coasts'' rms %.4f against %.4f m/s, false %d against %d\n', ...
     nnz(resH.flag ~= resT.flag), resHQ.hoRms, resQ.totRms, resHQ.nFalse, resQ.nFalse);
+fprintf('arm or latency against the truth: with the arm, latency %+.3f s and arm %+.2f m across; with 30 ms, latency %+.3f s (host''s view %+.3f) and arm %+.2f m, band slopes %+.2f at %.0f m/s and %+.2f at %.0f m/s\n', ...
+    resT.latTrue(2), resT.armTrueJoint(2), resY.latTrue(2), resY.latFit(2), resY.armTrueJoint(2), resY.bandSlopeTrue(1, 2), resY.bandSpeedTrue(1), ...
+    resY.bandSlopeTrue(2, 2), resY.bandSpeedTrue(2));
 if numel(ep) == 2
     fprintf('episodes: %.1f s caught after %.1f s (%.0f%%), %.1f s caught after %.1f s (%.0f%%); false flags %d, release tails %d; feedback share %.3f at lag %d\n', ...
         ep(1).tEnd - ep(1).tStart, ep(1).delay, 100 * ep(1).coverage, ep(2).tEnd - ep(2).tStart, ep(2).delay, 100 * ep(2).coverage, ...

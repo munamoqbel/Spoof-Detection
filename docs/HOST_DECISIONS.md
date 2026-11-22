@@ -602,7 +602,33 @@ few. Hence: the hold is time, advancing on every call while an episode is
 on, judged or not, with the hold limit and its re-anchor applying on an
 unjudged call too, since the re-anchor needs no rows; an unjudged call
 neither confirms nor releases; and the emulation fits under the host's
-redundancy rule, so it reproduces the host instead of flattering it. The
+redundancy rule, so it reproduces the host instead of flattering it. Under
+that rule run 11's records read 15.9 percent flagged, 21 false flags in 6
+runs and 260 release tails, 42 of 42 episodes caught, the number to expect
+once the hold is time.
+
+What run 11 settled about the coast. The horizontal acceleration error at
+the tunnel entry, the slope of the velocity error over the first 40 s of
+the coast, is the same in runs 10 and 11 to a few percent, about 0.009 m/s²
+in the coast's direction: holding the portal out did not move it, so the
+residual is systematic and the portal was the wrong suspect. It is tilt,
+inside the filter's own sigma, and its source is the yaw-rate slope the
+rows have carried from the start, about 0.4 m per rad/s: in every turn the
+rows are 0.2 to 0.3 m/s off the same way in the body frame, which the
+filter believes and puts into tilt, the bias steps at hard turns being its
+signature. The host's own log of its lever-arm term shows the term formed
+from a real rate, so the slope is not an uncompensated arm; the other thing
+with that signature is a pairing latency, whose error in a turn is the
+centripetal acceleration times the latency, and the time-pairing read has
+given 30 ms on every run, which at 15 m/s is 0.45 m per rad/s. The two
+part with speed, an arm's slope constant, a latency's in proportion, and
+the tool now reads them jointly against the reference. A transient episode
+the screen holds out; a consistent error at every turn no screen can, and
+that fix is on the host's side, in the time the rows are paired with. The
+two coast forms,
+compared on run 11 with the hand-over logged, read 0.0053 against
+0.0052 m/s per epoch and 21 against 5 false flags in the hour, so the host
+function stays on the update's step. The
 flag is one input to the measurement setup: the range-rate rows' R goes to
 the host's maximum while it is on, the layout stays, the ranges and the
 pressure row update as before, and the gate reads every row at the nominal

@@ -18,7 +18,9 @@ function [run, log, tKf, aux] = dopplerSynthRun(opt)
 %   SPF_dopplerScreen runs in the loop on each epoch's records before the update, and an epoch it flags leaves the
 %   rows out of the update, as the host's R at its maximum does; its flags come back in aux). gap may have several
 %   rows, one per stretch without rows; fewRows [] ([t0 t1] rows: stretches with 4 range and 4 rate rows on two
-%   constellations, too few for the screen's fit against its five unknowns, so the epoch is not judged). The filter
+%   constellations, too few for the screen's fit against its five unknowns, so the epoch is not judged); latency 0 s
+%   (the rows paired with a nav sample this much after their own time: the rows' velocity is the truth that much
+%   earlier). The filter
 %   also carries a position error state aided by the ranges every
 %   epoch with rows (posNoise 0.5 m, Kp 0.3 on position, Kv 0.03 on velocity), which keeps working while the Doppler
 %   rows are held out and pulls the velocity state back as the host's ranges do.
@@ -29,7 +31,8 @@ function [run, log, tKf, aux] = dopplerSynthRun(opt)
 if nargin < 1, opt = struct(); end
 o = struct('T', 400, 'seed', 21, 'corners', true, 'episodes', [200 205 0.35 0 0; 300 323 0 -0.4 3], 'gap', [350 360], ...
     'arm', [-0.18, 0.37], 'truthPoint', [0.25, 0.40], 'psi', 5e-3, 'accBias', 0.002, 'G', 0.1, 'KF', 0.5, 'delivery', 1, ...
-    'noise', 0.003, 'limiter', Inf, 'LM', 0.25, 'screen', false, 'posNoise', 0.5, 'Kp', 0.3, 'Kv', 0.03, 'fewRows', []);
+    'noise', 0.003, 'limiter', Inf, 'LM', 0.25, 'screen', false, 'posNoise', 0.5, 'Kp', 0.3, 'Kv', 0.03, 'fewRows', [], ...
+    'latency', 0);
 f = fieldnames(opt);
 for i = 1:numel(f), o.(f{i}) = opt.(f{i}); end
 randn('seed', o.seed);  rand('seed', o.seed);
@@ -99,6 +102,7 @@ for j = 2:N
     pErr = pErr + e / fs;
     if kNext <= K && tN(j) >= tKf(kNext)
         k = kNext;  jm = j - 1;  jBefore(k) = jm;
+        jRows = max(jm - round(o.latency * fs), 1);                          % the rows' own time, a latency before the nav's
         xPri(k, :) = x;  xpPri = xp;
         % the records of this epoch: 10 range rows and 10 rate rows on two constellations, the innovations
         % predicted minus measured minus H times the prior, none in a gap
@@ -110,7 +114,7 @@ for j = 2:N
             clk = 16 + 2 * double(sIdx > 5);
             H(i, 1:3) = -u(sIdx, :);          H(i, clk) = 1;      y(i) = rangeNoise(k, sIdx);
             H(nSat + i, 4:6) = -u(sIdx, :);   H(nSat + i, clk + 1) = 1;
-            y(nSat + i) = H(nSat + i, 4:6) * (vNav(jm, :) - xPri(k, :) - vRowsTrue(jm, :))' + rowNoise(k, sIdx) + 0.02 * double(sIdx > 5);
+            y(nSat + i) = H(nSat + i, 4:6) * (vNav(jm, :) - xPri(k, :) - vRowsTrue(jRows, :))' + rowNoise(k, sIdx) + 0.02 * double(sIdx > 5);
         end
         numMeas = uint8(2 * nSat);
         if inGap(k), numMeas = uint8(0); end
@@ -128,7 +132,7 @@ for j = 2:N
             xp = xpPri + o.Kp * zp;
         end
         if useRows
-            dis = (vTrue(jm, :) + e - x) - vRowsTrue(jm, :);                % nav less prior, against the rows
+            dis = (vTrue(jm, :) + e - x) - vRowsTrue(jRows, :);             % nav less prior, against the rows
             inc(k, :) = inc(k, :) + o.KF * dis;
         end
         xPost(k, :) = x + inc(k, :);

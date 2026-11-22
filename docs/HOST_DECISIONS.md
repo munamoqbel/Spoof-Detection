@@ -622,10 +622,22 @@ with that signature is a pairing latency, whose error in a turn is the
 centripetal acceleration times the latency, and the time-pairing read has
 given 30 ms on every run, which at 15 m/s is 0.45 m per rad/s. The two
 part with speed, an arm's slope constant, a latency's in proportion, and
-the tool now reads them jointly against the reference. A transient episode
-the screen holds out; a consistent error at every turn no screen can, and
-that fix is on the host's side, in the time the rows are paired with. The
-two coast forms,
+the tool reads them jointly against the reference. On run 11 the across
+slope read the same at 6 and at 11 m/s, a point offset and not a latency,
+and a ten-minute replay with the arm input at zero gave the arm as the data
+see it: the configured length to within a few centimetres, the direction
+7 degrees off in the IMU's horizontal axes, the antenna 0.3 m less to one
+side than the drawing says, by the host's own view and against the
+reference alike. The residual run 11 carried against the reference, 0.36 m
+per rad/s, is that geometry difference; the host's own view of it, 0.55 m,
+is inflated by the filter's response in turns, as the synthetic had shown;
+and the 30 ms the time-pairing read gave on every run was this residual
+arm, since an arm under a centripetal acceleration reads as a latency of
+its length over the speed, which the zero-arm replay confirmed by reading
+150 ms for 2.47 m. A transient episode the screen holds out; a consistent
+error at every turn no screen can, and that fix is the arm's components in
+the IMU's axes, from the data for the next run and from a survey of the
+mounting for the product. The two coast forms,
 compared on run 11 with the hand-over logged, read 0.0053 against
 0.0052 m/s per epoch and 21 against 5 false flags in the hour, so the host
 function stays on the update's step. The

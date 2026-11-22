@@ -139,6 +139,19 @@ isENU = strcmp(o.frame, 'ENU');
 K = numel(spfMeasLog);
 t = tKf(:);  t = t(1:K);
 tNav = run.t(:) + o.tShift;  navVel = run.navVel;                       % the run on the records' clock
+% the run's arrays must agree in length; cut to the shortest and say so, rather than index past one of them
+nRun = numel(tNav);
+if size(navVel, 1) ~= nRun || (isfield(run, 'navAtt') && ~isempty(run.navAtt) && size(run.navAtt, 1) ~= nRun)
+    nCut = min([nRun, size(navVel, 1)]);
+    if isfield(run, 'navAtt') && ~isempty(run.navAtt), nCut = min(nCut, size(run.navAtt, 1)); end
+    if ~o.quiet
+        fprintf('dopplerEpisodeCheck: run.t has %d samples, run.navVel %d%s; cut to the first %d (%.0f s)\n', nRun, size(navVel, 1), ...
+            pick(isfield(run, 'navAtt') && ~isempty(run.navAtt), sprintf(', run.navAtt %d', size(run.navAtt, 1)), ''), nCut, tNav(nCut) - tNav(1));
+    end
+    tNav = tNav(1:nCut);  navVel = navVel(1:nCut, :);
+    if isfield(run, 'navAtt') && ~isempty(run.navAtt), run.navAtt = run.navAtt(1:nCut, :); end
+    if isfield(run, 'fbVel') && ~isempty(run.fbVel) && size(run.fbVel, 1) == nRun, run.fbVel = run.fbVel(1:nCut, :); end
+end
 tTrueV = [];
 if isfield(run, 'tTrue'), tTrueV = run.tTrue(:) + o.tShift; end
 hasTruth = isfield(run, 'tTrue') && isfield(run, 'trueVel') && ~isempty(run.trueVel);
@@ -149,7 +162,7 @@ vNavM = NaN(K, 3);  dv = NaN(K, 3);  xPlus = NaN(K, 3);  xPri = NaN(K, 3);  nRat
 hasPrior = isfield(spfMeasLog, 'priorState');
 for k = 1:K
     j = find(tNav < t(k), 1, 'last');
-    if isempty(j), continue; end
+    if isempty(j) || t(k) - tNav(j) > 1.0, continue; end                % no nav sample within a second before the epoch
     vNavM(k, :) = navVel(j, :);  tSample(k) = tNav(j);               % the rows and the truth are read at this sample
     s = spfMeasLog(k);  m = double(s.numMeas);
     if hasPrior && ~isempty(s.priorState), xPri(k, :) = toNED(s.priorState(4:6)', isENU); end   % the prior, update or not

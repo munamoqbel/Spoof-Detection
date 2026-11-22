@@ -254,6 +254,11 @@ txtY = evalc('resY = dopplerEpisodeCheck(logY, tKfY, runY);');
 chk.latency      = abs(resY.latTrue(2) - 0.03) < 0.008 && abs(resY.armTrueJoint(2)) < 2 * resY.armTrueJointSig(2) + 0.05 && ...
     ~isempty(strfind(txtY, 'LATENCY:')) && resY.bandSlopeTrue(2, 2) > 1.8 * resY.bandSlopeTrue(1, 2) && ...
     abs(resY.bandSlopeTrue(2, 2) - 0.03 * resY.bandSpeedTrue(2)) < 0.12 && resY.latFit(2) > 0.005 && resY.latFit(2) < 0.03;
+% a run whose time vector runs past its velocity, as a replay cut short leaves it: the arrays are cut to their common
+% length with a line saying so, and the flags are those of the whole run
+runCut = runT;  runCut.t = [runT.t; runT.t(end) + (1:500)' / 100];
+txtC = evalc('resC = dopplerEpisodeCheck(logT, tKfT, runCut, CORR);');
+chk.cutRun       = isequal(resC.flag, resT.flag) && ~isempty(strfind(txtC, 'cut to the first'));
 % the fallback models still run on these records when forced; their rows' velocity is off by the prior state, which
 % absorbs the episodes, so what they read and catch there is not the question, only that they run and flag nothing clean
 resTL = dopplerEpisodeCheck(logT, tKfT, runT, setfield(setfield(CORR, 'fbModel', 'logged'), 'quiet', true)); %#ok<SFLD>

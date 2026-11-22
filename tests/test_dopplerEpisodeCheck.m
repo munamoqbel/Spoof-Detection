@@ -248,6 +248,10 @@ chk.handover     = strcmp(resH.fbModel, 'handover') && isequal(resH.flag, resT.f
 % slope per rad/s in proportion to the speed of the band
 chk.armNotLat    = abs(resT.latTrue(2)) < 2 * resT.latTrueSig(2) + 0.005 && abs(resT.armTrueJoint(2) - resT.armFit(2)) < 0.15 && ...
     abs(resT.latFit(2)) < 0.015 && isempty(strfind(txtT, 'LATENCY:'));
+% with the arm taken out of the rows and no latency there is no slope to attribute, and the read says so
+resTA = dopplerEpisodeCheck(logT, tKfT, runT, struct('armSlope', [-0.23, 0.34], 'truthSlope', auxT.TS));
+txtTA = evalc('dopplerEpisodeCheck(logT, tKfT, runT, struct(''armSlope'', [-0.23, 0.34], ''truthSlope'', auxT.TS));');
+chk.nothingToAttribute = ~isempty(strfind(txtTA, 'nothing to attribute')) || any(abs(resTA.armHost) > 2 * resTA.armHostSig & abs(resTA.armHost) > 0.1);
 [runY, logY, tKfY, auxY] = dopplerSynthRun(struct('seed', 21, 'latency', 0.03, 'arm', [0 0], 'truthPoint', [0 0]));
 txtY = evalc('resY = dopplerEpisodeCheck(logY, tKfY, runY);');
 % (the host's own view, nav minus rows, is diluted by the filter and reads a lower bound; the truth-based one is the read)

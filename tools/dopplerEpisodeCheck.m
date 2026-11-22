@@ -745,11 +745,14 @@ if hasAtt && all(isfinite(armHost))
     fprintf('   nav minus rows per rad/s of yaw rate, the host''s lever-arm error in this frame (leverArmCheck''s read): along %+.2f m, across %+.2f m (sigma %.2f / %.2f)\n', ...
         armHost(1), armHost(2), armHostSig(1), armHostSig(2));
 end
+slopeToAttribute = all(isfinite(armHost)) && any(abs(armHost) > 2 * armHostSig & abs(armHost) > 0.1);
 if hasAtt && isfinite(speedSpreadH) && speedSpreadH < SPEED_SPREAD_MIN
     fprintf('   arm or latency: the turning epochs sit at one speed (%.0f m/s, spread %.0f%%), so an arm and a latency cannot be told apart here\n', ...
         mean(speedK(turnH)), 100 * speedSpreadH);
+elseif hasAtt && all(isfinite(armHost)) && ~slopeToAttribute
+    fprintf('   arm or latency: the slope is within its sigma of zero; nothing to attribute\n');
 end
-if hasAtt && all(isfinite(latFit))
+if hasAtt && all(isfinite(latFit)) && slopeToAttribute
     fprintf('   arm or latency, nav minus rows on the yaw rate and on speed times yaw rate jointly: across, an arm of %+.2f m (sigma %.2f) and a latency of %+.3f s (sigma %.3f);\n', ...
         armJoint(2), armJointSig(2), latFit(2), latFitSig(2));
     fprintf('      along, %+.2f m (sigma %.2f) and %+.3f s (sigma %.3f); the across latency is the read, the along one a check\n', ...

@@ -23,6 +23,10 @@ spfLog.ssAlarm(k)     = info.ssAlarm;
 spfLog.cpiAlarm(k)    = info.cpiAlarm;
 spfLog.alarmAxis(k,:) = info.alarmPerAxis;
 spfLog.ssRatio(k,:)   = info.ssRatio;
+if isfield(info, 'ssSeparation')                 % a gate before these fields leaves them at zero
+    spfLog.ssSep(k,:) = info.ssSeparation;
+    spfLog.ssSig(k,:) = info.ssSigma;
+end
 spfLog.cpiRatio(k,:)  = info.cpiRatio;
 spfLog.pl(k)          = info.maxProtectionLevel;
 axes = CST_spfParam.MONITORED_AXES;

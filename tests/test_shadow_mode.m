@@ -21,6 +21,8 @@ propTel = STRUCT_SPF.setPropTel(Phi, Q);
 N = scn.N_total; m = size(z_all, 1);
 kf_x = zeros(n, 1); kf_P = P0;
 nAlarm = 0; plMax = 0; modeOK = true;
+telOK = true;  nTel = 0;                              % the telemetry behind the SS margin: |d| / (k_FA sigma + B) is the margin
+kFA = CST_spfParam.K_FALSE_ALERT;  Bax = CST_spfParam.NOMINAL_BIAS(CST_spfParam.MONITORED_AXES);
 for k = 1:N
     [kf_x, kf_P, y, ~, ~, xp, xpP] = kalman_update_step(kf_x, kf_P, z_all(:, k), H_all(:, :, k), propTel, V);
     kfMeas = STRUCT_SPF.kfMeasFromUpdate(y, H_all(:, :, k), V, m, xp, xpP, kf_x, kf_P);
@@ -28,10 +30,17 @@ for k = 1:N
     nAlarm = nAlarm + (tel.info.ssAlarm || tel.info.cpiAlarm);
     plMax  = max(plMax, tel.info.maxProtectionLevel);
     modeOK = modeOK && (tel.info.mode == CST_spfMode.NOMINAL);
+    on = tel.info.ssRatio > 0;
+    if any(on)
+        nTel = nTel + 1;
+        back = abs(tel.info.ssSeparation(on)) ./ (kFA * tel.info.ssSigma(on) + Bax(on));
+        telOK = telOK && all(tel.info.ssSigma(on) > 0) && all(abs(back - tel.info.ssRatio(on)) < 1e-9 * max(1, tel.info.ssRatio(on)));
+    end
 end
-ok1 = (nAlarm == 0) && modeOK && (plMax < 1.0);
-fprintf('  alarms = %d (expect 0) | stayed NOMINAL = %d | max PL = %.3f m -> %s\n', ...
-    nAlarm, modeOK, plMax, pf(ok1));
+telOK = telOK && nTel > 0;
+ok1 = (nAlarm == 0) && modeOK && (plMax < 1.0) && telOK;
+fprintf('  alarms = %d (expect 0) | stayed NOMINAL = %d | max PL = %.3f m | separation and sigma reproduce the margin on %d epochs = %d -> %s\n', ...
+    nAlarm, modeOK, plMax, nTel, telOK, pf(ok1));
 
 % alignment: navActive = false must return zeroTel and re-arm the gate; the
 % first active call afterwards re-initialises (no alarm, coastEpochs 0)

@@ -111,6 +111,8 @@ switch sys.mode
             [sys.pool, report] = SPF_monitorPool(sys.pool, kfMeas, propTel);
             info.maxProtectionLevel = report.maxProtectionLevel;
             info.ssRatio            = report.ssRatio;
+            info.ssSeparation       = report.ssSeparation;
+            info.ssSigma            = report.ssSigma;
             info.cpiRatio           = report.cpiRatio;
             info.solveFault         = report.solveFault;
             if (report.anyAlarm)
@@ -158,6 +160,8 @@ switch sys.mode
             info.maxProtectionLevel = report.maxProtectionLevel;
             info.solveFault         = report.solveFault;
             info.ssRatio            = report.ssRatio;
+            info.ssSeparation       = report.ssSeparation;
+            info.ssSigma            = report.ssSigma;
             info.cpiRatio           = report.cpiRatio;
 
             % ---- 3. refresh anchor (only on alarm-free epochs, so the
@@ -363,6 +367,8 @@ switch sys.mode
         info.maxProtectionLevel = report.maxProtectionLevel;
         info.solveFault         = info.solveFault || report.solveFault;
         info.ssRatio            = report.ssRatio;
+        info.ssSeparation       = report.ssSeparation;
+        info.ssSigma            = report.ssSigma;
         info.cpiRatio           = report.cpiRatio;
         % probation windows never refresh the anchor: the trial is not
         % yet trusted, so report.cleanClose* is deliberately ignored.

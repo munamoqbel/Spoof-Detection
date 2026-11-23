@@ -1,59 +1,60 @@
-%***************************************************************************
+%******************************************************************************************
 % DESCRIPTION:
-% One epoch of the overlapping-window monitor bank. Every open window
-% buffers this epoch's rows, runs the solution-separation test on all
-% monitored axes, and at full length runs the CPI test per axis and
-% closes. A window that lived its whole life without an alarm is
-% reported as the anchor candidate, with its separation and coast
-% covariance at the close.
+% One epoch of the overlapping-window dual monitor.
+%
+% For every OPEN window:
+%   1. buffer this epoch's (y, S, H, numMeas)
+%   2. SS test via SPF_ssMonitor (accumulates this window's separation and
+%      propagates its coast covariance once, tests every monitored axis,
+%      Eq. 49-52)
+%   3. at full length: CPI via SPF_cpiMonitor once per monitored axis
+%      (Eq. 33/35), then free the slot. A window that lived its whole
+%      life with NO alarm is reported as the anchor candidate.
 %
 % INPUTS:
-%   - poolIn   STRUCT_SPF.setMonitorPool: the N window slots
-%   - kfMeas   STRUCT_SPF.setKfMeas: this epoch's update quantities of
-%              the watched filter
-%   - propTel  STRUCT_SPF.setPropTel: interval Phi and Q
+%   - poolIn   (STRUCT_SPF.setMonitorPool)
+%   - kfMeas   (STRUCT_SPF.setKfMeas) this epoch's host update quantities
+%   - propTel  (STRUCT_SPF.setPropTel) .accumPhi / .accumQ
 %
 % OUTPUTS:
-%   - poolOut  the slots after this epoch
-%   - report   STRUCT_SPF.setMonitorReport: alarms (per axis, SS, CPI),
-%              the largest protection level, the margins |d| / gate and
-%              q / T_N, the clean-close candidate, solveFault
+%   - poolOut (updated)
+%   - report  (STRUCT_SPF.setMonitorReport)
 %
 % ASSUMPTIONS AND LIMITATIONS:
-% Windows are opened by the caller (STRUCT_SPF.openWindow), one per
-% epoch, N slots in all: with N epochs per window every slot is in use
-% once the bank is full. The nominal bias B is CST_spfParam.NOMINAL_BIAS.
 %
 % REQUIREMENT TRACEABILITY:
-% Paper (Kujur 2024): the overlapping windows of the monitor; E24, a
-% window opens on the post-update solution; the SS test Eq. 49 to 52 in
-% SPF_ssMonitor; the CPI test Eq. 33 and 35 in SPF_cpiMonitor at the
-% close.
-%***************************************************************************
+%
+%******************************************************************************************
 %#codegen
 function [poolOut, report] = SPF_monitorPool(poolIn, kfMeas, propTel)
 
-windowLength  = CST_spfParam.WINDOW_LENGTH;
+% Define variables
+windowLength = CST_spfParam.WINDOW_LENGTH;
 monitoredAxes = CST_spfParam.MONITORED_AXES;
-numAxes       = cast(numel(monitoredAxes), 'uint8');
-poolOut       = poolIn;
-kfIncrement   = kfMeas.postState - kfMeas.priorState;       % K y of the watched filter
+numAxes = cast(numel(monitoredAxes), 'uint8');
+poolOut = poolIn;
+kfIncrement = kfMeas.postState - kfMeas.priorState;     % K*y of the watched filter
 
 report = STRUCT_SPF.zeroMonitorReport;
 
 for wIdx = 1:windowLength
 
     if (poolIn.active(wIdx))
-        % 1. age the window and buffer this epoch
+        % ------------------------------------------------------------------
+        %  1. age the window and buffer this epoch
+        % ------------------------------------------------------------------
         age = poolIn.windowAge(wIdx) + 1;
         poolOut.windowAge(wIdx) = age;
 
-        poolOut.innovationBuffer(:, age, wIdx)       = kfMeas.innovation;
-        poolOut.innovationCovBuffer(:, :, age, wIdx) = kfMeas.innovationCov;
-        poolOut.obsMatrixBuffer(:, :, age, wIdx)     = kfMeas.obsMatrix;
-        poolOut.numMeasBuffer(age, wIdx)             = kfMeas.numMeas;
+        % fixed MAX_MEAS layouts: copy whole (rows beyond numMeas are padding)
+        poolOut.innovationBuffer(:, age, wIdx)          = kfMeas.innovation;
+        poolOut.innovationCovBuffer(:, :, age, wIdx)    = kfMeas.innovationCov;
+        poolOut.obsMatrixBuffer(:, :, age, wIdx)        = kfMeas.obsMatrix;
+        poolOut.numMeasBuffer(age, wIdx)                = kfMeas.numMeas;
 
-        % 2. solution-separation test (Eq. 49 to 52)
+        % ------------------------------------------------------------------
+        %  2. Solution-Separation test (all monitored axes)
+        % ------------------------------------------------------------------
         [newSeparation, newCoastCov, ssResult] = SPF_ssMonitor( ...
             poolIn.separation(:, wIdx), poolIn.coastCovariance(:, :, wIdx), ...
             kfIncrement, kfMeas.postCov, propTel, CST_spfParam.NOMINAL_BIAS);
@@ -65,27 +66,32 @@ for wIdx = 1:windowLength
             report.ssAlarm         = true;
             report.anyAlarm        = true;
             poolOut.hadAlarm(wIdx) = true;
-            report.alarmPerAxis    = report.alarmPerAxis | ssResult.alarmPerAxis;
-        end
+            report.alarmPerAxis = report.alarmPerAxis | ssResult.alarmPerAxis;
+        end % ELSE is trivial
 
         if (ssResult.maxProtectionLevel > report.maxProtectionLevel)
             report.maxProtectionLevel = ssResult.maxProtectionLevel;
-        end
+        end % ELSE is trivial
 
-        for idx = 1:numAxes                                    % SS margin |d| / (k_FA sigma_SS + B)
+        % telemetry: SS margin per monitored axis, max over the open windows
+        for idx = 1:numAxes
             if (ssResult.sigmaSeparation(idx) > 0.0)
                 ratio = abs(ssResult.separation(idx)) / (CST_spfParam.K_FALSE_ALERT * ssResult.sigmaSeparation(idx) ...
                     + CST_spfParam.NOMINAL_BIAS(monitoredAxes(idx)));
                 if (ratio > report.ssRatio(idx))
-                    report.ssRatio(idx) = ratio;
-                end
+                    report.ssRatio(idx)      = ratio;
+                    report.ssSeparation(idx) = ssResult.separation(idx);        % telemetry: the d and sigma_SS behind the margin
+                    report.ssSigma(idx)      = ssResult.sigmaSeparation(idx);
+                end % ELSE is trivial
             end
         end
 
-        % 3. window complete: CPI verdict per axis (Eq. 33, 35), then close
+        % ------------------------------------------------------------------
+        %  3. window complete: CPI verdict per axis, then close
+        % ------------------------------------------------------------------
         if (age >= windowLength)
             for idx = 1:numAxes
-                axisIdx = monitoredAxes(idx);
+                axisIdx = monitoredAxes(idx);  % actual state index
                 [cpiAlarm, qStatistic, ~, cpiFault] = SPF_cpiMonitor( ...
                     poolOut.innovationBuffer(:, 1:windowLength, wIdx), ...
                     poolOut.innovationCovBuffer(:, :, 1:windowLength, wIdx), ...
@@ -94,31 +100,35 @@ for wIdx = 1:windowLength
                     axisIdx, CST_spfParam.NOMINAL_BIAS(axisIdx));
 
                 if (cpiFault)
-                    report.solveFault = true;
-                end
-                ratio = qStatistic / CST_spfParam.CPI_THRESHOLD;   % CPI margin q / T_N
+                    report.solveFault = true;          % telemetry: a buffered S was unusable
+                end % ELSE is trivial
+                ratio = qStatistic / CST_spfParam.CPI_THRESHOLD;   % telemetry: CPI margin
                 if (ratio > report.cpiRatio(idx))
                     report.cpiRatio(idx) = ratio;
-                end
+                end % ELSE is trivial
 
                 if (cpiAlarm)
-                    report.cpiAlarm          = true;
-                    report.anyAlarm          = true;
-                    poolOut.hadAlarm(wIdx)   = true;
-                    report.alarmPerAxis(idx) = true;
-                end
+                    report.cpiAlarm                = true;
+                    report.anyAlarm                = true;
+                    poolOut.hadAlarm(wIdx)         = true;
+                    report.alarmPerAxis(idx)       = true;   % monitored-axis index (as SPF_ssMonitor)
+                end % ELSE is trivial
             end
 
-            if (~poolOut.hadAlarm(wIdx))                       % alarm-free life: the anchor candidate
+            if (~poolOut.hadAlarm(wIdx))
+                % Whole life alarm-free: certified anchor candidate.
+                % Caller commits it ONLY on a globally alarm-free epoch,
+                % so the anchor always ends strictly before any detection.
                 report.cleanCloseFound      = true;
                 report.cleanCloseSeparation = poolOut.separation(:, wIdx);
                 report.cleanCloseCovar      = poolOut.coastCovariance(:, :, wIdx);
-            end
+            end % ELSE is trivial
 
-            poolOut.active(wIdx) = false;
-        end
-    end
+            poolOut.active(wIdx) = false;        % free the slot
+        end % ELSE is trivial
+    end % ELSE is trivial
 end
 
 end
+
 %------------------------------------------------------------------------

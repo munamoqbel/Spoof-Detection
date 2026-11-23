@@ -256,7 +256,7 @@ classdef STRUCT_SPF
 
         function [report] = setMonitorReport(alarmPerAxis, anyAlarm, ...
                 maxProtectionLevel, ssAlarm, cpiAlarm, cleanCloseFound, ...
-                cleanCloseSeparation, cleanCloseCovar, solveFault, ssRatio, cpiRatio)
+                cleanCloseSeparation, cleanCloseCovar, solveFault, ssRatio, cpiRatio, ssSeparation, ssSigma)
 
             % Define structure
             report = struct( ...
@@ -270,7 +270,9 @@ classdef STRUCT_SPF
                 'cleanCloseCovar',      cleanCloseCovar, ...
                 'solveFault',           logical(solveFault), ... % a CPI epoch had an unusable S
                 'ssRatio',              ssRatio, ...     % [1x3] max over windows of |d|/(k_FA sigma_SS); alarm at > 1
-                'cpiRatio',             cpiRatio);       % [1x3] q/T_N of the window(s) closed this epoch; alarm at > 1
+                'cpiRatio',             cpiRatio, ...    % [1x3] q/T_N of the window(s) closed this epoch; alarm at > 1
+                'ssSeparation',         ssSeparation, ... % [1x3] d of the window with the largest SS margin per axis (m)
+                'ssSigma',              ssSigma);        % [1x3] its sigma_SS (m): the margin is |d| / (k_FA sigma_SS + B)
         end
 
         function [report] = zeroMonitorReport
@@ -283,7 +285,7 @@ classdef STRUCT_SPF
             zeroCovar = zeros(CST_gnssHybrid.NO_STATES, CST_gnssHybrid.NO_STATES);
 
             report = STRUCT_SPF.setMonitorReport(axisAlarm, alarm, ...
-                scalar, alarm, alarm, alarm, zeroState, zeroCovar, alarm, zeros(1, 3), zeros(1, 3));
+                scalar, alarm, alarm, alarm, zeroState, zeroCovar, alarm, zeros(1, 3), zeros(1, 3), zeros(1, 3), zeros(1, 3));
         end
 
         function [poolOut] = closeAllWindows(poolIn)
@@ -491,7 +493,8 @@ classdef STRUCT_SPF
                 dwellCount, eventLatched, eventAnchorEpoch, eventProbationStarted,...
                 eventProbationVetoed, eventHandback, anchorMissing, coastEpochs, ...
                 inputFault, numMeasClamped, solveFault, ssRatio, cpiRatio, armed, ...
-                resetInhibit, coastBudgetExceeded, eventReturn, returnChecked, returnWander, returnLanding)
+                resetInhibit, coastBudgetExceeded, eventReturn, returnChecked, returnWander, returnLanding, ...
+                ssSeparation, ssSigma)
 
             % Define structure
             info = struct( ...
@@ -521,7 +524,10 @@ classdef STRUCT_SPF
                 'eventReturn',           logical(eventReturn), ...   % a return: the nav corrected back to the long coast (at a latch, or in COAST)
                 'returnChecked',         logical(returnChecked), ... % the return check ran this epoch (a latch, or a COAST epoch with rows)
                 'returnWander',          returnWander, ...           % m: the nav's horizontal wander from the oldest long coast
-                'returnLanding',         returnLanding); % m: where the GNSS lands, horizontal, from the oldest long coast
+                'returnLanding',         returnLanding, ... % m: where the GNSS lands, horizontal, from the oldest long coast
+                'ssSeparation',          ssSeparation, ...  % [1x3] m: the separation d of the window with the largest SS margin per axis
+                'ssSigma',               ssSigma);          % [1x3] m: its sigma_SS; the margin is |d| / (K_FALSE_ALERT sigma_SS + B),
+                                                            % so a clean run's largest |d| is the B the host sets (NOMINAL_BIAS)
         end
 
         function [info] = zeroInfo
@@ -554,6 +560,8 @@ classdef STRUCT_SPF
             returnChecked         = false;
             returnWander          = 0.0;
             returnLanding         = 0.0;
+            ssSeparation          = zeros(1, 3);
+            ssSigma               = zeros(1, 3);
 
             % Define structure
             info = STRUCT_SPF.setInfo(mode, ssAlarm, cpiAlarm, ...
@@ -561,7 +569,8 @@ classdef STRUCT_SPF
                 dwellCount, eventLatched, eventAnchorEpoch, eventProbationStarted,...
                 eventProbationVetoed, eventHandback, anchorMissing, coastEpochs, ...
                 inputFault, numMeasClamped, solveFault, ssRatio, cpiRatio, armed, ...
-                resetInhibit, coastBudgetExceeded, eventReturn, returnChecked, returnWander, returnLanding);
+                resetInhibit, coastBudgetExceeded, eventReturn, returnChecked, returnWander, returnLanding, ...
+                ssSeparation, ssSigma);
         end
 
         function [command] = setCommand(startTrial)

@@ -1,73 +1,46 @@
-%***************************************************************************
+%******************************************************************************************
 % DESCRIPTION:
-% One epoch of the spoofing-protected navigator, the FSM behind
-% SPF_gate, on host-owned filters in increment form.
-%   NOMINAL    the host KF is updated normally; the monitors watch its
-%              increments; a clean-closed window refreshes the anchor;
-%              any alarm latches: the output falls back to the anchor's
-%              coast and the mode goes to COAST.
-%   COAST      the host does not update its operational KF, so the
-%              100 Hz extrapolation is the INS-only coast; the raw GNSS
-%              rows are re-validated against that coast; a dwell of
-%              consecutive passes opens PROBATION. Monitor silence never
-%              ends COAST.
-%   PROBATION  the host updates a trial copy; the monitors watch it; an
-%              alarm vetoes back to COAST; a full quiet probation
-%              commits: the trial becomes the solution and the anchor.
-% The host contract (docs/HOST_2HZ_WIRING.m): every epoch kfMeas from
-% the ACTIVE filter's update; on nav.applyCorrection (latch, commit)
-% the host passes nav.state and nav.covar to its setKF as the
-% operational KF's update result; on kfCommand.startTrial it starts the
-% trial filter as a copy of the operational KF.
+% One epoch of the spoofing-protected navigator (the FSM behind
+% SPF_gate). HOST-OWNED FILTERS, INCREMENT FORM.
+%
+% MODES (constants in CST_spfMode)
+%   NOMINAL    host KF updated normally; monitors watch its increments;
+%              clean-closed windows refresh the anchor; any alarm => LATCH.
+%   COAST      host does NOT update its operational KF (100 Hz extrapolation
+%              makes it the INS-only coast); the update is still computed
+%              on a scratch copy to feed y, S here; re-validation counts
+%              consecutive passes (an epoch with too few rows to test holds
+%              the count); full dwell => PROBATION.
+%              Monitor silence NEVER exits this mode (capture).
+%   PROBATION  host updates a TRIAL copy; monitors watch the trial; alarm
+%              => VETO; full quiet probation => COMMIT (handback).
+%
+% HOST CONTRACT (see docs/HOST_2HZ_WIRING.m)
+%   - every epoch: kfMeas from the ACTIVE filter's update (operational KF
+%     in NOMINAL/COAST, trial in PROBATION)
+%   - nav.applyCorrection true (LATCH, COMMIT): pass (nav.state, nav.covar)
+%     to the normal setKF as this epoch's update result of the OPERATIONAL
+%     KF (LATCH: x+ of the operational KF minus the anchor separation;
+%     COMMIT: the trial's x+, which by construction equals the coasting
+%     KF.states plus the accumulated trial increments)
+%   - kfCommand.startTrial true (probation opens): trial <- copy of the
+%     operational KF (states and covariance)
 %
 % INPUTS:
-%   - sys      STRUCT_SPF.setSys, the persistent FSM state
-%   - kfMeas   STRUCT_SPF.setKfMeas: y, S, H, R, numMeas, x_bar, x+, P+
-%   - propTel  STRUCT_SPF.setPropTel: interval Phi and Q
-%   - epoch    epoch counter for the event stamps and the anchor age
+%   - sys      STRUCT_SPF.setSys (persistent)
+%   - kfMeas   STRUCT_SPF.setKfMeas (y, S, H, R, numMeas, x_bar, x+, P+)
+%   - propTel  STRUCT_SPF.setPropTel (.accumPhi, .accumQ)
+%   - epoch    scalar epoch counter (event stamps, anchor age)
 %
 % OUTPUTS:
 %   - sys      updated
-%   - spoofTel STRUCT_SPF.setTel: .info (mode, alarms, PL, qReval,
-%              dwell, events, faults, armed, resetInhibit,
-%              coastBudgetExceeded), .kfCommand (startTrial), .nav
-%              (applyCorrection, state, correction, covar, sigmaPosition)
+%   - spoofTel STRUCT_SPF.setTel (.info, .kfCommand, .nav)
 %
 % ASSUMPTIONS AND LIMITATIONS:
-% - Warm-up: after a (re)initialisation the monitors arm only after
-%   ARM_EPOCHS NOMINAL epochs with REVAL_MIN_MEAS rows and a protection
-%   level below ARM_PL_MAX on which the monitors, run in shadow, would
-%   not have alarmed; a level above or a shadow alarm restarts the count, a row
-%   dropout pauses it; arming is sticky.
-% - A latch falls back to the anchor only when the anchor is at most
-%   MAX_ANCHOR_AGE old; otherwise the current solution is frozen and
-%   info.anchorMissing is raised.
-% - resetInhibit asks the host not to apply its protective reset while
-%   the gate holds GNSS off or alarms; the re-validation and the first
-%   probation window use the coast covariance bounded by COAST_SIGMA_MAX
-%   (STRUCT_SPF.boundCoastCov), and the dwell also needs the CPI of the
-%   innovations against the coast below T_N, so a spoof the monitors
-%   would latch on stays refused however long the coast; coastBudgetExceeded (coast PL
-%   above ARM_PL_MAX, or COAST_BUDGET_EPOCHS passed) says the gate can
-%   no longer certify a re-validation and the host may reset.
-% - The return path: RETURN_BANK long INS-only coasts are kept beside the
-%   anchor, restarted in turn (the oldest spans 80 to 120 s). At a latch,
-%   and on every COAST epoch, the position the rows ask for is read
-%   against the oldest: when the nav had wandered more than RETURN_WANDER
-%   from it and the GNSS lands within RETURN_RADIUS of it, the event is
-%   the end of a followed spoof, not an onset (eventReturn): the nav is
-%   corrected back to the long coast, velocity included (a correction in
-%   COAST goes through the host's setKF as a latch does), and the bound's
-%   floor becomes that coast's own sigma, so the clean GNSS re-validates;
-%   the first probation window keeps the short bound. Otherwise nothing
-%   changes.
 %
 % REQUIREMENT TRACEABILITY:
-% Paper Sec. 5 recovery: detection and latch, re-validation (Guide
-% Sec. 5 chi-square gate), probation, hand-back; E28 and E31 for every
-% coast propagation; Eq. 51 protection level for the warm-up and the
-% budget (Implementation Guide rule 4).
-%***************************************************************************
+%
+%******************************************************************************************
 %#codegen
 function [sys, spoofTel] = SPF_protectedNav(sys, kfMeas, propTel, epoch)
 
@@ -75,39 +48,60 @@ info      = STRUCT_SPF.zeroInfo;
 kfCommand = STRUCT_SPF.zeroCommand;
 numStates = CST_gnssHybrid.NO_STATES;
 applyCorrection = false;
-correction      = zeros(numStates, 1);    % increment relative to the operational KF
-navState        = kfMeas.postState;       % x+ handed to setKF on a latch or a commit
+correction      = zeros(numStates, 1);    % increment relative to the OPERATIONAL KF
+navState        = kfMeas.postState;       % absolute x+ to hand to setKF (LATCH / COMMIT)
 
 propTel = SPF_coastPropTel(propTel);                     % the gate's own Q on its coasts (CST_spfParam.COAST_Q_DATASHEET)
 postCovHost    = kfMeas.postCov;                         % the host's P as it came: handed back as it came at a commit
-kfMeas.postCov = SPF_coastStartCov(kfMeas.postCov);      % the host's P as the gate reads it, floored (CST_spfParam.COAST_SIGMA_FLOOR_*)
+kfMeas.postCov = SPF_coastStartCov(kfMeas.postCov);      % the host's P as the gate reads it: floored where its own
+                                                         % consistency reads say it underestimates (CST_spfParam.COAST_SIGMA_FLOOR_*)
 kfMeas.innovationCov = SPF_floorInnovCov(kfMeas.innovationCov, kfMeas.obsMatrix, kfMeas.numMeas, postCovHost, kfMeas.postCov, ...
     CST_spfParam.CPI_CLOCK_STATES, CST_spfParam.CPI_CLOCK_SIGMA);   % and the S its monitors read: the same increase, the clock
                                                          % carried free (section 14); the re-validation keeps the bounded clock
 Phi = propTel.accumPhi;
 Q   = propTel.accumQ;
-kfIncrement = kfMeas.postState - kfMeas.priorState;      % K y of the active filter
+kfIncrement = kfMeas.postState - kfMeas.priorState;      % K*y of the active filter
 
 switch sys.mode
     % ==================================================================
     case CST_spfMode.NOMINAL
     % ==================================================================
 
-        % 1. the protected solution is the host KF
+        % ---- 1. the protected solution IS the host KF ----
         sys.coastCov = kfMeas.postCov;
         sys.probSep  = zeros(numStates, 1);
 
-        % 1b. warm-up: a PL above ARM_PL_MAX restarts the count, a row dropout pauses it, and the monitors run in
-        %     shadow (windows open and close as in NOMINAL, the margins logged, nothing latches and the alarm flags stay
-        %     down): a shadow alarm restarts the count, so the gate arms only after ARM_EPOCHS epochs on which it
-        %     would not have alarmed. A PL above ARM_PL_MAX while armed (a long gap) returns the monitors to shadow
+        % ---- 1b. warm-up: arm the monitors only on a converged filter ----
+        %          ARM_EPOCHS qualifying epochs (enough rows and a protection
+        %          level below ARM_PL_MAX). A protection level above the limit
+        %          restarts the count (filter diverging or coasting); a short
+        %          row dropout with the PL still inside only pauses it.
+        %          The monitors run in SHADOW meanwhile: windows open and
+        %          close as in NOMINAL and the margins are logged, but nothing
+        %          latches and the alarm flags stay down (unarmed: no alarm,
+        %          no latch, the host contract). A shadow alarm restarts the
+        %          count, so the gate arms only after ARM_EPOCHS epochs on
+        %          which it would not have alarmed: a transient the host's
+        %          covariance does not admit (a heading still converging, a
+        %          constellation joining the solution, a reacquisition)
+        %          delays the arming instead of latching right after it
+        %          (measured on the vehicle data: a latch at 83 s, 7 s after
+        %          the arming, on the start transient of 82.6 to 84.6 s).
+        %          Armed until the protection level passes ARM_PL_MAX (below);
+        %          the pool carries over into NOMINAL.
         sigmaPosMax = 0.0;
         for idx = 1:numel(CST_spfParam.MONITORED_AXES)
             axisIdx = CST_spfParam.MONITORED_AXES(idx);
             sigmaPosMax = max(sigmaPosMax, sqrt(max(kfMeas.postCov(axisIdx, axisIdx), 0.0)));
         end
-        plInside = (CST_spfParam.K_MISSED_DETECTION * sigmaPosMax < CST_spfParam.ARM_PL_MAX);   % Eq. 51 term
+        plInside = (CST_spfParam.K_MISSED_DETECTION * sigmaPosMax < CST_spfParam.ARM_PL_MAX);
         if (sys.armed) && (~plInside)
+            % a protection level above ARM_PL_MAX while armed: a gap in which
+            % the INS-only solution grew past what the monitors can certify,
+            % so the GNSS met at the reacquisition cannot be judged against it
+            % (measured: a 350 m jump after a 450 s gap read 14 sigma, latched,
+            % and the coast to hold was the drifted INS). Back to shadow, the
+            % count from zero, as after a re-initialisation (section 15)
             sys.armed    = false;
             sys.armCount = 0;
         end
@@ -117,40 +111,47 @@ switch sys.mode
             [sys.pool, report] = SPF_monitorPool(sys.pool, kfMeas, propTel);
             info.maxProtectionLevel = report.maxProtectionLevel;
             info.ssRatio            = report.ssRatio;
+            info.ssSeparation       = report.ssSeparation;
+            info.ssSigma            = report.ssSigma;
             info.cpiRatio           = report.cpiRatio;
             info.solveFault         = report.solveFault;
             if (report.anyAlarm)
-                sys.armCount = 0;
+                sys.armCount = 0;                     % a shadow alarm: restart
                 sys.pool     = STRUCT_SPF.closeAllWindows(sys.pool);
             else
                 if (~plInside)
-                    sys.armCount = 0;
+                    sys.armCount = 0;                 % restart
                 elseif (enoughRows)
-                    sys.armCount = sys.armCount + 1;
+                    sys.armCount = sys.armCount + 1;  % qualifying epoch
                 end
                 sys.pool = STRUCT_SPF.openWindow(sys.pool, kfMeas);
             end
             if (sys.armCount >= double(CST_spfParam.ARM_EPOCHS))
                 sys.armed = true;
-            end
+            end % ELSE is trivial
         end
 
         if (~armedBefore)
-            % a warm-up epoch, the arming one included: no latch, the anchor follows the solution, the long coasts
-            % start with the arming
+            % a warm-up epoch, the arming one included (its pool pass is done
+            % above): no latch; the anchor follows the current solution so it
+            % is fresh when the monitors start; the long coasts of the return
+            % path start with the arming
             sys.anchor    = STRUCT_SPF.setAnchor(true, zeros(numStates, 1), kfMeas.postCov, uint32(epoch));
             sys.longCoast = STRUCT_SPF.zeroLongCoast;
         else
-            % 2. monitor bank on the host increments
+            % ---- 2. monitor bank on the host increments ----
             [sys.pool, report] = SPF_monitorPool(sys.pool, kfMeas, propTel);
 
-            % 2b. the anchor kept live (E28, E31 in increment form)
+            % ---- 2b. keep the anchor LIVE: (host solution now) - (anchor coast
+            %          now) accumulates this epoch's increment; P_C propagates ----
             if (sys.anchor.valid)
                 sys.anchor.separation = Phi * sys.anchor.separation + kfIncrement;
                 sys.anchor.covariance = Phi * sys.anchor.covariance * Phi' + Q;
                 sys.anchor.covariance = (sys.anchor.covariance + sys.anchor.covariance') / 2;
-            end
-            % 2c. the long coasts of the return path kept live the same way, restarted in turn
+            end % ELSE is trivial
+
+            % ---- 2c. the long coasts of the return path, kept live the same
+            %          way and restarted in turn: the memory the anchor lacks ----
             sys.longCoast = SPF_longCoastStep(sys.longCoast, Phi, Q, kfIncrement, kfMeas.postCov, uint32(epoch), true);
 
             info.ssAlarm            = report.ssAlarm;
@@ -159,22 +160,28 @@ switch sys.mode
             info.maxProtectionLevel = report.maxProtectionLevel;
             info.solveFault         = report.solveFault;
             info.ssRatio            = report.ssRatio;
+            info.ssSeparation       = report.ssSeparation;
+            info.ssSigma            = report.ssSigma;
             info.cpiRatio           = report.cpiRatio;
 
-            % 3. an alarm-free clean close refreshes the anchor
+            % ---- 3. refresh anchor (only on alarm-free epochs, so the
+            %         anchor always ends strictly before detection) ----
             if (report.cleanCloseFound) && (~report.anyAlarm)
                 sys.anchor.valid      = true;
-                sys.anchor.separation = report.cleanCloseSeparation;
+                sys.anchor.separation = report.cleanCloseSeparation;   % already at 'now'
                 sys.anchor.covariance = report.cleanCloseCovar;
                 sys.anchor.epoch      = uint32(epoch);
             end
 
-            % 4. any alarm latches, otherwise the next window opens
+            % ---- 4. latch on any alarm, else open the next window ----
             if (report.anyAlarm)
                 info.eventLatched = true;
                 anchorAge = uint32(epoch) - sys.anchor.epoch;
-                % a return or an onset? the GNSS lands where the inertial sensors alone would have carried the vehicle
-                % over the last minutes while the nav had wandered from there: the end of a followed spoof
+                % A return or an onset? "The GNSS is 30 m from the nav" reads
+                % both ways; the inertial sensors tell them apart: in a
+                % followed spoof the nav has wandered from where the INS alone
+                % would have carried it, and the returning GNSS lands on that
+                % INS coast within its drift; an onset lands away from both.
                 % The wander is the anchor's (the nav before the event): a
                 % latch that comes a few epochs late, once the KF has already
                 % moved towards the returning GNSS, still reads as a return.
@@ -186,7 +193,9 @@ switch sys.mode
                 [isReturn, jLong, info] = SPF_returnCheck(sys.longCoast, kfMeas, kfIncrement, refSep, info);
 
                 if (isReturn)
-                    % back to the long coast, velocity included; the coast's uncertainty is that coast's own
+                    % back to the long coast, velocity included (the ramp's
+                    % velocity goes with the position); the coast's
+                    % uncertainty is that coast's own, the floor of the bound
                     applyCorrection       = true;
                     correction            = -sys.longCoast.separation(:, jLong);
                     navState              = kfMeas.postState + correction;
@@ -195,19 +204,25 @@ switch sys.mode
                     info.eventReturn      = true;
                     sys.longCoast         = STRUCT_SPF.zeroLongCoast;
                 elseif (sys.anchor.valid) && (anchorAge <= CST_spfParam.MAX_ANCHOR_AGE)
-                    % fall back to the certified-clean coast; the long coasts follow the nav
+                    % fall back to the certified-clean coast: the host must
+                    % move its solution by -(accumulated increments since the
+                    % anchor window opened) and take the coast covariance;
+                    % the long coasts follow the nav through the correction
                     applyCorrection       = true;
                     correction            = -sys.anchor.separation;
-                    navState              = kfMeas.postState + correction;
+                    navState              = kfMeas.postState + correction;   % operational x+ - separation
                     sys.coastCov          = sys.anchor.covariance;
                     info.eventAnchorEpoch = sys.anchor.epoch;
                     sys.longCoast         = SPF_longCoastShift(sys.longCoast, correction);
                 else
-                    % no usable anchor: the current solution is frozen
+                    % no usable anchor: freeze the current solution
                     info.eventAnchorEpoch = uint32(0);
                     info.anchorMissing    = true;
                 end
-                sys.sigmaLatch = SPF_sigmaOf(sys.coastCov);   % the floor of the bound: the coast's own sigma at the latch
+                % the floor of the bound the re-admission tests use: the
+                % coast's own sigma at the latch (3 m or so from the anchor,
+                % the long coast's own on a return)
+                sys.sigmaLatch = SPF_sigmaOf(sys.coastCov);
 
                 sys.pool       = STRUCT_SPF.closeAllWindows(sys.pool);
                 sys.dwellCount = 0;
@@ -218,25 +233,31 @@ switch sys.mode
                 sys.pool = STRUCT_SPF.openWindow(sys.pool, kfMeas);
             end
 
-        end
+        end % armed
 
     % ==================================================================
     case CST_spfMode.COAST
     % ==================================================================
 
-        % 1. the protected output is the INS-only coast (E31)
+        % ---- 1. protected output = INS-only coast (host extrapolates the
+        %         operational KF the same way; GNSS severed) ----
         sys.coastCount = sys.coastCount + 1;
         sys.coastCov   = Phi * sys.coastCov * Phi' + Q;
         sys.coastCov   = (sys.coastCov + sys.coastCov') / 2;
 
-        % 1b. the long coasts kept live (no update in COAST: no increment), and the return read here too: the clean
-        %     GNSS back after a followed spoof reaches the gate only once the host's spike filter has released its rows
+        % ---- 1b. the long coasts kept live (no update in COAST: no increment)
+        %          and the return read here as well: the clean GNSS back after
+        %          a followed spoof reaches the gate only once the host's spike
+        %          filter has released its rows, and a followed drag can end
+        %          while the gate already coasts on a later onset ----
         sys.longCoast = SPF_longCoastStep(sys.longCoast, Phi, Q, zeros(numStates, 1), kfMeas.postCov, uint32(epoch), false);
         [isReturn, jLong, info] = SPF_returnCheck(sys.longCoast, kfMeas, zeros(numStates, 1), zeros(numStates, 1), info);
         coastMinusPrior = zeros(numStates, 1);
         if (isReturn)
-            % back to the long coast, velocity included; the coast's uncertainty is that coast's own; the operational
-            % KF is the coast here, so the correction is relative to the prior
+            % back to the long coast, velocity included; the coast's
+            % uncertainty is that coast's own. The operational KF IS the coast
+            % here, so the correction is relative to the prior; the host
+            % applies it through its setKF as it does a latch
             applyCorrection       = true;
             correction            = -sys.longCoast.separation(:, jLong);
             navState              = kfMeas.priorState + correction;
@@ -252,15 +273,28 @@ switch sys.mode
         coastCovBound = STRUCT_SPF.boundCoastCov(sys.coastCov, sys.sigmaLatch);        % the coast as the re-admission tests may use it
         coastCovOpen  = STRUCT_SPF.boundCoastCov(sys.coastCov, zeros(numStates, 1));   % the first probation window keeps the short bound
 
-        % 2. the raw GNSS against the coast; the operational KF is not updated, so prior = coast (the new one on a return)
+        % ---- 2. test the (untrusted) GNSS against the coast ----
+        %         HOST CONTRACT: the operational KF is not updated in COAST
+        %         (the scratch update only feeds y, S here), so its prior IS
+        %         the coast: x_coast - x_prior = 0 and the residual is y
+        %         (on a return the new coast minus the prior is the correction).
         sys.probSep = zeros(numStates, 1);
         [passed, q_value, revalFault] = SPF_revalidation(kfMeas.innovation, kfMeas.obsMatrix, ...
             kfMeas.measNoiseCov, kfMeas.numMeas, coastMinusPrior, coastCovBound);
         info.qReval = q_value;
         info.revalComputed = true;
         info.solveFault = revalFault;
-        % 2b. the same innovations through the CPI over the last N epochs, S with the bounded coast covariance and a zero
-        %     increment: GNSS the monitors would latch on is not re-admitted (B and T_N as in NOMINAL), whatever the chi-square says
+        % ---- 2b. the same innovations through the CPI over the last N epochs ----
+        %         The chi-square is one epoch at a time at 1e-3 on all rows; on
+        %         the vehicle data it admits an offset below about 24 m even with
+        %         the bounded coast covariance, while the CPI latches from 20 m.
+        %         So the dwell also requires the CPI statistic of the innovations
+        %         against the coast (a zero increment: no update in COAST, the SS
+        %         stays silent; S = H P_C,bound H' + R) to stay below T_N: GNSS
+        %         the monitors would latch on is not re-admitted, with the same B
+        %         and T_N as in NOMINAL. The windows of the pool serve as the
+        %         sliding window; they are closed at the latch and at the
+        %         probation open, and none of them touches the anchor here.
         coastS = kfMeas.obsMatrix * coastCovBound * kfMeas.obsMatrix' + kfMeas.measNoiseCov;
         kfMeasCoast = kfMeas;
         kfMeasCoast.innovation    = kfMeas.innovation - kfMeas.obsMatrix * coastMinusPrior;
@@ -277,22 +311,28 @@ switch sys.mode
         if (passed && quiet)
             sys.dwellCount = sys.dwellCount + 1;
         elseif (double(kfMeas.numMeas) >= double(CST_spfParam.REVAL_MIN_MEAS))
-            sys.dwellCount = 0;                      % a fail restarts the dwell; too few rows to test holds it
+            sys.dwellCount = 0;                      % a failed test restarts the dwell
         end
 
-        % 3. dwell full: PROBATION opens, the host starts the trial as a copy of the coasting KF
+        % ---- 3. dwell full: open PROBATION (never direct handback) ----
         if (sys.dwellCount >= CST_spfParam.REVAL_DWELL_REQUIRED)
             info.eventProbationStarted = true;
             sys.probationCount = 0;
             sys.dwellCount     = 0;
-            sys.probSep        = zeros(numStates, 1);
+            sys.probSep        = zeros(numStates, 1);   % trial starts ON the coast
             sys.pool           = STRUCT_SPF.closeAllWindows(sys.pool);
-            % the first probation window opens on the coast with the bounded covariance, so the trial's first
-            % update counts in its separation (otherwise a trial that jumps onto a spoof in one update is seen by nothing)
+            % The first probation window opens on the COAST, separation zero,
+            % covariance the bounded coast covariance: the trial's first update
+            % then counts in that window's separation. Without it a trial that
+            % jumps onto a spoof in one update (a wide coast covariance against
+            % 14 rows at 5 m absorbs 85 % at once) is seen by no window, since
+            % the windows of the probation open on the trial's post-update
+            % solution, and the probation only watches what the trial does after.
             kfMeasOpen         = kfMeas;
-            kfMeasOpen.postCov = coastCovOpen;
-            sys.pool           = STRUCT_SPF.openWindow(sys.pool, kfMeasOpen);
+            kfMeasOpen.postCov = coastCovOpen;   % the short bound whatever opened the probation: a trial that jumps
+            sys.pool           = STRUCT_SPF.openWindow(sys.pool, kfMeasOpen);   % more than about 20 m is vetoed
             sys.mode           = CST_spfMode.PROBATION;
+            % order the host to start its TRIAL as a copy of the coasting KF
             kfCommand = STRUCT_SPF.setCommand(true);
         end
 
@@ -300,14 +340,14 @@ switch sys.mode
     case CST_spfMode.PROBATION
     % ==================================================================
 
-        % 1. the protected output stays on the coast (E31); the long coasts kept live
+        % ---- 1. protected output STAYS on the coast; the long coasts kept live ----
         sys.coastCount = sys.coastCount + 1;
         sys.coastCov   = Phi * sys.coastCov * Phi' + Q;
         sys.coastCov   = (sys.coastCov + sys.coastCov') / 2;
         sys.longCoast  = SPF_longCoastStep(sys.longCoast, Phi, Q, zeros(numStates, 1), kfMeas.postCov, uint32(epoch), false);
         coastCovBound  = STRUCT_SPF.boundCoastCov(sys.coastCov, sys.sigmaLatch);   % the coast as the re-admission tests may use it
 
-        % 2. diagnostic: the GNSS against the coast on the trial's innovation
+        % ---- 2. diagnostic: GNSS-vs-coast on the trial's innovation ----
         coastMinusPrior = -(Phi * sys.probSep);
         [~, q_value, revalFault] = SPF_revalidation(kfMeas.innovation, kfMeas.obsMatrix, ...
             kfMeas.measNoiseCov, kfMeas.numMeas, coastMinusPrior, coastCovBound);
@@ -315,10 +355,10 @@ switch sys.mode
         info.revalComputed = true;
         info.solveFault = revalFault;
 
-        % 3. trial minus coast accumulates the trial's increments (E28)
+        % ---- 3. trial - coast accumulates the trial's increments ----
         sys.probSep = Phi * sys.probSep + kfIncrement;
 
-        % 4. monitor bank on the trial filter; it never refreshes the anchor
+        % ---- 4. monitor bank on THE TRIAL filter ----
         [sys.pool, report] = SPF_monitorPool(sys.pool, kfMeas, propTel);
 
         info.ssAlarm            = report.ssAlarm;
@@ -327,14 +367,18 @@ switch sys.mode
         info.maxProtectionLevel = report.maxProtectionLevel;
         info.solveFault         = info.solveFault || report.solveFault;
         info.ssRatio            = report.ssRatio;
+        info.ssSeparation       = report.ssSeparation;
+        info.ssSigma            = report.ssSigma;
         info.cpiRatio           = report.cpiRatio;
+        % probation windows never refresh the anchor: the trial is not
+        % yet trusted, so report.cleanClose* is deliberately ignored.
 
         if (report.anyAlarm)
-            % veto: the trial is discarded
+            % ---- VETO: monitors caught the trial; discard it ----
             info.eventProbationVetoed = true;
             sys.pool       = STRUCT_SPF.closeAllWindows(sys.pool);
             sys.dwellCount = 0;
-            sys.probSep    = zeros(numStates, 1);
+            sys.probSep    = zeros(numStates, 1);   % operational KF is still the coast
             sys.mode       = CST_spfMode.COAST;
         else
             sys.pool = STRUCT_SPF.openWindow(sys.pool, kfMeas);
@@ -342,28 +386,31 @@ switch sys.mode
             sys.probationCount = sys.probationCount + 1;
 
             if (sys.probationCount >= CST_spfParam.PROBATION_LENGTH)
-                % commit (hand-back): the host solution becomes the trial, which becomes the anchor
+                % ---- COMMIT (handback): host solution <- trial ----
                 info.eventHandback = true;
                 applyCorrection    = true;
-                correction         = sys.probSep;
-                navState           = kfMeas.postState;
-                sys.coastCov       = postCovHost;
+                correction         = sys.probSep;          % trial - coast (relative to the operational KF)
+                navState           = kfMeas.postState;     % the trial's x+ IS the clean solution
+                sys.coastCov       = postCovHost;          % the host takes its own P back, not the floored one
 
+                % just certified by a full quiet probation: new anchor; the
+                % long coasts start again on the new solution
                 sys.anchor.valid      = true;
                 sys.anchor.separation = zeros(numStates, 1);
                 sys.anchor.covariance = kfMeas.postCov;
                 sys.anchor.epoch      = uint32(epoch);
-                sys.longCoast         = STRUCT_SPF.zeroLongCoast;   % the long coasts start again on the new solution
+                sys.longCoast         = STRUCT_SPF.zeroLongCoast;
                 sys.sigmaLatch        = zeros(numStates, 1);
 
                 sys.probSep    = zeros(numStates, 1);
                 sys.coastCount = 0;
                 sys.mode       = CST_spfMode.NOMINAL;
+                % pool carries over seamlessly
             end
         end
 end
 
-% the navigation output of this epoch
+% ---- navigation output of this epoch ----
 sigmaPosition = zeros(3, 1);
 for idx = 1:3
     axisIdx = CST_spfParam.MONITORED_AXES(idx);
@@ -373,18 +420,26 @@ nav = STRUCT_SPF.setNav(applyCorrection, navState, correction, sys.coastCov, sig
 
 info.mode           = sys.mode;
 info.dwellCount     = sys.dwellCount;
-info.coastEpochs    = sys.coastCount;
+info.coastEpochs    = sys.coastCount;    % time-in-coast (COAST + PROBATION), epochs
 info.numMeasClamped = kfMeas.numMeasClamped;
 info.armed          = sys.armed;
-% reset arbitration: the host must not reset while the gate holds GNSS off or alarms
+% protective-reset arbitration: while the gate holds GNSS off (COAST,
+% PROBATION) or alarms this epoch, a GNSS-vs-INS discrepancy is its finding
+% and the host must not reset on it; the coast budget bounds the hold:
+% once the coast's own position uncertainty (K_MD * sigma_C, the PL of an
+% INS-only solution) exceeds ARM_PL_MAX the gate could no longer certify a
+% re-validation, so the host may reset. Grows with Phi/Q, not with time.
+% COAST_BUDGET_EPOCHS is the belt behind it: a Q too small keeps sigma_C
+% under the limit however long the hold, so a long time bound closes it.
 info.resetInhibit        = (sys.mode ~= CST_spfMode.NOMINAL) || info.ssAlarm || info.cpiAlarm;
 info.coastBudgetExceeded = (CST_spfParam.K_MISSED_DETECTION * max(sigmaPosition) ...
-    > CST_spfParam.ARM_PL_MAX) ...      % coast PL (Eq. 51 term) beyond the limit: the host may reset
-    || (sys.coastCount > double(CST_spfParam.COAST_BUDGET_EPOCHS));   % time belt (rule 4)
+    > CST_spfParam.ARM_PL_MAX) ...      % coast too uncertain to re-validate: host may reset
+    || (sys.coastCount > double(CST_spfParam.COAST_BUDGET_EPOCHS));   % time belt (Q too small)
 
 spoofTel = STRUCT_SPF.setTel(info, kfCommand, nav);
 
 end
+
 %------------------------------------------------------------------------
 
 function [longCoast] = SPF_longCoastStep(longCoast, Phi, Q, increment, postCov, epoch, inNominal)

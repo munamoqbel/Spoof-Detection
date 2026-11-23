@@ -79,7 +79,9 @@ for wIdx = 1:windowLength
                 ratio = abs(ssResult.separation(idx)) / (CST_spfParam.K_FALSE_ALERT * ssResult.sigmaSeparation(idx) ...
                     + CST_spfParam.NOMINAL_BIAS(monitoredAxes(idx)));
                 if (ratio > report.ssRatio(idx))
-                    report.ssRatio(idx) = ratio;
+                    report.ssRatio(idx)      = ratio;
+                    report.ssSeparation(idx) = ssResult.separation(idx);        % telemetry: the d and sigma_SS behind the margin
+                    report.ssSigma(idx)      = ssResult.sigmaSeparation(idx);
                 end % ELSE is trivial
             end % ELSE: test undefined this epoch
         end

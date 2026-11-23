@@ -3,7 +3,7 @@ function test_navConsistency()
 % tools/navConsistency on a synthetic stationary run: errors drawn from known sigmas on position, velocity, attitude
 % and biases, and a logged P that is either those sigmas (ratios near 1, about 0.3 % beyond 3 sigma), three times
 % them (ratios near 3, nothing beyond 3 sigma) or a third of them (ratios near 0.33, many beyond 3 sigma); the
-% window argument must restrict the epochs read; the three forms of P must read the same; a constant 3 m offset on
+% window argument must restrict the epochs read; the five forms of P (K x n, cell, n x n x K, n x K, one diagonal) must read the same; a constant 3 m offset on
 % the north position must read a low ratio and a mean-removed ratio near 1, with the mean reported. Run from anywhere:
 % octave --no-gui --quiet --eval test_navConsistency
 here = fileparts(mfilename('fullpath'));
@@ -39,7 +39,10 @@ pCell = cell(K, 1);  for k = 1:K, pCell{k} = diag(sig .^ 2); end
 evalc('rC = navConsistency(run, tKf, pCell);');
 P3 = repmat(diag(sig .^ 2), [1 1 K]);
 evalc('r3d = navConsistency(run, tKf, P3);');
-okForm = max(abs(rC.ratio - r1.ratio)) < 1e-9 && max(abs(r3d.ratio - r1.ratio)) < 1e-9;
+evalc('rTr = navConsistency(run, tKf, pDiag'');');                                  % the diagonal logged as n x K
+evalc('rOne = navConsistency(run, tKf, (sig .^ 2)'');');                              % one diagonal for the whole run
+okForm = max(abs(rC.ratio - r1.ratio)) < 1e-9 && max(abs(r3d.ratio - r1.ratio)) < 1e-9 ...
+    && max(abs(rTr.ratio - r1.ratio)) < 1e-9 && max(abs(rOne.ratio - r1.ratio)) < 1e-9;
 fprintf('--- a constant offset of 3 m on the north position ---\n');
 runOff = run;  runOff.navPos(:, 1) = runOff.navPos(:, 1) + 3 / (Rm + h0);
 rO = navConsistency(runOff, tKf, pDiag);

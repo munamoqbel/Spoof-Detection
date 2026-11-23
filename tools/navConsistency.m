@@ -8,8 +8,9 @@ function [res] = navConsistency(run, tKf, pAtEpochs, aidedWin)
 %               biasTrue [1 x 6]; pGyroFirst true when the host's P orders the gyro biases 10:12 before the
 %               accelerometer biases 13:15 (default true)
 %   tKf         [K x 1] the 2 Hz epochs (s)
-%   pAtEpochs   the host's P per epoch as coastDriftCheck takes it: a cell of n x n (or of diagonals), [n x n x K], or
-%               the diagonal [K x n]
+%   pAtEpochs   the host's P per epoch as coastDriftCheck takes it: a cell of n x n (or of diagonals), [n x n x K], the
+%               diagonal [K x n] or [n x K], or a single diagonal [n x 1] read at every epoch (a note is printed); the
+%               records' postCov as a cell, {rec.postCov}, is the usual source
 %   aidedWin    [W x 2] windows [t1 t2] to read (s); [] or omitted: the whole run
 %   Per group it prints the rms of the error, its mean over the window, the rms of the sigma the filter carried,
 %   their ratio, the same ratio with the mean error removed, and the share of epochs beyond 3 sigma: a consistent
@@ -120,6 +121,14 @@ elseif ndims(p) == 3
     n = size(p, 1);  sig = NaN(K, n);
     for k = 1:min(K, size(p, 3)), sig(k, :) = sqrt(max(diag(p(:, :, k)), 0))'; end
 else
+    if isvector(p) && numel(p) ~= K                                   % one diagonal for the whole run
+        p = repmat(p(:)', K, 1);
+        fprintf('navConsistency: a single P diagonal was given; the same sigma is read at every epoch\n');
+    elseif isvector(p)
+        error('navConsistency:pShape', 'pAtEpochs is a vector of one value per epoch; the tool needs the P diagonal per epoch (K x n), a cell per epoch, or n x n x K');
+    elseif size(p, 1) ~= K && size(p, 2) == K
+        p = p';                                                        % the diagonal logged as n x K
+    end
     n = size(p, 2);  sig = NaN(K, n);
     m = min(K, size(p, 1));  sig(1:m, :) = sqrt(max(p(1:m, :), 0));
 end

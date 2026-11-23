@@ -347,7 +347,8 @@ if nDropTot > 0
 end
 % the receiver's common-mode steps: the clock shift of the fit, per clock column, between consecutive epochs
 allCols = zeros(1, 0);
-for k = kW', allCols = union(allCols, clkColsList{k}); end
+for k = kW', allCols = union(allCols, clkColsList{k}(:)'); end
+allCols = allCols(:)';                                       % a row, so the loop below takes one column at a time
 clockStep = struct('rms', NaN, 'max', NaN, 'tMax', NaN, 'col', NaN);
 steps = zeros(0, 3);                                         % [step t col]
 for c = allCols

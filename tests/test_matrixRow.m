@@ -68,6 +68,17 @@ matrixTable([r1 r5]);
 okC = okC && abs(r5.tReturn - tKf(225)) < 1e-9 && isnan(r1.tReturn) && isnan(r4.tReturn) ...
    && r4.probationInSpoof && abs(r4.handbackDelay - (139 - 160)) < 1e-9 && r4.plAtHandback == 25 && r1.plAtHandback == 25 ...
    && isfinite(r1.coastCpiMin) && r1.coastCpiMin < 0.35 && r1.coastCpiMed < 0.35 && isnan(r2.coastCpiMin);
-if ok1 && ok2 && ok3 && okC, fprintf('=== test_matrixRow PASS ===\n');
+% the record read to tEnd only: the input fault at 149.5 s is beyond a cut at 145 s and is not counted; a cut before
+% tOff is refused
+fprintf('--- the record cut at 145 s ---\n');
+r6 = matrixRow(L, tKf, [], scn, 'run 3 cut', 145);
+okCut = r1.faults(1) == 1 && r6.faults(1) == 0 && abs(r6.tEnd - 145) < 1e-9 && abs(r6.latchDelay - 2.5) < 1e-9;
+try
+    matrixRow(L, tKf, [], scn, 'bad cut', 120);  okCut = false;
+catch err
+    okCut = okCut && ~isempty(strfind(err.message, 'tOff'));
+end
+fprintf('cut at 145 s drops the fault at 149.5 s and keeps the latch, a cut before tOff is refused: %s\n', pf(okCut));
+if ok1 && ok2 && ok3 && okC && okCut, fprintf('=== test_matrixRow PASS ===\n');
 else, fprintf('ok1 %d ok2 %d ok3 %d okC %d\n=== test_matrixRow FAIL ===\n', ok1, ok2, ok3, okC); end
 end

@@ -1,9 +1,12 @@
-function [row] = matrixRow(spfLog, tKf, run, scn, name)
+function [row] = matrixRow(spfLog, tKf, run, scn, name, tEnd)
 %MATRIXROW  One row of the injection-matrix table from the gate log and the nav errors of one spoofed run.
 %   row = matrixRow(spfLog, tKf, run, scn)        spfLog from SPF_logAppend; tKf the epoch times (s); run the struct
 %                                                 runCompare takes (t, navPos, tTrue, truePos at least), or [] for the
 %                                                 gate numbers alone; scn the scenario struct of spoofScenario
 %   row = matrixRow(spfLog, tKf, run, scn, name)  a name for the row (default the scenario)
+%   row = matrixRow(..., name, tEnd)            the record read to tEnd (s) only: a row without a hand-back otherwise runs
+%                                                 to the end of the record, and an outage or a re-acquisition there lands in
+%                                                 the largest error, the budget and the clean maxima; [] for the whole record
 %   Prints the reading of the run and returns its numbers; matrixTable(rows) prints several rows as one table.
 %   The nav position error is nav minus truth in NED at the nav samples, with its mean over the minute before tOn
 %   taken out, so what is read is what the spoof did, not where the nav sat already.
@@ -37,6 +40,11 @@ SETTLE = 10;                                                 % s: the mean error
 CLEAN_AFTER = 60;                                            % s: clean epochs start this long after the hand-back
 tKf = tKf(:);
 n = min([double(spfLog.count), double(spfLog.numEpochs), numel(tKf)]);
+if nargin >= 6 && ~isempty(tEnd)
+    nCut = find(tKf(1:n) <= tEnd, 1, 'last');
+    if isempty(nCut) || tKf(nCut) < scn.tOff, error('matrixRow:tEnd', 'tEnd must lie after the scenario''s tOff and inside the record'); end
+    n = nCut;
+end
 tKf = tKf(1:n);
 tOn = scn.tOn;  tOff = scn.tOff;  tEnd = tKf(n);
 mode = spfLog.mode(1:n);  armed = logical(spfLog.armed(1:n));

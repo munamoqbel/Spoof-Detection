@@ -300,8 +300,11 @@ can end while the gate already coasts on a later onset), it reads the
 position the rows ask for, the CPI projection with the full S, against the
 oldest long coast: a return when the nav before the event (the anchor at
 a latch, so that a latch a few epochs late still reads right; the coasting
-nav in COAST) had wandered more than `RETURN_WANDER` from it horizontally
-and the GNSS lands within `RETURN_RADIUS` of it. On a return the nav is corrected back to the long
+nav in COAST) had wandered from it horizontally by more than the yardstick
+and the GNSS lands within the yardstick of it, the yardstick being that
+coast's own horizontal protection level at its age, `K_MISSED_DETECTION *
+sigma_long + B` from the long coast's covariance, never below
+`RETURN_WANDER` / `RETURN_RADIUS` (`returnYardstick` in the telemetry). On a return the nav is corrected back to the long
 coast, velocity included (`nav.applyCorrection`, in COAST relative to the
 coasting KF), the coast's uncertainty becomes that coast's own and is the
 floor of the bound (`boundCoastCov(P_C, sigmaLatch)`: no sigma above the
@@ -312,12 +315,21 @@ trial that jumps more than about 20 m is still vetoed. Otherwise nothing
 changes: an onset latches on the anchor as before, and the long coasts
 follow the nav through the correction.
 
-The two radii, 15 m, sit above the two-minute INS drift measured on the
-vehicle and below the smallest step the gate latches on (about 20 m), so
-every return that can occur qualifies and no onset does. What a spoofer
-can get through the door is a hand-back within about `RETURN_RADIUS` plus
-the drift of the truth, after a slow drag the spoofer could make anyway,
-and the first window caps the probation's jump. Vertical returns are not
+The two floors, 15 m, sit below the smallest step the gate latches on
+(about 20 m), so no onset qualifies through them; the yardstick above
+them keeps the INS's own drift out. Fixed radii alone were not enough:
+sized above a two-minute INS drift of 7 to 11 m, they met a vehicle whose
+long coast drifted 15 m in 100 s, where a 20 m onset landed 15 m from that
+coast while the nav had wandered 15 m from it, read as a return, loosened
+the re-validation to the long coast's own uncertainty and handed the nav
+to the spoofer (the matrix on the long run, step N 20 m). With the
+yardstick the return path reaches only followed spoofs larger than the
+INS's own drift uncertainty at that age, so its reach is the IMU's grade
+through `sigma_long`; a smaller followed spoof that ends with a latch is
+held on the clean GNSS until the coast budget. What a spoofer can get
+through the door is a hand-back within the yardstick of the long coast,
+after a drag of at least the yardstick the spoofer could make anyway, and
+the first window caps the probation's jump. Vertical returns are not
 read (the GLONASS clock-height pattern reads 7 to 11 m on single epochs
 in D); a ramp longer than the horizon has its last two minutes undone and
 the rest must fit the loosened re-admission; an INS drift beyond 15 m in

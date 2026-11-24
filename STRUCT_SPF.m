@@ -494,7 +494,7 @@ classdef STRUCT_SPF
                 eventProbationVetoed, eventHandback, anchorMissing, coastEpochs, ...
                 inputFault, numMeasClamped, solveFault, ssRatio, cpiRatio, armed, ...
                 resetInhibit, coastBudgetExceeded, eventReturn, returnChecked, returnWander, returnLanding, ...
-                ssSeparation, ssSigma)
+                returnYardstick, ssSeparation, ssSigma)
 
             % Define structure
             info = struct( ...
@@ -525,6 +525,8 @@ classdef STRUCT_SPF
                 'returnChecked',         logical(returnChecked), ... % the return check ran this epoch (a latch, or a COAST epoch with rows)
                 'returnWander',          returnWander, ...           % m: the nav's horizontal wander from the oldest long coast
                 'returnLanding',         returnLanding, ... % m: where the GNSS lands, horizontal, from the oldest long coast
+                'returnYardstick',       returnYardstick, ... % m: the yardstick of both tests this epoch, K_MISSED_DETECTION * sigma of
+                                                            % that coast (horizontal) + B; RETURN_WANDER / RETURN_RADIUS never below it
                 'ssSeparation',          ssSeparation, ...  % [1x3] m: the separation d of the window with the largest SS margin per axis
                 'ssSigma',               ssSigma);          % [1x3] m: its sigma_SS; the margin is |d| / (K_FALSE_ALERT sigma_SS + B),
                                                             % so a clean run's largest |d| is the B the host sets (NOMINAL_BIAS)
@@ -560,6 +562,7 @@ classdef STRUCT_SPF
             returnChecked         = false;
             returnWander          = 0.0;
             returnLanding         = 0.0;
+            returnYardstick       = 0.0;
             ssSeparation          = zeros(1, 3);
             ssSigma               = zeros(1, 3);
 
@@ -570,7 +573,7 @@ classdef STRUCT_SPF
                 eventProbationVetoed, eventHandback, anchorMissing, coastEpochs, ...
                 inputFault, numMeasClamped, solveFault, ssRatio, cpiRatio, armed, ...
                 resetInhibit, coastBudgetExceeded, eventReturn, returnChecked, returnWander, returnLanding, ...
-                ssSeparation, ssSigma);
+                returnYardstick, ssSeparation, ssSigma);
         end
 
         function [command] = setCommand(startTrial)

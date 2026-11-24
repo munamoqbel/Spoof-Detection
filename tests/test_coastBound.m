@@ -15,14 +15,29 @@
 %   D  a 35 m down step, which every row sees with the same sign: with the position bounded alone the chi-square passes
 %      mid-spoof because the clock variance absorbs the common part; with the clock bias bounded as well it fails, and
 %      the step is held through the spoof;
-%   E  the return path: a 0.15 m per epoch east ramp from 100 to 300 (30 m) is followed without a latch; the step back
-%      at 301 latches and reads as a return (the nav had wandered 30 m from the long coast, the GNSS lands on it), the
+%   E  the return path: a 1 m per epoch east ramp from 100 to 300 (200 m) is followed without a latch; the step back
+%      at 301 latches and reads as a return (the nav had wandered 200 m from the long coast, the GNSS lands on it), the
 %      nav is corrected back and handed back within 40 epochs, on the truth; without the return path the clean GNSS
-%      would be refused for as long as it lasts;
-%   G  a slow drag of 24 m (0.12 m per epoch, 100 to 300) and then a step 25 m further (301 to 400): the step latches
-%      as an onset (the GNSS lands some 45 m from the long coast) and is held; at 401 the clean GNSS comes back 24 m from
-%      the nav, which the strict bound would refuse, and the return check in COAST reads it (the nav had wandered some
-%      20 m from the long coast, the GNSS lands within a few metres of it): corrected back and handed back.
+%      would be refused for as long as it lasts. The ramp is sized to the yardstick of the return check under this
+%      host's Q: the long coast's sigma at its age (160 to 250 epochs of 2 m^2) is near 20 m per axis, so
+%      K_MISSED_DETECTION * sigma_long is near 140 m, and only a followed spoof beyond that reads as a return. The
+%      landing reads some 40 m, not the few metres of the geometry: the position the rows ask for is the CPI projection,
+%      one axis at a time with the full S, and through these rows' lines of sight a 200 m east offset leaks about a
+%      fifth of itself onto north (the leakage scales with the offset asked, so it stays inside a yardstick the wander
+%      has to exceed anyway);
+%   G  a slow drag of 200 m (1 m per epoch, 100 to 300) and then a step 50 m further (301 to 400): the step latches as
+%      an onset (the GNSS lands 250 m from the long coast, beyond the yardstick) and is held; at 401 the clean GNSS comes
+%      back 200 m from the nav, which the strict bound would refuse, and the return check in COAST reads it (the nav had
+%      wandered 200 m from the long coast, beyond the yardstick, the GNSS lands within a few metres of it): corrected
+%      back and handed back;
+%   F  the 30 m ramp the return path was built on (0.15 m per epoch, 100 to 300), followed: the yardstick sits far above
+%      the 30 m wander, the step back is not read as a return, and the clean GNSS stays refused through the strict bound
+%      to the end of the record: the reach of the return path is the INS's own drift uncertainty at the long coast's age;
+%   H  the false return measured on the vehicle: an INS that drifts 0.1 m per epoch north, corrected by the GNSS in
+%      NOMINAL so that the long coast sits 16 to 24 m north of the nav at its age, and a 20 m north step at 300: the
+%      step lands within 4 m of the long coast while the nav has wandered 16 m or more from it, which fixed 15 m radii
+%      read as a return (the nav moved onto the drifted coast, the re-validation loosened to that coast's uncertainty,
+%      the spoof handed back); against the yardstick it is an onset: no return, no hand-back while the spoof lasts.
 % Run from the repo root (MATLAB, or Octave with tools/octave_shim).
 
 n = CST_gnssHybrid.NO_STATES;  mMax = double(CST_spfParam.MAX_MEAS);
@@ -49,14 +64,15 @@ u = [cos(el) .* cos(az), cos(el) .* sin(az), -sin(el)];
 H = zeros(m, n);  H(1:14, 1:3) = -u;  H(1:14, 16) = 1;  H(15, 3) = 1;                     % range rows: line of sight and the clock; the pressure row
 P0 = 0.01 * eye(n);  P0(1:3, 1:3) = eye(3);  P0(16, 16) = 1;
 DRIFT = 0.02;                                                                             % m per coast epoch, north
-function [res] = runCase(offsetAt, tOff, stepB, tOffB, n, mMax, m, N, H, R, P0, propTel, DRIFT)
+function [res] = runCase(offsetAt, tOff, stepB, tOffB, n, mMax, m, N, H, R, P0, propTel, DRIFT, driftAlways)
     % offsetAt(k) = the [N E D] offset the ranges describe at epoch k; stepB (north) from the epoch after the first probation
-    % that opens after tOff until tOffB
+    % that opens after tOff until tOffB; driftAlways = the INS drifts in NOMINAL too (the GNSS corrects it there, and the
+    % long coast collects that drift)
     sys = STRUCT_SPF.zeroSys;  sys.coastCov = P0;
     sys.anchor = STRUCT_SPF.setAnchor(true, zeros(n, 1), P0, uint32(0));
     kf_x = zeros(n, 1);  kf_P = P0;  tr_x = kf_x;  tr_P = P0;  mode = CST_spfMode.NOMINAL;
     st = zeros(1, N);  det = [];  hb = [];  veto = [];  prob = [];  ret = [];  qRaw = NaN;  qBound = NaN;  passRaw = false;  passBound = false;
-    qPos = NaN;  passPos = false;  tOnB = Inf;  xNE = zeros(N, 2);  wander = NaN(N, 1);  landing = NaN(N, 1);
+    qPos = NaN;  passPos = false;  tOnB = Inf;  xNE = zeros(N, 2);  wander = NaN(N, 1);  landing = NaN(N, 1);  yard = NaN(N, 1);
     for k = 1:N
         z = sqrt(diag(R)) .* randn(m, 1);
         off = offsetAt(k);
@@ -81,12 +97,12 @@ function [res] = runCase(offsetAt, tOff, stepB, tOffB, n, mMax, m, N, H, R, P0, 
         end
         [sys, tel] = SPF_protectedNav(sys, kfMeas, propTel, k);
         mode = tel.info.mode;
-        if kfUpd, kf_x = post;  kf_P = postP;
+        if kfUpd, kf_x = post;  kf_P = postP;  if driftAlways, kf_x(1) = kf_x(1) + DRIFT; end
         else, [kf_x, kf_P] = SPF_insCoast(kf_x, kf_P, propTel);  kf_x(1) = kf_x(1) + DRIFT; end
         if tel.nav.applyCorrection, kf_x = tel.nav.state;  kf_P = tel.nav.covar; end
         if tel.kfCommand.startTrial, tr_x = kf_x;  tr_P = kf_P; end
         st(k) = double(tel.info.mode);  xNE(k, :) = kf_x(1:2)';
-        if tel.info.returnChecked, wander(k) = tel.info.returnWander;  landing(k) = tel.info.returnLanding; end
+        if tel.info.returnChecked, wander(k) = tel.info.returnWander;  landing(k) = tel.info.returnLanding;  yard(k) = tel.info.returnYardstick; end
         if tel.info.eventReturn, ret(end+1) = k; end %#ok<AGROW>
         if tel.info.eventLatched, det(end+1) = k; end %#ok<AGROW>
         if tel.info.eventHandback, hb(end+1) = k; end %#ok<AGROW>
@@ -97,7 +113,7 @@ function [res] = runCase(offsetAt, tOff, stepB, tOffB, n, mMax, m, N, H, R, P0, 
         end
     end
     res = struct('st', st, 'det', det, 'hb', hb, 'veto', veto, 'prob', prob, 'ret', ret, 'tOnB', tOnB, 'qRaw', qRaw, 'qBound', qBound, ...
-        'passRaw', passRaw, 'passBound', passBound, 'qPos', qPos, 'passPos', passPos, 'xNE', xNE, 'wander', wander, 'landing', landing);
+        'passRaw', passRaw, 'passBound', passBound, 'qPos', qPos, 'passPos', passPos, 'xNE', xNE, 'wander', wander, 'landing', landing, 'yard', yard);
 end
 function s = pf(ok)
 if ok, s = 'PASS'; else, s = 'FAIL'; end
@@ -107,12 +123,14 @@ function v = latchVal(x, det)
 if isempty(det), v = NaN; else, v = x(det(1)); end
 end
 stepOn = @(s, k, t1, t2) s * double(k >= t1 && k <= t2);
-rA = runCase(@(k) stepOn([30 0 0], k, 100, 300), 300, 0, 0, n, mMax, m, N, H, R, P0, propTel, DRIFT);
-rB = runCase(@(k) stepOn([16 0 0], k, 100, 300), 300, 0, 0, n, mMax, m, N, H, R, P0, propTel, DRIFT);
-rC = runCase(@(k) stepOn([16 0 0], k, 100, 200), 200, 30, 400, n, mMax, m, N, H, R, P0, propTel, DRIFT);
-rD = runCase(@(k) stepOn([0 0 35], k, 100, 300), 300, 0, 0, n, mMax, m, N, H, R, P0, propTel, DRIFT);
-rE = runCase(@(k) stepOn([0 0.15 * (k - 100) 0], k, 100, 300), 300, 0, 0, n, mMax, m, N, H, R, P0, propTel, DRIFT);
-rG = runCase(@(k) stepOn([0 0.12 * (k - 100) 0], k, 100, 300) + stepOn([0 49 0], k, 301, 400), 400, 0, 0, n, mMax, m, N, H, R, P0, propTel, DRIFT);
+rA = runCase(@(k) stepOn([30 0 0], k, 100, 300), 300, 0, 0, n, mMax, m, N, H, R, P0, propTel, DRIFT, false);
+rB = runCase(@(k) stepOn([16 0 0], k, 100, 300), 300, 0, 0, n, mMax, m, N, H, R, P0, propTel, DRIFT, false);
+rC = runCase(@(k) stepOn([16 0 0], k, 100, 200), 200, 30, 400, n, mMax, m, N, H, R, P0, propTel, DRIFT, false);
+rD = runCase(@(k) stepOn([0 0 35], k, 100, 300), 300, 0, 0, n, mMax, m, N, H, R, P0, propTel, DRIFT, false);
+rE = runCase(@(k) stepOn([0 1.0 * (k - 100) 0], k, 100, 300), 300, 0, 0, n, mMax, m, N, H, R, P0, propTel, DRIFT, false);
+rG = runCase(@(k) stepOn([0 1.0 * (k - 100) 0], k, 100, 300) + stepOn([0 250 0], k, 301, 400), 400, 0, 0, n, mMax, m, N, H, R, P0, propTel, DRIFT, false);
+rF = runCase(@(k) stepOn([0 0.15 * (k - 100) 0], k, 100, 300), 300, 0, 0, n, mMax, m, N, H, R, P0, propTel, DRIFT, false);
+rH = runCase(@(k) stepOn([20 0 0], k, 300, 400), 400, 0, 0, n, mMax, m, N, H, R, P0, propTel, 0.1, true);
 thr = CST_spfParam.REVAL_THRESHOLD_TABLE(m);
 fprintf('A 30 m: latch %s, hand-backs %s, probations %s; mid-spoof q on the raw coast covariance %.1f (%s), on the bounded %.1f (%s), threshold %.1f\n', ...
     mat2str(rA.det), mat2str(rA.hb), mat2str(rA.prob), rA.qRaw, pf(rA.passRaw), rA.qBound, pf(~rA.passBound), thr);
@@ -129,17 +147,29 @@ okC = isfinite(rC.tOnB) && rC.tOnB > 200 && rC.tOnB < 260 && any(rC.veto == rC.t
     && any(rC.hb > 400 & rC.hb < 460) && all(rC.st(rC.tOnB + 1:400) ~= 1);
 okD = ~isempty(rD.det) && rD.det(1) >= 100 && rD.det(1) <= 112 && ~any(rD.hb <= 300) && any(rD.hb > 300 & rD.hb < 370) ...
     && ~any(rD.prob > 100 & rD.prob <= 300) && rD.passPos && ~rD.passBound && rD.qBound > thr && rD.qPos < thr;
-fprintf('E ramp to 30 m E, followed: latch %s, return %s, hand-backs %s, nav E %.1f m at 299, %.1f m at the end; at the latch wander %.1f m, landing %.1f m\n', ...
-    mat2str(rE.det), mat2str(rE.ret), mat2str(rE.hb), rE.xNE(299, 2), rE.xNE(end, 2), latchVal(rE.wander, rE.det), latchVal(rE.landing, rE.det));
-fprintf('G drag to 24 m E then 49 m: latch %s, return %s, hand-backs %s, nav E %.1f m at 399, %.1f m at the end; at the latch landing %.1f m\n', ...
-    mat2str(rG.det), mat2str(rG.ret), mat2str(rG.hb), rG.xNE(399, 2), rG.xNE(end, 2), latchVal(rG.landing, rG.det));
+fprintf('E ramp to 200 m E, followed: latch %s, return %s, hand-backs %s, nav E %.1f m at 299, %.1f m at the end; at the latch wander %.1f m, landing %.1f m, yardstick %.1f m\n', ...
+    mat2str(rE.det), mat2str(rE.ret), mat2str(rE.hb), rE.xNE(299, 2), rE.xNE(end, 2), latchVal(rE.wander, rE.det), latchVal(rE.landing, rE.det), latchVal(rE.yard, rE.det));
+fprintf('G drag to 200 m E then 250 m: latch %s, return %s, hand-backs %s, nav E %.1f m at 399, %.1f m at the end; at the latch landing %.1f m, yardstick %.1f m\n', ...
+    mat2str(rG.det), mat2str(rG.ret), mat2str(rG.hb), rG.xNE(399, 2), rG.xNE(end, 2), latchVal(rG.landing, rG.det), latchVal(rG.yard, rG.det));
 okE = ~isempty(rE.det) && rE.det(1) >= 301 && rE.det(1) <= 312 && numel(rE.ret) == 1 && rE.ret(1) == rE.det(1) ...
-    && ~any(rE.hb <= 300) && any(rE.hb > 300 & rE.hb < 350) && all(rE.st(1:300) == 1) && abs(rE.xNE(299, 2) - 30) < 2 ...
-    && max(abs(rE.xNE(end, :))) < 3 && latchVal(rE.wander, rE.det) > 15 && latchVal(rE.landing, rE.det) < 15;
+    && ~any(rE.hb <= 300) && any(rE.hb > 300 & rE.hb < 350) && all(rE.st(1:300) == 1) && abs(rE.xNE(299, 2) - 200) < 5 ...
+    && max(abs(rE.xNE(end, :))) < 3 && latchVal(rE.wander, rE.det) > latchVal(rE.yard, rE.det) && latchVal(rE.yard, rE.det) > 100 ...
+    && latchVal(rE.landing, rE.det) < 0.3 * latchVal(rE.wander, rE.det);                   % the projection's cross-axis leakage, see the header
 okG = ~isempty(rG.det) && rG.det(1) >= 301 && rG.det(1) <= 312 && ~any(rG.ret <= 400) && numel(rG.ret) == 1 && rG.ret(1) >= 401 && rG.ret(1) <= 403 ...
-    && ~any(rG.hb <= 400) && any(rG.hb > 400 & rG.hb < 445) && all(rG.st(313:400) ~= 1) && abs(rG.xNE(399, 2) - 24) < 4 ...
-    && max(abs(rG.xNE(end, :))) < 3 && latchVal(rG.landing, rG.det) > 15 && all(rG.st(1:300) == 1);
+    && ~any(rG.hb <= 400) && any(rG.hb > 400 & rG.hb < 445) && all(rG.st(313:400) ~= 1) && rG.xNE(399, 2) > 150 && rG.xNE(399, 2) < 205 ...
+    && max(abs(rG.xNE(end, :))) < 3 && latchVal(rG.landing, rG.det) > latchVal(rG.yard, rG.det) && all(rG.st(1:300) == 1) ...
+    && rG.yard(rG.ret(1)) < rG.wander(rG.ret(1)) && rG.landing(rG.ret(1)) < 0.3 * rG.wander(rG.ret(1));
+fprintf('F ramp to 30 m E, followed: latch %s, return %s, hand-backs %s, nav E %.1f m at the end; at the latch wander %.1f m, yardstick %.1f m\n', ...
+    mat2str(rF.det), mat2str(rF.ret), mat2str(rF.hb), rF.xNE(end, 2), latchVal(rF.wander, rF.det), latchVal(rF.yard, rF.det));
+fprintf('H 20 m N onset on an INS drifting 0.1 m per epoch: latch %s, return %s, hand-backs %s, nav N %.1f m at 399; at the latch wander %.1f m, landing %.1f m, yardstick %.1f m\n', ...
+    mat2str(rH.det), mat2str(rH.ret), mat2str(rH.hb), rH.xNE(399, 1), latchVal(rH.wander, rH.det), latchVal(rH.landing, rH.det), latchVal(rH.yard, rH.det));
+okF = ~isempty(rF.det) && rF.det(1) >= 301 && rF.det(1) <= 312 && isempty(rF.ret) && isempty(rF.hb) && all(rF.st(320:end) == 2) ...
+    && latchVal(rF.wander, rF.det) > 15 && latchVal(rF.yard, rF.det) > latchVal(rF.wander, rF.det);
+okH = ~isempty(rH.det) && rH.det(1) >= 300 && rH.det(1) <= 312 && isempty(rH.ret) && ~any(rH.hb <= 400) && all(rH.st(313:400) == 2) ...
+    && latchVal(rH.wander, rH.det) >= CST_spfParam.RETURN_WANDER && latchVal(rH.landing, rH.det) <= CST_spfParam.RETURN_RADIUS ...
+    && latchVal(rH.yard, rH.det) > latchVal(rH.wander, rH.det) && rH.xNE(399, 1) < 15;
 fprintf('bound: %s | A, the bound holds 30 m where the raw covariance admits it: %s | B, the CPI against the coast holds 16 m: %s | C, the first window vetoes a spoof resuming at the probation: %s | D, the clock bound holds a down step the position bound alone admits: %s\n', ...
     pf(okBound), pf(okA), pf(okB), pf(okC), pf(okD));
 fprintf('E, the end of a followed ramp reads as a return and is handed back: %s | G, a drag then a step is held, the return read in COAST when the GNSS comes back: %s\n', pf(okE), pf(okG));
-if okBound && okA && okB && okC && okD && okE && okG, fprintf('=== test_coastBound PASS ===\n'); else, fprintf('=== test_coastBound FAIL ===\n'); end
+fprintf('F, a 30 m followed ramp ends below the yardstick: no return, the clean GNSS held: %s | H, the false return on the INS''s own drift, which fixed radii read, is refused by the yardstick: %s\n', pf(okF), pf(okH));
+if okBound && okA && okB && okC && okD && okE && okG && okF && okH, fprintf('=== test_coastBound PASS ===\n'); else, fprintf('=== test_coastBound FAIL ===\n'); end

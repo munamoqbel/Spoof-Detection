@@ -448,7 +448,8 @@ arming count, so a start transient delays the arming instead of latching
 right after it (section 10). The return path (section 12) keeps long
 INS-only coasts beside the anchor and reads a latch, or a COAST epoch, as
 the end of a followed spoof when the nav had wandered from the long coast
-and the GNSS lands back on it: the nav is corrected back to the inertial
+by more than that coast's own protection level and the GNSS lands back on
+it within that level: the nav is corrected back to the inertial
 truth and the clean GNSS is re-admitted in seconds instead of being
 refused as a spoof. The gate's coasts are propagated with its own Q from
 the IMU datasheet along the host's Phi (section 13, `SPF_coastQ`, under

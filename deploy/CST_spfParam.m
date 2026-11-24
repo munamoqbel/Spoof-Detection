@@ -69,8 +69,10 @@ classdef CST_spfParam
         COAST_BOUND_STATES = [1 2 3 16];                  % the states bounded: the NED position and the receiver clock bias
         RETURN_BANK = uint8(3);                           % long coasts kept beside the anchor, restarted in turn
         RETURN_RESTART = uint32(80);                      % epochs between restarts: the oldest spans 160 to 240 epochs
-        RETURN_WANDER = 15.0;                             % m: the nav must have wandered this far from the long coast,
-        RETURN_RADIUS = 15.0;                             % m: and the GNSS must land this close to it, for a return
+        RETURN_WANDER = 15.0;                             % m: floors of the return check's two radii: the nav's wander from
+        RETURN_RADIUS = 15.0;                             % the long coast, and the GNSS landing from it; each test uses the
+                                                          % larger of its floor and the yardstick, K_MISSED_DETECTION * the
+                                                          % long coast's horizontal sigma + B (its own PL at its age)
         MAX_ANCHOR_AGE = uint32(234);                     % epochs: an older anchor is refused at a latch
         COAST_Q_DATASHEET = false;                        % the gate's coasts on the IMU datasheet Q (SPF_coastQ); false: the host's accumQ
         IMU_ARW = 0.05;                                   % deg/sqrt(h)

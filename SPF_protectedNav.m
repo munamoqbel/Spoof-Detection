@@ -476,8 +476,12 @@ end
 function [isReturn, jLong, info] = SPF_returnCheck(longCoast, kfMeas, increment, refSep, info)
 % the return check against the oldest long coast: the horizontal wander from it of the nav before the event (the
 % separation refSep: the anchor's at a latch, zero for the coasting nav in COAST), and where the position the rows ask
-% for lands relative to it; a return when the wander exceeds RETURN_WANDER and the landing is within RETURN_RADIUS
-% (the GNSS agrees with the inertial sensors while the nav does not)
+% for lands relative to it; a return when the wander exceeds the yardstick and the landing is within it (the GNSS
+% agrees with the inertial sensors while the nav does not). The yardstick is the long coast's own horizontal protection
+% level at its age, K_MISSED_DETECTION * sigma_long + B from that coast's covariance (what its drift can be, as the
+% gate's Q states it), never below RETURN_WANDER / RETURN_RADIUS: a wander the long coast's own drift explains is no
+% evidence against the nav (measured on the vehicle: a long coast 15 m from the nav after 100 s and a 20 m onset
+% landing 15 m from it read as a return against fixed 15 m radii, and the loosened re-validation handed the nav over)
 isReturn = false;
 jLong    = 1;
 found    = false;
@@ -504,10 +508,21 @@ if (found)
             wander2   = wander2 + sepRef * sepRef;
             landing2  = landing2 + (dHat(idx) + sepBefore) * (dHat(idx) + sepBefore);
         end
-        info.returnChecked = true;
-        info.returnWander  = sqrt(wander2);
-        info.returnLanding = sqrt(landing2);
-        isReturn = (info.returnWander >= CST_spfParam.RETURN_WANDER) && (info.returnLanding <= CST_spfParam.RETURN_RADIUS);
+        sigmaLong   = SPF_sigmaOf(longCoast.covariance(:, :, jLong));
+        sigmaLongH2 = 0.0;
+        biasH2      = 0.0;
+        for idx = 1:2                                            % the horizontal axes
+            axisIdx     = CST_spfParam.MONITORED_AXES(idx);
+            sigmaLongH2 = sigmaLongH2 + sigmaLong(axisIdx) * sigmaLong(axisIdx);
+            biasH2      = biasH2 + CST_spfParam.NOMINAL_BIAS(axisIdx) * CST_spfParam.NOMINAL_BIAS(axisIdx);
+        end
+        yardstick = CST_spfParam.K_MISSED_DETECTION * sqrt(sigmaLongH2) + sqrt(biasH2);
+        info.returnChecked   = true;
+        info.returnWander    = sqrt(wander2);
+        info.returnLanding   = sqrt(landing2);
+        info.returnYardstick = yardstick;
+        isReturn = (info.returnWander >= max(CST_spfParam.RETURN_WANDER, yardstick)) ...
+            && (info.returnLanding <= max(CST_spfParam.RETURN_RADIUS, yardstick));
     end % ELSE: too few rows or an unusable S: no reading
 end % ELSE: no long coast yet
 end

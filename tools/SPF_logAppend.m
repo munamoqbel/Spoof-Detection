@@ -63,6 +63,10 @@ if info.eventHandback,         spfLog.evHandback(end+1)  = k; end
 if info.anchorMissing,         spfLog.evNoAnchor(end+1)  = k; end
 if isfield(info, 'eventReturn')
     if info.eventReturn,   spfLog.evReturn(end+1) = k; end
-    if info.returnChecked, spfLog.returnWander(k) = info.returnWander;  spfLog.returnLanding(k) = info.returnLanding; end
+    if info.returnChecked
+    spfLog.returnWander(k)  = info.returnWander;
+    spfLog.returnLanding(k) = info.returnLanding;
+    if isfield(info, 'returnYardstick'), spfLog.returnYardstick(k) = info.returnYardstick; end   % a gate before the yardstick logs none
+end
 end
 end

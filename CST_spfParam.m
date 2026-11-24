@@ -93,20 +93,31 @@
 % spike filter has released its rows), reads the position the rows ask
 % for against the oldest long coast: a return when the nav before the
 % event (the anchor at a latch, the coasting nav in COAST) had wandered
-% more than RETURN_WANDER from it horizontally and the GNSS lands within
-% RETURN_RADIUS of it. On a return the nav is corrected back to the long
-% coast, velocity included, and the coast's uncertainty becomes that
-% coast's own (the bound's floor, STRUCT_SPF.boundCoastCov), so the clean
-% GNSS re-validates and the hand-back follows in about 15 s; the first
-% probation window keeps the short bound, so a trial that jumps more than
-% about 20 m is still vetoed. Otherwise nothing changes. The two radii sit
-% above the two-minute INS drift measured on the vehicle (7 to 11 m) and
-% below the smallest step the gate latches on (about 20 m), so every
-% return that can occur qualifies and no onset does; the door lets a
-% spoofer in only within about RETURN_RADIUS plus the drift of the truth,
-% after a slow drag the spoofer could make anyway. Vertical returns are
-% not read (the GLONASS clock-height pattern reads 7 to 11 m on single
-% epochs in D).
+% from it horizontally by more than the yardstick and the GNSS lands
+% within the yardstick of it. The yardstick is that coast's own
+% horizontal protection level at its age, K_MISSED_DETECTION * sigma_long
+% + B with sigma_long from the long coast's covariance (what its drift can
+% be, as the gate's Q states it), and never below RETURN_WANDER /
+% RETURN_RADIUS, which sit below the smallest step the gate latches on
+% (about 20 m) so that no onset qualifies through them. On a return the
+% nav is corrected back to the long coast, velocity included, and the
+% coast's uncertainty becomes that coast's own (the bound's floor,
+% STRUCT_SPF.boundCoastCov), so the clean GNSS re-validates and the
+% hand-back follows in about 15 s; the first probation window keeps the
+% short bound, so a trial that jumps more than about 20 m is still vetoed.
+% Otherwise nothing changes. Fixed radii alone were not enough: sized
+% above a two-minute INS drift of 7 to 11 m, they met a vehicle whose long
+% coast drifted 15 m in 100 s, where a 20 m onset landed 15 m from that
+% coast while the nav had wandered 15 m from it, read as a return,
+% loosened the re-validation to the long coast's own uncertainty and
+% handed the nav to the spoofer. With the yardstick the return path
+% reaches only followed spoofs larger than the INS's own drift uncertainty
+% at that age (its reach is the IMU's grade through sigma_long; a smaller
+% followed spoof that ends with a latch is held on the clean GNSS until the
+% coast budget), and the door lets a spoofer in only within the yardstick
+% of the long coast, after a drag of at least the yardstick the spoofer
+% could make anyway. Vertical returns are not read (the GLONASS
+% clock-height pattern reads 7 to 11 m on single epochs in D).
 % - COAST_Q_DATASHEET, IMU_*, COAST_*_STATES, COAST_Q_INTERVAL (the gate's own Q):
 % An INS-only coast drifts by the sensor; the host's Q is a filter tuning,
 % inflated to keep the filter responsive under the GNSS, and carried into
@@ -234,10 +245,10 @@ classdef CST_spfParam
         RETURN_RESTART = uint32(80);              % epochs between restarts: the oldest long coast spans
                                                   % RETURN_RESTART * (RETURN_BANK - 1) to RETURN_RESTART * RETURN_BANK
                                                   % epochs, 80 to 120 s here
-        RETURN_WANDER = 15.0;                     % m: the nav must have wandered this far (horizontal) from the
-                                                  % long coast, and
-        RETURN_RADIUS = 15.0;                     % m: the GNSS must land this close (horizontal) to the long
-                                                  % coast, for a latch or a coast epoch to read as a return
+        RETURN_WANDER = 15.0;                     % m: the floor of the wander a return needs (horizontal, the nav from
+                                                  % the long coast); the test uses the larger of this and the yardstick
+        RETURN_RADIUS = 15.0;                     % m: the floor of the landing radius (horizontal, the GNSS from the long
+                                                  % coast), likewise; the yardstick is K_MISSED_DETECTION * sigma_long + B
         MAX_ANCHOR_AGE = uint32(234);             % epochs, 0.5 s each
         COAST_Q_DATASHEET = false;                % the gate's coasts on the IMU datasheet Q (SPF_coastQ); false: the host's accumQ
         IMU_ARW = 0.05;                           % deg/sqrt(h)   angle random walk

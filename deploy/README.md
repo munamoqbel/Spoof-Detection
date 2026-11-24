@@ -84,8 +84,11 @@ re-validation keeps the bounded clock.
 The return path: `RETURN_BANK` long INS-only coasts are kept beside the
 anchor, the oldest spanning 80 to 120 s. At a latch and on every COAST
 epoch the position the rows ask for is read against it: when the nav had
-wandered more than `RETURN_WANDER` from that coast and the GNSS lands
-within `RETURN_RADIUS` of it, the event is the end of a followed spoof,
+wandered from that coast by more than the yardstick and the GNSS lands
+within the yardstick of it (the coast's own horizontal protection level
+at its age, `K_MISSED_DETECTION * sigma_long + B`, never below
+`RETURN_WANDER` / `RETURN_RADIUS`; `returnYardstick` in the telemetry),
+the event is the end of a followed spoof,
 not an onset (`eventReturn`): the nav is corrected back to the long coast,
 velocity included, through `nav.applyCorrection` (in COAST too), and the
 bound's floor becomes that coast's own sigma, so the clean GNSS

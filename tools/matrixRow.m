@@ -141,8 +141,8 @@ else
         fprintf('   re-latched %d time(s) within the window and the minute after it, at%s\n', numel(relatch), sprintf(' %.2f s', tKf(relatch)));
     end
     if isfield(spfLog, 'returnLanding') && isfinite(spfLog.returnLanding(kL))
-        fprintf('   at the latch the nav had wandered %.1f m from the long INS coast and the GNSS landed %.1f m from it', ...
-            spfLog.returnWander(kL), spfLog.returnLanding(kL));
+        fprintf('   at the latch the nav had wandered %.1f m from the long INS coast and the GNSS landed %.1f m from it%s', ...
+            spfLog.returnWander(kL), spfLog.returnLanding(kL), yardText(spfLog, kL));
         if any(returns == kL), fprintf(': a return, the nav corrected back to that coast\n'); else, fprintf(': an onset, latched on the anchor\n'); end
     end
     fprintf('   timeline (mode and the time it starts): %s\n', timeline);
@@ -151,8 +151,8 @@ retIn = returns(returns >= find(tKf >= tOn, 1) & returns <= kStop);
 if ~isempty(retIn)
     tReturn = tKf(retIn(1));
     for r = retIn(:)'
-        fprintf('   return at %.2f s: the GNSS landed %.1f m from the long INS coast while the nav had wandered %.1f m from it; the nav corrected\n', ...
-            tKf(r), spfLog.returnLanding(r), spfLog.returnWander(r));
+        fprintf('   return at %.2f s: the GNSS landed %.1f m from the long INS coast while the nav had wandered %.1f m from it%s; the nav corrected\n', ...
+            tKf(r), spfLog.returnLanding(r), spfLog.returnWander(r), yardText(spfLog, r));
         fprintf('   back to that coast, velocity included, and the re-validation loosened to the coast''s own uncertainty\n');
     end
 end
@@ -193,8 +193,10 @@ if ~isempty(kL) && isfield(spfLog, 'qReval')
     pick = unique([segC(1:min(8, numel(segC))), segC(round(linspace(1, numel(segC), min(10, numel(segC)))))]);
     fprintf('   course (the first 8 epochs in a row, then spread to the end):\n');
     hasLand = isfield(spfLog, 'returnLanding');
+    hasYard = isfield(spfLog, 'returnYardstick');
     fprintf('   %10s %5s %5s %9s %8s %5s %5s %7s', 't [s]', 'mode', 'rows', 'q', 'thr', 'pass', 'dwell', 'cpi');
     if hasLand, fprintf(' %7s', 'land'); end
+    if hasYard, fprintf(' %7s', 'yard'); end
     fprintf('\n');
     letters2 = '?NCP';
     for k = pick
@@ -202,11 +204,13 @@ if ~isempty(kL) && isfield(spfLog, 'qReval')
         fprintf('   %10.2f %5s %5d %9.1f %8.1f %5s %5d %7.2f', tKf(k), letters2(min(max(round(mode(k)) + 1, 1), 4)), rows(i), q(i), thr(i), ...
             ifelse(pass(i), 'yes', '-'), spfLog.dwell(k), max(cpiR(k, :)));
         if hasLand, fprintf(' %7s', num2(spfLog.returnLanding(k))); end
+        if hasYard, fprintf(' %7s', num2(spfLog.returnYardstick(k))); end
         fprintf('\n');
     end
     fprintf('   (cpi = the CPI of the innovations against the coast, q/T_N of the window closed that epoch; a gate that logs it holds the dwell while it is above 1');
     if hasLand
-        fprintf(';\n   land = where the GNSS lands from the long INS coast, m: a return when within %g m while the nav had wandered %g m or more', ...
+        fprintf(';\n   land = where the GNSS lands from the long INS coast, m: a return when within the yardstick while the nav had wandered at least\n');
+        fprintf('   the yardstick from it; yard = that yardstick, K_MD * sigma of the long coast (horizontal) + B, never below %g / %g m', ...
             CST_spfParam.RETURN_RADIUS, CST_spfParam.RETURN_WANDER);
     end
     fprintf(')\n');
@@ -217,7 +221,11 @@ if ~isempty(kL) && isfield(spfLog, 'qReval')
             fprintf('; the %g m injected sit inside the protection level (%.1f m at the hand-back): the coast covariance\n', abs(scn.size), plAtHandback);
             fprintf('            H P_C H'' + R had grown to where the offset reads as noise, which the design tolerates as an error within the PL');
         end
-        if rowsCoast < 0.8 * rowsBefore
+        retBefore = retIn(retIn < kP);
+        if ~isempty(retBefore)
+            fprintf('; a return at %.2f s had loosened the re-validation to the long INS coast''s own uncertainty, which covers an\n', tKf(retBefore(end)));
+            fprintf('            offset of this size: the hand-back followed from that return, not from the rows'' R or the coast bound\n');
+        elseif rowsCoast < 0.8 * rowsBefore
             fprintf('; the host handed fewer rows during the coast (%d against %d): its spike filter dropped the rows that\n            saw the step most, and the test ran on the rest\n', round(rowsCoast), round(rowsBefore));
         elseif qRatioCoast < 0.5
             fprintf('; q sat at %.2f of its threshold on a full row set: either the rows'' R and the coast bound leave an offset of\n', qRatioCoast);
@@ -303,6 +311,13 @@ function [s] = ifelse(c, a, b)
 if c, s = a; else, s = b; end
 end
 
+function s = yardText(spfLog, k)
+% the yardstick of the return check at epoch k, where the log carries it
+s = '';
+if isfield(spfLog, 'returnYardstick') && isfinite(spfLog.returnYardstick(k))
+    s = sprintf(' (yardstick %.1f m)', spfLog.returnYardstick(k));
+end
+end
 function [s] = num2(x)
 if isnan(x), s = '-'; else, s = sprintf('%.1f', x); end
 end

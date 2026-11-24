@@ -40,4 +40,6 @@ spfLog.evNoAnchor  = [];
 spfLog.evReturn    = [];                         % epochs of each return (the nav corrected back to the long coast)
 spfLog.returnWander  = NaN(numEpochs, 1);        % m: the nav's horizontal wander from the long coast, where the return check ran
 spfLog.returnLanding = NaN(numEpochs, 1);        % m: where the GNSS landed, horizontal, from the long coast
+spfLog.returnYardstick = NaN(numEpochs, 1);      % m: the yardstick of both return tests that epoch, K_MD * sigma of the long coast
+                                                 % (horizontal) + B, the two radii never below it
 end

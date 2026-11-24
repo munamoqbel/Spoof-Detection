@@ -220,7 +220,10 @@ if ~isempty(kL) && isfield(spfLog, 'qReval')
         if rowsCoast < 0.8 * rowsBefore
             fprintf('; the host handed fewer rows during the coast (%d against %d): its spike filter dropped the rows that\n            saw the step most, and the test ran on the rest\n', round(rowsCoast), round(rowsBefore));
         elseif qRatioCoast < 0.5
-            fprintf('; q sat at %.2f of its threshold on a full row set: S = H P_C H'' + R carries an R the host scaled up on the\n            large innovations\n', qRatioCoast);
+            fprintf('; q sat at %.2f of its threshold on a full row set: either the rows'' R and the coast bound leave an offset of\n', qRatioCoast);
+            fprintf('            this size within the noise of S = H P_C H'' + R (a 20 m horizontal step on fifteen 5 m rows reads near 0.5), or S\n');
+            fprintf('            carries an R the host scaled up on the large innovations; the records'' nominal and host R on the coast epochs,\n');
+            fprintf('            or cpiReplay in its nominal and host modes, say which\n');
         else
             fprintf('\n');
         end

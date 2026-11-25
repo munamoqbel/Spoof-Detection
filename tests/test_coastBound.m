@@ -11,7 +11,8 @@
 %   B  a 16 m step, which the chi-square passes even on the bounded covariance, is held by the CPI against the coast:
 %      no probation while it lasts, hand-back after it;
 %   C  a 16 m step from 100 to 200 and then a 30 m spoof switched on at the epoch the probation opens: the trial jumps
-%      onto it in its first update, the first window vetoes that epoch, the spoof stays refused until it ends at 400;
+%      onto it in its first update, the first window vetoes that epoch, the spoof stays refused until it ends at 280
+%      (before the coast budget, which this host's Q spends about 220 epochs after a latch);
 %   D  a 35 m down step, which every row sees with the same sign: with the position bounded alone the chi-square passes
 %      mid-spoof because the clock variance absorbs the common part; with the clock bias bounded as well it fails, and
 %      the step is held through the spoof;
@@ -37,7 +38,14 @@
 %      NOMINAL so that the long coast sits 16 to 24 m north of the nav at its age, and a 20 m north step at 300: the
 %      step lands within 4 m of the long coast while the nav has wandered 16 m or more from it, which fixed 15 m radii
 %      read as a return (the nav moved onto the drifted coast, the re-validation loosened to that coast's uncertainty,
-%      the spoof handed back); against the yardstick it is an onset: no return, no hand-back while the spoof lasts.
+%      the spoof handed back); against the yardstick it is an onset: no return, no hand-back while the spoof lasts;
+%   I  the F ramp on a record of 800 epochs: the coast budget is spent about 220 epochs after the latch (K_MD * sigma_C
+%      past ARM_PL_MAX), the re-admission then runs on the coast's own covariance, the paper's recovery, the clean GNSS
+%      passes, the probation's windows open on that covariance so the trial's move is not vetoed, and the hand-back
+%      follows, flagged handbackUncertified; the nav is back on the truth by the end;
+%   J  a 30 m step from 100 to 700 on 800 epochs: held on the bound until the budget, then admitted the same way, the
+%      hand-back into the spoof flagged; the step back at 700 latches again as an onset and is held to the end (its own
+%      budget lies beyond the record): the hold on any spoof is bounded by the budget.
 % Run from the repo root (MATLAB, or Octave with tools/octave_shim).
 
 n = CST_gnssHybrid.NO_STATES;  mMax = double(CST_spfParam.MAX_MEAS);
@@ -73,6 +81,7 @@ function [res] = runCase(offsetAt, tOff, stepB, tOffB, n, mMax, m, N, H, R, P0, 
     kf_x = zeros(n, 1);  kf_P = P0;  tr_x = kf_x;  tr_P = P0;  mode = CST_spfMode.NOMINAL;
     st = zeros(1, N);  det = [];  hb = [];  veto = [];  prob = [];  ret = [];  qRaw = NaN;  qBound = NaN;  passRaw = false;  passBound = false;
     qPos = NaN;  passPos = false;  tOnB = Inf;  xNE = zeros(N, 2);  wander = NaN(N, 1);  landing = NaN(N, 1);  yard = NaN(N, 1);
+    budget = false(N, 1);  hbUnc = false(N, 1);
     for k = 1:N
         z = sqrt(diag(R)) .* randn(m, 1);
         off = offsetAt(k);
@@ -102,6 +111,7 @@ function [res] = runCase(offsetAt, tOff, stepB, tOffB, n, mMax, m, N, H, R, P0, 
         if tel.nav.applyCorrection, kf_x = tel.nav.state;  kf_P = tel.nav.covar; end
         if tel.kfCommand.startTrial, tr_x = kf_x;  tr_P = kf_P; end
         st(k) = double(tel.info.mode);  xNE(k, :) = kf_x(1:2)';
+        budget(k) = tel.info.coastBudgetExceeded;  hbUnc(k) = tel.info.handbackUncertified;
         if tel.info.returnChecked, wander(k) = tel.info.returnWander;  landing(k) = tel.info.returnLanding;  yard(k) = tel.info.returnYardstick; end
         if tel.info.eventReturn, ret(end+1) = k; end %#ok<AGROW>
         if tel.info.eventLatched, det(end+1) = k; end %#ok<AGROW>
@@ -113,7 +123,8 @@ function [res] = runCase(offsetAt, tOff, stepB, tOffB, n, mMax, m, N, H, R, P0, 
         end
     end
     res = struct('st', st, 'det', det, 'hb', hb, 'veto', veto, 'prob', prob, 'ret', ret, 'tOnB', tOnB, 'qRaw', qRaw, 'qBound', qBound, ...
-        'passRaw', passRaw, 'passBound', passBound, 'qPos', qPos, 'passPos', passPos, 'xNE', xNE, 'wander', wander, 'landing', landing, 'yard', yard);
+        'passRaw', passRaw, 'passBound', passBound, 'qPos', qPos, 'passPos', passPos, 'xNE', xNE, 'wander', wander, 'landing', landing, 'yard', yard, ...
+        'budget', budget, 'hbUnc', hbUnc);
 end
 function s = pf(ok)
 if ok, s = 'PASS'; else, s = 'FAIL'; end
@@ -125,12 +136,14 @@ end
 stepOn = @(s, k, t1, t2) s * double(k >= t1 && k <= t2);
 rA = runCase(@(k) stepOn([30 0 0], k, 100, 300), 300, 0, 0, n, mMax, m, N, H, R, P0, propTel, DRIFT, false);
 rB = runCase(@(k) stepOn([16 0 0], k, 100, 300), 300, 0, 0, n, mMax, m, N, H, R, P0, propTel, DRIFT, false);
-rC = runCase(@(k) stepOn([16 0 0], k, 100, 200), 200, 30, 400, n, mMax, m, N, H, R, P0, propTel, DRIFT, false);
+rC = runCase(@(k) stepOn([16 0 0], k, 100, 200), 200, 30, 280, n, mMax, m, N, H, R, P0, propTel, DRIFT, false);
 rD = runCase(@(k) stepOn([0 0 35], k, 100, 300), 300, 0, 0, n, mMax, m, N, H, R, P0, propTel, DRIFT, false);
 rE = runCase(@(k) stepOn([0 1.0 * (k - 100) 0], k, 100, 300), 300, 0, 0, n, mMax, m, N, H, R, P0, propTel, DRIFT, false);
 rG = runCase(@(k) stepOn([0 1.0 * (k - 100) 0], k, 100, 300) + stepOn([0 250 0], k, 301, 400), 400, 0, 0, n, mMax, m, N, H, R, P0, propTel, DRIFT, false);
 rF = runCase(@(k) stepOn([0 0.15 * (k - 100) 0], k, 100, 300), 300, 0, 0, n, mMax, m, N, H, R, P0, propTel, DRIFT, false);
 rH = runCase(@(k) stepOn([20 0 0], k, 300, 400), 400, 0, 0, n, mMax, m, N, H, R, P0, propTel, 0.1, true);
+rI = runCase(@(k) stepOn([0 0.15 * (k - 100) 0], k, 100, 300), 300, 0, 0, n, mMax, m, 800, H, R, P0, propTel, DRIFT, false);
+rJ = runCase(@(k) stepOn([30 0 0], k, 100, 700), 700, 0, 0, n, mMax, m, 800, H, R, P0, propTel, DRIFT, false);
 thr = CST_spfParam.REVAL_THRESHOLD_TABLE(m);
 fprintf('A 30 m: latch %s, hand-backs %s, probations %s; mid-spoof q on the raw coast covariance %.1f (%s), on the bounded %.1f (%s), threshold %.1f\n', ...
     mat2str(rA.det), mat2str(rA.hb), mat2str(rA.prob), rA.qRaw, pf(rA.passRaw), rA.qBound, pf(~rA.passBound), thr);
@@ -143,8 +156,8 @@ okA = ~isempty(rA.det) && rA.det(1) >= 100 && rA.det(1) <= 110 && ~any(rA.hb <= 
     && all(rA.st(110:300) == 2) && rA.passRaw && ~rA.passBound && rA.qBound > thr && rA.qRaw < thr;
 okB = ~isempty(rB.det) && rB.det(1) >= 100 && rB.det(1) <= 110 && ~any(rB.hb <= 300) && any(rB.hb > 300 & rB.hb < 360) ...
     && ~any(rB.prob > 100 & rB.prob <= 300) && rB.passBound && all(rB.st(110:300) == 2);
-okC = isfinite(rC.tOnB) && rC.tOnB > 200 && rC.tOnB < 260 && any(rC.veto == rC.tOnB) && ~any(rC.hb <= 400) ...
-    && any(rC.hb > 400 & rC.hb < 460) && all(rC.st(rC.tOnB + 1:400) ~= 1);
+okC = isfinite(rC.tOnB) && rC.tOnB > 200 && rC.tOnB < 260 && any(rC.veto == rC.tOnB) && ~any(rC.hb <= 280) ...
+    && any(rC.hb > 280 & rC.hb < 340) && all(rC.st(rC.tOnB + 1:280) ~= 1) && ~any(rC.hbUnc);
 okD = ~isempty(rD.det) && rD.det(1) >= 100 && rD.det(1) <= 112 && ~any(rD.hb <= 300) && any(rD.hb > 300 & rD.hb < 370) ...
     && ~any(rD.prob > 100 & rD.prob <= 300) && rD.passPos && ~rD.passBound && rD.qBound > thr && rD.qPos < thr;
 fprintf('E ramp to 200 m E, followed: latch %s, return %s, hand-backs %s, nav E %.1f m at 299, %.1f m at the end; at the latch wander %.1f m, landing %.1f m, yardstick %.1f m\n', ...
@@ -168,8 +181,18 @@ okF = ~isempty(rF.det) && rF.det(1) >= 301 && rF.det(1) <= 312 && isempty(rF.ret
 okH = ~isempty(rH.det) && rH.det(1) >= 300 && rH.det(1) <= 312 && isempty(rH.ret) && ~any(rH.hb <= 400) && all(rH.st(313:400) == 2) ...
     && latchVal(rH.wander, rH.det) >= CST_spfParam.RETURN_WANDER && latchVal(rH.landing, rH.det) <= CST_spfParam.RETURN_RADIUS ...
     && latchVal(rH.yard, rH.det) > latchVal(rH.wander, rH.det) && rH.xNE(399, 1) < 15;
+fprintf('I the F ramp on 800 epochs: latch %s, budget from %s, probations %s, hand-backs %s (flagged %s), nav E %.1f m at the end\n', ...
+    mat2str(rI.det), mat2str(find(rI.budget, 1)), mat2str(rI.prob), mat2str(rI.hb), mat2str(find(rI.hbUnc)'), rI.xNE(end, 2));
+fprintf('J 30 m N from 100 to 700 on 800 epochs: latches %s, budget from %s, hand-backs %s (flagged %s), nav N %.1f m at 600, %.1f m at the end\n', ...
+    mat2str(rJ.det), mat2str(find(rJ.budget, 1)), mat2str(rJ.hb), mat2str(find(rJ.hbUnc)'), rJ.xNE(600, 1), rJ.xNE(end, 1));
+okI = ~isempty(rI.det) && rI.det(1) >= 301 && rI.det(1) <= 312 && isempty(rI.ret) && ~any(rI.hb < 500) && any(rI.hb >= 500 & rI.hb < 600) ...
+    && ~isempty(rI.prob) && rI.budget(rI.prob(end)) && rI.hbUnc(rI.hb(end)) && max(abs(rI.xNE(end, :))) < 3 && rI.st(end) == 1 ...
+    && all(rI.st(320:500) == 2);
+okJ = ~isempty(rJ.det) && rJ.det(1) >= 100 && rJ.det(1) <= 110 && all(rJ.st(110:310) == 2) && any(rJ.hb > 310 & rJ.hb < 400) ...
+    && rJ.hbUnc(rJ.hb(1)) && abs(rJ.xNE(600, 1) - 30) < 4 && any(rJ.det > 700 & rJ.det < 712) && ~any(rJ.hb > 700) && rJ.st(end) == 2;
 fprintf('bound: %s | A, the bound holds 30 m where the raw covariance admits it: %s | B, the CPI against the coast holds 16 m: %s | C, the first window vetoes a spoof resuming at the probation: %s | D, the clock bound holds a down step the position bound alone admits: %s\n', ...
     pf(okBound), pf(okA), pf(okB), pf(okC), pf(okD));
 fprintf('E, the end of a followed ramp reads as a return and is handed back: %s | G, a drag then a step is held, the return read in COAST when the GNSS comes back: %s\n', pf(okE), pf(okG));
 fprintf('F, a 30 m followed ramp ends below the yardstick: no return, the clean GNSS held: %s | H, the false return on the INS''s own drift, which fixed radii read, is refused by the yardstick: %s\n', pf(okF), pf(okH));
-if okBound && okA && okB && okC && okD && okE && okG && okF && okH, fprintf('=== test_coastBound PASS ===\n'); else, fprintf('=== test_coastBound FAIL ===\n'); end
+fprintf('I, past the budget the clean GNSS is re-admitted on the coast''s own covariance, flagged: %s | J, a spoof that outlasts the budget is admitted the same way, flagged, and its step back held: %s\n', pf(okI), pf(okJ));
+if okBound && okA && okB && okC && okD && okE && okG && okF && okH && okI && okJ, fprintf('=== test_coastBound PASS ===\n'); else, fprintf('=== test_coastBound FAIL ===\n'); end

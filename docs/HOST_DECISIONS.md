@@ -109,7 +109,7 @@ the estimate having no information, not a sign that the attack ended.
 | Return in COAST | `applyCorrection`, `eventReturn`, `eventAnchorEpoch` (the long coast's start) | coasting `xPrior - longCoast.separation` | the long coast's covariance | none; the mode stays COAST, the dwell restarts |
 | Probation opens | `eventProbationStarted` | none | none | `startTrial = true` |
 | Veto | `eventProbationVetoed` | none | none | none |
-| Commit | `applyCorrection`, `eventHandback` | trial `xPost` | trial `PPost` | none |
+| Commit | `applyCorrection`, `eventHandback`, `handbackUncertified` (the probation opened past the coast budget: re-admitted on the coast's own covariance, integrity not assured across it) | trial `xPost` | trial `PPost` | none |
 | Alarm without usable anchor | `eventLatched`, `anchorMissing` | none | none | none; mode still COAST |
 | Every epoch | `mode`, `ssAlarm`, `cpiAlarm`, `alarmPerAxis`, `maxProtectionLevel`, `qReval`, `dwellCount`, `coastEpochs`, `ssRatio` (SS margin per axis, alarm > 1), `ssSeparation` and `ssSigma` (the separation `d` and its `sigma_SS` per axis of the window with the largest SS margin; the margin is `|d| / (K_FALSE_ALERT sigma_SS + B)`, so the largest clean `|d|` of a run is the `B` the host sets), `cpiRatio` (CPI margin per axis, alarm > 1), `armed` (monitors active; false during the warm-up after init), `resetInhibit` (gate in COAST / PROBATION or alarming: the host must not apply its protective reset on the GNSS-vs-INS discrepancy), `coastBudgetExceeded` (coast PL `K_MD * sigma_C` above `ARM_PL_MAX`, or `COAST_BUDGET_EPOCHS` passed: the host may reset, integrity not assured) | | `coastCov` (diagnostic) | |
 | Fault telemetry | `inputFault` (non-finite input: epoch dropped, gate re-initialises on the next good epoch), `numMeasClamped` (host passed more than `MAX_MEAS` rows), `solveFault` (an S or residual covariance was not positive definite: that CPI epoch counts `xi = 0`, re-validation cannot pass) | | | |
@@ -138,12 +138,12 @@ Covered by `tests/test_error_handlers.m`. On a host update flagged `failed`, pas
 ## 7. Deferred
 
 - Baro-only aiding during COAST and PROBATION (vertical channel).
-- Coast budget (Implementation Guide rule 4): reported only
-  (`K_MD * sigma_C > ARM_PL_MAX`, with `COAST_BUDGET_EPOCHS` as a time belt,
-  `info.coastBudgetExceeded`); the host decides what
-  to do beyond it (its protective reset). The gate does not declare dead
-  reckoning itself. Each cycle still costs a coast and widens the coarse
-  re-validation gate.
+- Coast budget (Implementation Guide rule 4): `K_MD * sigma_C > ARM_PL_MAX`,
+  with `COAST_BUDGET_EPOCHS` as a time belt, `info.coastBudgetExceeded`.
+  Past it the gate re-admits as the paper does, on the coast's own
+  covariance (section 9), and flags the hand-back `handbackUncertified`;
+  the host may still reset on the flag. The gate does not declare dead
+  reckoning itself.
 - `MAX_ANCHOR_AGE` is a startup-only guard today.
 - Warm-up arming: `ARM_EPOCHS` qualifying epochs (rows, a PL below
   `ARM_PL_MAX`) on which the monitors, run in shadow, would not have
@@ -223,8 +223,14 @@ refuses any offset above about 24 m for as long as it lasts, the probation
 vetoes a trial that jumps by more than k_FA sigma_SS + B, about 17 m, and
 clean GNSS is still re-admitted after a real coast whose drift stays below
 those figures, two to three minutes on this INS. Beyond that the gate
-stays in COAST until the coast budget (unbounded P_C, as before) and the
-host's reset, which is what the host does after a jam today. Offsets
+stays in COAST until the coast budget; past it the re-validation, the
+CPI hold and the probation's windows run on the unbounded P_C, the
+paper's recovery, so the GNSS is re-admitted through the normal dwell
+and probation and the hand-back is flagged `handbackUncertified`
+(measured on the long run: a followed 0.3 m/s drag whose 30 m step back
+latched left the clean GNSS refused to the end, the nav INS-only and
+1.5 km off after 15 minutes, the flag up and the host's reset bound to a
+5 km gap). Offsets
 below about 17 m would still be admitted by the chi-square, which is one
 epoch at a time at 1e-3 on all rows, while the CPI latches from about
 20 m. So the dwell also requires the CPI statistic of the innovations
@@ -234,7 +240,7 @@ in NOMINAL) to stay below T_N: GNSS the monitors would latch on is not
 re-admitted. With 5 m range rows and B = 5 m this refuses offsets from
 about 14 m, below what the gate detects, and admits clean GNSS after a
 real coast whose drift stays below about 13 m, some 100 s on this INS;
-beyond that the gate stays in COAST until the budget and the host's reset.
+beyond that the gate stays in COAST until the budget, then re-admits as above.
 The CPI margin is logged through the coast (cpiRatio), so the plots show
 how far the coast is from re-admission.
 
@@ -326,7 +332,8 @@ to the spoofer (the matrix on the long run, step N 20 m). With the
 yardstick the return path reaches only followed spoofs larger than the
 INS's own drift uncertainty at that age, so its reach is the IMU's grade
 through `sigma_long`; a smaller followed spoof that ends with a latch is
-held on the clean GNSS until the coast budget. What a spoofer can get
+held on the clean GNSS until the coast budget, where the paper's recovery
+re-admits it, flagged. What a spoofer can get
 through the door is a hand-back within the yardstick of the long coast,
 after a drag of at least the yardstick the spoofer could make anyway, and
 the first window caps the probation's jump. Vertical returns are not
@@ -458,7 +465,7 @@ the host's innovations, 0.49 of its threshold on 31 rows once the spike
 filter released them, and handed back at 2905.52 s. An acting gate would
 have held the nav on the drifted INS, 500 m from the truth, and the
 re-validation against that coast would have failed until the coast
-budget and the host's reset.
+budget, where the paper's recovery re-admits the GNSS, flagged.
 
 The arming rule already says what the gate can certify: the monitors arm
 only when the protection level is below `ARM_PL_MAX`, because above it

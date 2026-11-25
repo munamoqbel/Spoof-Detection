@@ -68,5 +68,6 @@ if isfield(info, 'eventReturn')
     spfLog.returnLanding(k) = info.returnLanding;
     if isfield(info, 'returnYardstick'), spfLog.returnYardstick(k) = info.returnYardstick; end   % a gate before the yardstick logs none
 end
+if isfield(info, 'handbackUncertified'), spfLog.hbUncertified(k) = info.handbackUncertified; end   % a hand-back past the coast budget
 end
 end

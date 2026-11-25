@@ -438,9 +438,11 @@ prints the rows as one table, a dash where a run has no such number.
 The re-admission tests of the gate, the re-validation in COAST and the
 first probation window, use the coast covariance bounded by
 `CST_spfParam.COAST_SIGMA_MAX` (`STRUCT_SPF.boundCoastCov`), so a spoof
-the coast cannot vouch against stays refused for as long as it lasts
-instead of being admitted once the coast's own uncertainty has grown over
-it, and the dwell also needs the CPI of the innovations against the coast
+the coast cannot vouch against stays refused for as long as the coast's
+own protection level stays inside `ARM_PL_MAX` instead of being admitted
+as soon as the coast's uncertainty has grown over it; past that budget
+the article's recovery re-admits through the probation and flags the
+hand-back (`handbackUncertified`). The dwell also needs the CPI of the innovations against the coast
 below T_N, so what the monitors would latch on is not re-admitted;
 `docs/HOST_DECISIONS.md` section 9 has the measurement behind it. Through
 the warm-up the monitors run in shadow and a shadow alarm restarts the

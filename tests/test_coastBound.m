@@ -47,7 +47,10 @@
 %   J  a 30 m east step from 100 to 500, fast-forwarded the same way: held on the bound through the PL flag until the
 %      limit, then admitted the same way, the hand-back into the spoof flagged; the step back at 500 latches again as an
 %      onset and is held to the end (its own limit lies beyond the record): the hold on any spoof is bounded by the limit
-%      alone (east, across the synthetic INS drift, which runs north and would otherwise carry the coast onto the spoof).
+%      alone (east, across the synthetic INS drift, which runs north and would otherwise carry the coast onto the spoof);
+%   T  the long-coast telemetry: in E at 299 the oldest long coast's separation is the ramp followed since that coast
+%      started, 160 to 200 m at an age of 160 to 240 epochs; in H, where the INS drifts 0.1 m per epoch north and the GNSS
+%      corrects it, the separation is 0.1 m times the age: the INS's own wander as the GNSS corrected it.
 % Run from the repo root (MATLAB, or Octave with tools/octave_shim).
 
 n = CST_gnssHybrid.NO_STATES;  mMax = double(CST_spfParam.MAX_MEAS);
@@ -84,7 +87,7 @@ function [res] = runCase(offsetAt, tOff, stepB, tOffB, n, mMax, m, N, H, R, P0, 
     kf_x = zeros(n, 1);  kf_P = P0;  tr_x = kf_x;  tr_P = P0;  mode = CST_spfMode.NOMINAL;
     st = zeros(1, N);  det = [];  hb = [];  veto = [];  prob = [];  ret = [];  qRaw = NaN;  qBound = NaN;  passRaw = false;  passBound = false;
     qPos = NaN;  passPos = false;  tOnB = Inf;  xNE = zeros(N, 2);  wander = NaN(N, 1);  landing = NaN(N, 1);  yard = NaN(N, 1);
-    budget = false(N, 1);  hbUnc = false(N, 1);  forwarded = false;
+    budget = false(N, 1);  hbUnc = false(N, 1);  forwarded = false;  longW = NaN(N, 1);  longA = zeros(N, 1);
     for k = 1:N
         z = sqrt(diag(R)) .* randn(m, 1);
         off = offsetAt(k);
@@ -121,6 +124,7 @@ function [res] = runCase(offsetAt, tOff, stepB, tOffB, n, mMax, m, N, H, R, P0, 
         if tel.kfCommand.startTrial, tr_x = kf_x;  tr_P = kf_P; end
         st(k) = double(tel.info.mode);  xNE(k, :) = kf_x(1:2)';
         budget(k) = tel.info.coastBudgetExceeded;  hbUnc(k) = tel.info.handbackUncertified;
+        longW(k) = hypot(tel.info.longSeparation(1), tel.info.longSeparation(2));  longA(k) = double(tel.info.longAge);
         if tel.info.returnChecked, wander(k) = tel.info.returnWander;  landing(k) = tel.info.returnLanding;  yard(k) = tel.info.returnYardstick; end
         if tel.info.eventReturn, ret(end+1) = k; end %#ok<AGROW>
         if tel.info.eventLatched, det(end+1) = k; end %#ok<AGROW>
@@ -133,7 +137,7 @@ function [res] = runCase(offsetAt, tOff, stepB, tOffB, n, mMax, m, N, H, R, P0, 
     end
     res = struct('st', st, 'det', det, 'hb', hb, 'veto', veto, 'prob', prob, 'ret', ret, 'tOnB', tOnB, 'qRaw', qRaw, 'qBound', qBound, ...
         'passRaw', passRaw, 'passBound', passBound, 'qPos', qPos, 'passPos', passPos, 'xNE', xNE, 'wander', wander, 'landing', landing, 'yard', yard, ...
-        'budget', budget, 'hbUnc', hbUnc);
+        'budget', budget, 'hbUnc', hbUnc, 'longW', longW, 'longA', longA);
 end
 function s = pf(ok)
 if ok, s = 'PASS'; else, s = 'FAIL'; end
@@ -207,4 +211,9 @@ fprintf('bound: %s | A, the bound holds 30 m where the raw covariance admits it:
 fprintf('E, the end of a followed ramp reads as a return and is handed back: %s | G, a drag then a step is held, the return read in COAST when the GNSS comes back: %s\n', pf(okE), pf(okG));
 fprintf('F, a 30 m followed ramp ends below the yardstick: no return, the clean GNSS held: %s | H, the false return on the INS''s own drift, which fixed radii read, is refused by the yardstick: %s\n', pf(okF), pf(okH));
 fprintf('I, past the hold limit the clean GNSS is re-admitted on the coast''s own covariance, flagged: %s | J, a step is held through the PL flag to the limit, then admitted flagged, and its step back held: %s\n', pf(okI), pf(okJ));
-if okBound && okA && okB && okC && okD && okE && okG && okF && okH && okI && okJ, fprintf('=== test_coastBound PASS ===\n'); else, fprintf('=== test_coastBound FAIL ===\n'); end
+fprintf('T long-coast telemetry: E at 299 separation %.1f m at age %d; H at 299 separation %.1f m at age %d (0.1 m per epoch drift)\n', ...
+    rE.longW(299), rE.longA(299), rH.longW(299), rH.longA(299));
+okT = rE.longA(299) >= 160 && rE.longA(299) <= 240 && rE.longW(299) > 150 && rE.longW(299) <= 205 ...
+    && rH.longA(299) >= 160 && rH.longA(299) <= 240 && abs(rH.longW(299) - 0.1 * rH.longA(299)) < 3;
+fprintf('T, the long-coast telemetry reads the followed ramp in E and the INS''s own wander in H: %s\n', pf(okT));
+if okBound && okA && okB && okC && okD && okE && okG && okF && okH && okI && okJ && okT, fprintf('=== test_coastBound PASS ===\n'); else, fprintf('=== test_coastBound FAIL ===\n'); end

@@ -459,6 +459,7 @@ info.mode           = sys.mode;
 info.dwellCount     = sys.dwellCount;
 info.coastEpochs    = sys.coastCount;    % time-in-coast (COAST + PROBATION), epochs
 info.numMeasClamped = kfMeas.numMeasClamped;
+[info.longSeparation, info.longSigma, info.longAge] = SPF_longCoastRead(sys.longCoast, uint32(epoch));   % the oldest long coast as telemetry
 info.armed          = sys.armed;
 % protective-reset arbitration: while the gate holds GNSS off (COAST,
 % PROBATION) or alarms this epoch, a GNSS-vs-INS discrepancy is its finding
@@ -614,6 +615,35 @@ function [expired] = SPF_holdExpired(sys)
 % the coast has really drifted (50 s against 3 m of drift on that vehicle), and a step spoof held on the bound must
 % be held for its whole duration, the clean GNSS at its end re-validated through the bound
 expired = (sys.coastCount > double(CST_spfParam.COAST_BUDGET_EPOCHS));
+end
+
+function [separation, sigma, age] = SPF_longCoastRead(longCoast, epoch)
+% the oldest started long coast as telemetry: its horizontal separation (nav minus the INS-only coast, N and E), the
+% sigmas of that coast on the same axes, and its age in epochs (0 with none started). While the GNSS is trusted the
+% separation is the INS's own wander over the last 80 to 120 s as the GNSS corrected it, the sigma the model's word
+% for it: the measurement behind a longer solution-separation window and behind a learned drift
+separation = zeros(1, 2);
+sigma      = zeros(1, 2);
+age        = uint32(0);
+nb     = double(CST_spfParam.RETURN_BANK);
+jLong  = 0;
+oldest = uint32(0);
+for idx = 1:nb
+    if (longCoast.epoch(idx) > 0)
+        if (jLong == 0) || (longCoast.epoch(idx) < oldest)
+            oldest = longCoast.epoch(idx);
+            jLong  = idx;
+        end
+    end
+end
+if (jLong > 0)
+    for idx = 1:2                                            % the horizontal axes
+        axisIdx         = CST_spfParam.MONITORED_AXES(idx);
+        separation(idx) = longCoast.separation(axisIdx, jLong);
+        sigma(idx)      = sqrt(max(longCoast.covariance(axisIdx, axisIdx, jLong), 0.0));
+    end
+    age = epoch - oldest;
+end
 end
 
 function [sigma] = SPF_sigmaOf(covariance)

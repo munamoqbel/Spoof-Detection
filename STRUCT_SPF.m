@@ -497,7 +497,7 @@ classdef STRUCT_SPF
                 eventProbationVetoed, eventHandback, anchorMissing, coastEpochs, ...
                 inputFault, numMeasClamped, solveFault, ssRatio, cpiRatio, armed, ...
                 resetInhibit, coastBudgetExceeded, eventReturn, returnChecked, returnWander, returnLanding, ...
-                returnYardstick, handbackUncertified, ssSeparation, ssSigma)
+                returnYardstick, handbackUncertified, longSeparation, longSigma, longAge, ssSeparation, ssSigma)
 
             % Define structure
             info = struct( ...
@@ -533,6 +533,10 @@ classdef STRUCT_SPF
                 'handbackUncertified',   logical(handbackUncertified), ... % with eventHandback: the probation opened past the hold
                                                             % limit COAST_BUDGET_EPOCHS, the re-admission on the coast's own covariance
                                                             % (the paper's recovery): integrity not assured across this hand-back
+                'longSeparation',        longSeparation, ... % [1x2] m: the oldest long INS coast, nav minus coast on N and E (the INS's
+                                                            % own wander over its age while the GNSS is trusted)
+                'longSigma',             longSigma, ...      % [1x2] m: that coast's sigma on N and E
+                'longAge',               uint32(longAge), ... % epochs since that coast started, 0 with none
                 'ssSeparation',          ssSeparation, ...  % [1x3] m: the separation d of the window with the largest SS margin per axis
                 'ssSigma',               ssSigma);          % [1x3] m: its sigma_SS; the margin is |d| / (K_FALSE_ALERT sigma_SS + B),
                                                             % so a clean run's largest |d| is the B the host sets (NOMINAL_BIAS)
@@ -570,6 +574,9 @@ classdef STRUCT_SPF
             returnLanding         = 0.0;
             returnYardstick       = 0.0;
             handbackUncertified   = false;
+            longSeparation        = zeros(1, 2);
+            longSigma             = zeros(1, 2);
+            longAge               = uint32(0);
             ssSeparation          = zeros(1, 3);
             ssSigma               = zeros(1, 3);
 
@@ -580,7 +587,7 @@ classdef STRUCT_SPF
                 eventProbationVetoed, eventHandback, anchorMissing, coastEpochs, ...
                 inputFault, numMeasClamped, solveFault, ssRatio, cpiRatio, armed, ...
                 resetInhibit, coastBudgetExceeded, eventReturn, returnChecked, returnWander, returnLanding, ...
-                returnYardstick, handbackUncertified, ssSeparation, ssSigma);
+                returnYardstick, handbackUncertified, longSeparation, longSigma, longAge, ssSeparation, ssSigma);
         end
 
         function [command] = setCommand(startTrial)

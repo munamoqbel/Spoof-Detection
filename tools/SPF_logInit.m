@@ -43,4 +43,8 @@ spfLog.returnLanding = NaN(numEpochs, 1);        % m: where the GNSS landed, hor
 spfLog.returnYardstick = NaN(numEpochs, 1);      % m: the yardstick of both return tests that epoch, K_MD * sigma of the long coast
                                                  % (horizontal) + B, the two radii never below it
 spfLog.hbUncertified = false(numEpochs, 1);      % a hand-back past the hold limit: re-admitted on the coast's own covariance, not certified
+spfLog.longSep       = NaN(numEpochs, 2);        % m: the oldest long INS coast, nav minus coast on N and E (the INS's own wander over its age
+                                                 % while the GNSS is trusted; in COAST the nav coasts too, so it holds)
+spfLog.longSig       = NaN(numEpochs, 2);        % m: that coast's sigma on N and E
+spfLog.longAge       = zeros(numEpochs, 1);      % epochs since that coast started (80 to 120 s once the bank is full), 0 with none
 end

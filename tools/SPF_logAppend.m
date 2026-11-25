@@ -69,5 +69,10 @@ if isfield(info, 'eventReturn')
     if isfield(info, 'returnYardstick'), spfLog.returnYardstick(k) = info.returnYardstick; end   % a gate before the yardstick logs none
 end
 if isfield(info, 'handbackUncertified'), spfLog.hbUncertified(k) = info.handbackUncertified; end   % a hand-back past the hold limit
+if isfield(info, 'longAge') && info.longAge > 0                                                   % the oldest long INS coast
+    spfLog.longSep(k, :) = info.longSeparation;
+    spfLog.longSig(k, :) = info.longSigma;
+    spfLog.longAge(k)    = double(info.longAge);
+end
 end
 end

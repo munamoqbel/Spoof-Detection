@@ -227,7 +227,7 @@ switch sys.mode
                 sys.pool       = STRUCT_SPF.closeAllWindows(sys.pool);
                 sys.dwellCount = 0;
                 sys.coastCount = 0;
-                sys.probationPastBudget = false;
+                sys.probationPastLimit = false;
                 sys.mode       = CST_spfMode.COAST;
 
             else
@@ -272,14 +272,16 @@ switch sys.mode
             coastMinusPrior       = correction;             % this epoch's rows are read against the new coast
         end
         % ---- 1c. the coast as the re-admission tests may use it: bounded by
-        %          COAST_SIGMA_MAX while the coast's own PL is inside ARM_PL_MAX,
-        %          the coast covariance itself once the budget is spent (the
-        %          paper's recovery: the gate can no longer certify a refusal, so
-        %          the GNSS is admitted as an error within the PL through the
-        %          normal dwell and probation, and the hand-back that follows is
-        %          flagged info.handbackUncertified) ----
-        budgetSpent = SPF_budgetSpent(sys);
-        if (budgetSpent)
+        %          COAST_SIGMA_MAX for as long as the hold lasts, the coast
+        %          covariance itself once the hold has reached its limit,
+        %          COAST_BUDGET_EPOCHS (the paper's recovery: the GNSS is then
+        %          admitted as an error within the PL through the normal dwell
+        %          and probation, and the hand-back that follows is flagged
+        %          info.handbackUncertified). The PL budget only reports: a step
+        %          spoof is held for its whole duration, the clean GNSS at its
+        %          end re-validated through the bound ----
+        holdExpired = SPF_holdExpired(sys);
+        if (holdExpired)
             coastCovBound = sys.coastCov;
             coastCovOpen  = sys.coastCov;
         else
@@ -320,7 +322,7 @@ switch sys.mode
         sys.pool = STRUCT_SPF.openWindow(sys.pool, kfMeasCoast);
         info.cpiRatio   = report.cpiRatio;             % the CPI against the coast, logged through the coast
         info.solveFault = info.solveFault || report.solveFault;
-        quiet = (~report.cpiAlarm) || budgetSpent;     % past the budget the paper's chi-square alone decides
+        quiet = (~report.cpiAlarm) || holdExpired;     % past the hold limit the paper's chi-square alone decides
 
         if (passed && quiet)
             sys.dwellCount = sys.dwellCount + 1;
@@ -334,7 +336,7 @@ switch sys.mode
             sys.probationCount = 0;
             sys.dwellCount     = 0;
             sys.probSep        = zeros(numStates, 1);   % trial starts ON the coast
-            sys.probationPastBudget = budgetSpent;      % passes counted on the coast's own covariance: not certified
+            sys.probationPastLimit = holdExpired;       % passes counted on the coast's own covariance: not certified
             sys.pool           = STRUCT_SPF.closeAllWindows(sys.pool);
             % The first probation window opens on the COAST, separation zero,
             % covariance the bounded coast covariance: the trial's first update
@@ -360,8 +362,8 @@ switch sys.mode
         sys.coastCov   = Phi * sys.coastCov * Phi' + Q;
         sys.coastCov   = (sys.coastCov + sys.coastCov') / 2;
         sys.longCoast  = SPF_longCoastStep(sys.longCoast, Phi, Q, zeros(numStates, 1), kfMeas.postCov, uint32(epoch), false);
-        if (sys.probationPastBudget)
-            coastCovBound = sys.coastCov;                                            % past the budget: the coast's own covariance
+        if (sys.probationPastLimit)
+            coastCovBound = sys.coastCov;                                            % past the hold limit: the coast's own covariance
         else
             coastCovBound = STRUCT_SPF.boundCoastCov(sys.coastCov, sys.sigmaLatch);   % the coast as the re-admission tests may use it
         end
@@ -400,9 +402,9 @@ switch sys.mode
             sys.probSep    = zeros(numStates, 1);   % operational KF is still the coast
             sys.mode       = CST_spfMode.COAST;
         else
-            if (sys.probationPastBudget)
-                % past the budget the probation watches the trial against the
-                % coast's own uncertainty, as the paper's recovery does: the
+            if (sys.probationPastLimit)
+                % past the hold limit the probation watches the trial against
+                % the coast's own uncertainty, as the paper's recovery does: the
                 % trial's move onto the GNSS is not vetoed
                 kfMeasOpen         = kfMeas;
                 kfMeasOpen.postCov = sys.coastCov;
@@ -416,7 +418,7 @@ switch sys.mode
             if (sys.probationCount >= CST_spfParam.PROBATION_LENGTH)
                 % ---- COMMIT (handback): host solution <- trial ----
                 info.eventHandback = true;
-                info.handbackUncertified = sys.probationPastBudget;   % re-admitted past the coast budget: integrity not assured across it
+                info.handbackUncertified = sys.probationPastLimit;    % re-admitted past the hold limit: integrity not assured across it
                 applyCorrection    = true;
                 correction         = sys.probSep;          % trial - coast (relative to the operational KF)
                 navState           = kfMeas.postState;     % the trial's x+ IS the clean solution
@@ -434,12 +436,12 @@ switch sys.mode
                 sys.probSep    = zeros(numStates, 1);
                 sys.coastCount = 0;
                 sys.mode       = CST_spfMode.NOMINAL;
-                if (sys.probationPastBudget)
+                if (sys.probationPastLimit)
                     % the probation's windows were opened on the coast's own
                     % covariance: the monitors start again on the host's P
                     sys.pool = STRUCT_SPF.closeAllWindows(sys.pool);
                     sys.pool = STRUCT_SPF.openWindow(sys.pool, kfMeas);
-                    sys.probationPastBudget = false;
+                    sys.probationPastLimit = false;
                 end
             end
         end
@@ -603,23 +605,15 @@ if (numMeas >= double(CST_spfParam.REVAL_MIN_MEAS))
 end
 end
 
-function [spent] = SPF_budgetSpent(sys)
-% the coast budget (Implementation Guide rule 4): spent once the coast's own position protection level,
-% K_MISSED_DETECTION * sigma_C on the monitored axes, exceeds ARM_PL_MAX, or once COAST_BUDGET_EPOCHS of COAST and
-% PROBATION have passed (the time belt): the rule behind info.coastBudgetExceeded, read before the epoch's re-admission
-% tests. Past it the gate admits the GNSS as the paper does, on the coast's own covariance (measured on the vehicle: a
-% followed 0.3 m/s drag whose step back latched left the clean GNSS refused for the rest of the run, the nav INS-only
-% and 1.5 km off after 15 minutes, the flag up for 14 of them and the host's reset bound to a 5 km gap)
-sigmaMax = 0.0;
-for idx = 1:3
-    axisIdx   = CST_spfParam.MONITORED_AXES(idx);
-    sigmaAxis = sqrt(max(sys.coastCov(axisIdx, axisIdx), 0.0));
-    if (sigmaAxis > sigmaMax)
-        sigmaMax = sigmaAxis;
-    end
-end
-spent = (CST_spfParam.K_MISSED_DETECTION * sigmaMax > CST_spfParam.ARM_PL_MAX) ...
-    || (sys.coastCount > double(CST_spfParam.COAST_BUDGET_EPOCHS));
+function [expired] = SPF_holdExpired(sys)
+% the hold limit: COAST_BUDGET_EPOCHS of COAST and PROBATION have passed. Past it the gate admits the GNSS as the paper
+% does, on the coast's own covariance, through the normal dwell and probation, the hand-back flagged. Measured on the
+% vehicle: a followed 0.3 m/s drag whose step back latched left the clean GNSS refused for the rest of the run, the nav
+% INS-only and 1.5 km off after 15 minutes, the host's reset bound to a 5 km gap; the limit bounds that to its own
+% length. The PL budget (info.coastBudgetExceeded) is not a trigger here: with run-wide floors it comes long before
+% the coast has really drifted (50 s against 3 m of drift on that vehicle), and a step spoof held on the bound must
+% be held for its whole duration, the clean GNSS at its end re-validated through the bound
+expired = (sys.coastCount > double(CST_spfParam.COAST_BUDGET_EPOCHS));
 end
 
 function [sigma] = SPF_sigmaOf(covariance)

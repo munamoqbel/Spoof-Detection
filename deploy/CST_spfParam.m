@@ -42,7 +42,7 @@ classdef CST_spfParam
         K_MISSED_DETECTION = 4.753424308817088;           % k_MD, PL term (Eq. 51)
         MONITORED_AXES = [1 2 3];                         % NED position state indices
         NOMINAL_BIAS = [0.0 0.0 0.0];                     % B per NED axis (m): SS gate + B, PL + B, CPI deadband B
-        COAST_BUDGET_EPOCHS = uint32(1200);               % time belt behind the PL coast budget (rule 4)
+        COAST_BUDGET_EPOCHS = uint32(1200);               % the hold limit (the gate re-admits past it, flagged) and the time belt behind the PL flag
         REVAL_THRESHOLD = 39.252354790768472;             % chi-square gate, m = 16 (reference only)
         REVAL_THRESHOLD_TABLE = [ ...                     % chi2inv(1 - 1e-3, m), m = 1..60 (Guide Sec. 5)
             10.82756617066, 13.81551055796, 16.26623619624, 18.46682695290, ...

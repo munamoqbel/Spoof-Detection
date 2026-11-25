@@ -409,7 +409,7 @@ classdef STRUCT_SPF
         end
 
         function [sys] = setSys(mode, coastCov, probSep, pool, anchor, ...
-                dwellCount, probationCount, coastCount, armed, armCount, longCoast, sigmaLatch, probationPastBudget)
+                dwellCount, probationCount, coastCount, armed, armCount, longCoast, sigmaLatch, probationPastLimit)
 
             % Define structure
             sys = struct( ...
@@ -426,8 +426,8 @@ classdef STRUCT_SPF
                 'longCoast',      longCoast, ...      % the long coasts of the return path (setLongCoast)
                 'sigmaLatch',     sigmaLatch, ...     % [n x 1] the coast's sigma at the latch: the floor of the
                                                       % bound the re-admission tests use (boundCoastCov)
-                'probationPastBudget', logical(probationPastBudget));   % the open probation's dwell counted passes on the
-                                                      % coast's own covariance, the budget spent: its hand-back is not certified
+                'probationPastLimit', logical(probationPastLimit));     % the open probation's dwell counted passes on the
+                                                      % coast's own covariance, the hold limit passed: its hand-back is not certified
         end
 
         function [sys] = zeroSys
@@ -446,10 +446,10 @@ classdef STRUCT_SPF
             armCount = 0.0;
             longCoast = STRUCT_SPF.zeroLongCoast;
             sigmaLatch = zeros(n, 1);
-            probationPastBudget = false;
+            probationPastLimit = false;
 
             sys = STRUCT_SPF.setSys(mode, coastCov, probSep, pool, ...
-                anchor, dwellCount, probationCount, coastCount, armed, armCount, longCoast, sigmaLatch, probationPastBudget);
+                anchor, dwellCount, probationCount, coastCount, armed, armCount, longCoast, sigmaLatch, probationPastLimit);
         end
 
         function [altXCheck] = setAltXCheck(suspect, altDiff)
@@ -530,9 +530,9 @@ classdef STRUCT_SPF
                 'returnLanding',         returnLanding, ... % m: where the GNSS lands, horizontal, from the oldest long coast
                 'returnYardstick',       returnYardstick, ... % m: the yardstick of both tests this epoch, K_MISSED_DETECTION * sigma of
                                                             % that coast (horizontal) + B; RETURN_WANDER / RETURN_RADIUS never below it
-                'handbackUncertified',   logical(handbackUncertified), ... % with eventHandback: the probation opened past the coast
-                                                            % budget, the re-admission on the coast's own covariance (the paper's
-                                                            % recovery): integrity not assured across this hand-back
+                'handbackUncertified',   logical(handbackUncertified), ... % with eventHandback: the probation opened past the hold
+                                                            % limit COAST_BUDGET_EPOCHS, the re-admission on the coast's own covariance
+                                                            % (the paper's recovery): integrity not assured across this hand-back
                 'ssSeparation',          ssSeparation, ...  % [1x3] m: the separation d of the window with the largest SS margin per axis
                 'ssSigma',               ssSigma);          % [1x3] m: its sigma_SS; the margin is |d| / (K_FALSE_ALERT sigma_SS + B),
                                                             % so a clean run's largest |d| is the B the host sets (NOMINAL_BIAS)

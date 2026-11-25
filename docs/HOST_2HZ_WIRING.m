@@ -280,9 +280,10 @@
 %     % lasted COAST_BUDGET_EPOCHS), so the gate could not certify a
 %     % re-validation anyway: reset if the
 %     % discrepancy demands it, integrity is not assured across that reset.
-%     % Past the budget the gate also re-admits the GNSS by itself, through
-%     % its normal probation on the coast's own covariance, and that
-%     % hand-back carries info.handbackUncertified; the reset stays yours
+%     % Past the hold limit COAST_BUDGET_EPOCHS the gate re-admits the GNSS
+%     % by itself, through its normal probation on the coast's own
+%     % covariance, and that hand-back carries info.handbackUncertified;
+%     % the PL part of the flag only reports, and the reset stays yours
 % end
 % %  Limitation: during the warm-up (info.armed = false) the gate cannot
 % %  alarm, so a step spoof in that minute still triggers the reset.

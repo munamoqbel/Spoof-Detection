@@ -136,7 +136,7 @@ else
         end
         if isfinite(plAtHandback), fprintf('; PL %.1f m at the hand-back', plAtHandback); end
         if isfield(spfLog, 'hbUncertified') && ~isempty(kH) && spfLog.hbUncertified(kH)
-            fprintf('\n   the hand-back came past the coast budget: re-admitted on the coast''s own covariance, the paper''s recovery, NOT certified');
+            fprintf('\n   the hand-back came past the hold limit COAST_BUDGET_EPOCHS: re-admitted on the coast''s own covariance, the paper''s recovery, NOT certified');
         end
         fprintf('\n');
     end
@@ -227,8 +227,8 @@ if ~isempty(kL) && isfield(spfLog, 'qReval')
         retBefore = retIn(retIn < kP);
         pastBudget = isfield(spfLog, 'hbUncertified') && ~isempty(kH) && spfLog.hbUncertified(kH);
         if pastBudget
-            fprintf('; the coast budget was spent before the probation opened: the re-admission ran on the coast''s own covariance,\n');
-            fprintf('            the paper''s recovery, and the hand-back is flagged not certified; the hold ends where the coast PL reaches ARM_PL_MAX\n');
+            fprintf('; the hold limit COAST_BUDGET_EPOCHS had passed before the probation opened: the re-admission ran on the coast''s own\n');
+            fprintf('            covariance, the paper''s recovery, and the hand-back is flagged not certified\n');
         elseif ~isempty(retBefore)
             fprintf('; a return at %.2f s had loosened the re-validation to the long INS coast''s own uncertainty, which covers an\n', tKf(retBefore(end)));
             fprintf('            offset of this size: the hand-back followed from that return, not from the rows'' R or the coast bound\n');

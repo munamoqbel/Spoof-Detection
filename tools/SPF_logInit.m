@@ -42,5 +42,5 @@ spfLog.returnWander  = NaN(numEpochs, 1);        % m: the nav's horizontal wande
 spfLog.returnLanding = NaN(numEpochs, 1);        % m: where the GNSS landed, horizontal, from the long coast
 spfLog.returnYardstick = NaN(numEpochs, 1);      % m: the yardstick of both return tests that epoch, K_MD * sigma of the long coast
                                                  % (horizontal) + B, the two radii never below it
-spfLog.hbUncertified = false(numEpochs, 1);      % a hand-back past the coast budget: re-admitted on the coast's own covariance, not certified
+spfLog.hbUncertified = false(numEpochs, 1);      % a hand-back past the hold limit: re-admitted on the coast's own covariance, not certified
 end

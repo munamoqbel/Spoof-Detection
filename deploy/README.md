@@ -42,12 +42,12 @@ and clean GNSS is re-admitted after a real coast whose drift stays below
 that, and the dwell also needs the CPI of the innovations against the
 coast below T_N, so what the monitors would latch on is not re-admitted
 (from about 14 m here); beyond that the gate stays in COAST until the
-coast budget, where the coast's PL reaches `ARM_PL_MAX`; past it the
-re-validation, the CPI hold and the probation's windows run on the coast's
-own covariance, the paper's recovery, so the GNSS is re-admitted through
-the normal dwell and probation and the hand-back carries
-`handbackUncertified`. The budget and the nav's own sigma use the
-unbounded covariance.
+hold limit `COAST_BUDGET_EPOCHS`; past it the re-validation, the CPI
+hold and the probation's windows run on the coast's own covariance, the
+paper's recovery, so the GNSS is re-admitted through the normal dwell
+and probation and the hand-back carries `handbackUncertified`. The PL
+budget (`coastBudgetExceeded`) only reports. The budget and the nav's
+own sigma use the unbounded covariance.
 
 The gate's own coast covariance: with `COAST_Q_DATASHEET` the gate
 propagates every coast it keeps (windows, anchor, long coasts, the coast

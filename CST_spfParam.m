@@ -44,25 +44,27 @@
 % never updated) exceeds ARM_PL_MAX, the same limit that qualifies a
 % filter for arming, the gate could no longer certify a re-validation and
 % raises info.coastBudgetExceeded: the host may reset (integrity not
-% assured across that reset). From then on the gate's own re-admission
-% runs as the paper's recovery: the re-validation, the CPI hold and the
-% probation's windows on the coast's own covariance instead of the bound,
-% so the GNSS is admitted as an error within the PL through the normal
-% dwell and probation, and the hand-back carries info.handbackUncertified
-% (integrity not assured across it). Measured on the vehicle: a followed
-% 0.3 m/s drag whose step back latched left the clean GNSS refused for
-% the rest of the run, the nav INS-only and 1.5 km off after 15 minutes,
-% the flag up for 14 of them and the host's reset bound to a 5 km gap;
-% with the recovery the clean GNSS comes back about 70 s after the step
-% back, and a spoof that outlasts the budget is admitted the same way,
-% flagged. The hold is therefore bounded by where the coast's PL reaches
-% ARM_PL_MAX, the alert limit the host sets (50 s on that vehicle with
-% its floors, at 100 m). The budget depends on the IMU through Q, not on
-% a fixed time, and needs an honest Q (sigma_C must track the true INS
-% drift). COAST_BUDGET_EPOCHS is the belt behind it for the one case the
-% PL test cannot see, a Q too small: after that many COAST + PROBATION
-% epochs the flag is raised whatever sigma_C says. It is set long (600 s)
-% so that it never cuts a spoof the PL budget would still cover.
+% assured across that reset). The gate itself only reports on the PL: a
+% step spoof is held on the bound for its whole duration and the clean
+% GNSS at its end re-validated through the bound, for as long as the
+% coast's real drift stays within the bound's reach (about 150 s on the
+% vehicle; a PL budget on run-wide floors would end the hold at 50 s,
+% against 3 m of real drift, and hand the nav to the spoofer). The budget
+% depends on the IMU through Q, not on a fixed time, and needs an honest
+% Q (sigma_C must track the true INS drift). COAST_BUDGET_EPOCHS is the
+% hold limit: after that many COAST + PROBATION epochs the flag is raised
+% whatever sigma_C says, and the gate's own re-admission runs as the
+% paper's recovery, the re-validation, the CPI hold and the probation's
+% windows on the coast's own covariance instead of the bound, so the GNSS
+% is admitted as an error within the PL through the normal dwell and
+% probation, the hand-back carrying info.handbackUncertified (integrity
+% not assured across it). It bounds the one hold nothing else can end:
+% measured on the vehicle, a followed 0.3 m/s drag whose 30 m step back
+% latched left the clean GNSS refused for the rest of the run, the nav
+% INS-only and 1.5 km off after 15 minutes, the host's reset bound to a
+% 5 km gap; with the limit the loss is the INS drift over its length. It
+% is set long (600 s) so that it never cuts a spoof the bound would still
+% hold; the host sets it from the longest hold it accepts.
 % - COAST_SIGMA_MAX (metres, per monitored position axis):
 % The re-validation compares the GNSS rows with the coast through
 % H P_C H' + R and the probation compares the trial's move with the coast
@@ -221,7 +223,7 @@ classdef CST_spfParam
         NOMINAL_BIAS = [0.0 0.0 0.0];                     % m per NED position state: tolerated nominal
                                                           % GNSS excursion (0 = the published design;
                                                           % the host sets its own, see header)
-        COAST_BUDGET_EPOCHS = uint32(1200);               % time belt behind the PL budget: 600 s of
+        COAST_BUDGET_EPOCHS = uint32(1200);               % the hold limit, and the time belt behind the PL flag: 600 s of
                                                           % COAST + PROBATION raises coastBudgetExceeded
                                                           % even if sigma_C never reaches the limit
         REVAL_THRESHOLD = 39.252354790768472;     % chi-square gate, m = 16 (kept for reference)
